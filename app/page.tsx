@@ -316,7 +316,10 @@ export default function Page() {
   const product = products[active]
   return <main className="home-root">
     <header className="site-header"><Logo/><nav className={menuOpen ? 'mobile-open' : ''}>
-      <div className="nav-item" onMouseEnter={() => setProductsOpen(true)} onMouseLeave={() => setProductsOpen(false)}>
+      {/* Hover-to-open is for mice only: a tap also fires the enter event,
+          which would open the menu just before the tap's click toggled it
+          shut again, leaving it impossible to open on touch screens. */}
+      <div className="nav-item" onPointerEnter={e => { if (e.pointerType === 'mouse') setProductsOpen(true) }} onPointerLeave={e => { if (e.pointerType === 'mouse') setProductsOpen(false) }}>
         <button className={productsOpen ? 'nav-item-active' : ''} onClick={() => setProductsOpen(v => !v)}>Products <ChevronDown size={15}/></button>
         {productsOpen && <div className="products-menu">
           <div className="products-menu-grid">
