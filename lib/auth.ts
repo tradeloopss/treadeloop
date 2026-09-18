@@ -33,6 +33,15 @@ export const auth = betterAuth({
                 google: {
                   clientId: process.env.GOOGLE_CLIENT_ID!,
                   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+                  // Google only accepts callback URLs listed on the OAuth
+                  // client, and production's lists https://tradeloop.pro/...
+                  // while the site is served from www. — so the default
+                  // ${baseURL}/api/auth/callback/google is refused with
+                  // redirect_uri_mismatch. Pointing Google at the listed apex
+                  // URL works because Vercel 308s it to www with the query
+                  // intact, where the state cookie lives. Unset (local dev),
+                  // the default localhost callback is used.
+                  ...(process.env.GOOGLE_REDIRECT_URI ? { redirectURI: process.env.GOOGLE_REDIRECT_URI } : {}),
                 },
               }
             : {}),
