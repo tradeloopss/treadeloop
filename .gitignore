@@ -17,6 +17,3 @@ node_modules
 
 # Build artifacts
 tsconfig.tsbuildinfo
-
-# Build artifacts
-tsconfig.tsbuildinfo

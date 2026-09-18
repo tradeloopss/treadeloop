@@ -9,3 +9,9 @@ allowBuilds:
   bufferutil: true
   esbuild: true
   utf-8-validate: true
+  # embedded-postgres only runs the local dev database (scripts/db.mjs); the
+  # deployed app talks to a hosted Postgres over DATABASE_URL and never starts
+  # one. Explicitly refusing the Linux builds keeps CI from erroring on an
+  # unapproved build script it doesn't need to run anyway.
+  '@embedded-postgres/linux-x64': false
+  '@embedded-postgres/linux-arm64': false
