@@ -1,0 +1,13 @@
+import { Client } from 'pg'
+const wait = (ms) => new Promise(r => setTimeout(r, ms))
+const c = new Client({ connectionString: process.env.DATABASE_URL })
+await c.connect()
+await c.query(`update rithmic_connections set "lastSyncCount"=0 where id=2`)
+await c.query(`update metatrader_connections set "lastSyncCount"=0 where id=3`)
+await wait(20000)
+await c.query(`update rithmic_connections set "lastSyncCount"=7, "lastSyncedAt"=now(), "lastSyncStatus"='ok' where id=2`)
+console.log('toast 1', new Date().toISOString())
+await wait(20000)
+await c.query(`update metatrader_connections set "lastSyncCount"=3, "lastSyncedAt"=now(), "lastSyncStatus"='ok' where id=3`)
+console.log('toast 2', new Date().toISOString())
+await c.end()

@@ -1,0 +1,118 @@
+import Link from "next/link"
+import { TrendingUp } from "lucide-react"
+
+export const metadata = { title: "Terms of Service — TradeLoop" }
+
+export default function TermsPage() {
+  return (
+    <div className="min-h-svh bg-gradient-to-b from-background to-accent/20 px-4 py-16">
+      <div className="mx-auto mb-10 flex max-w-3xl items-center justify-center gap-2">
+        <Link href="/" className="flex items-center gap-2">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <TrendingUp className="size-5" />
+          </div>
+          <span className="text-lg font-semibold tracking-tight">TradeLoop</span>
+        </Link>
+      </div>
+
+      <div className="mx-auto max-w-3xl space-y-8 rounded-2xl border bg-card p-8 sm:p-10">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Terms of Service</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Last updated: September 2026</p>
+        </div>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">1. Agreement to terms</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            By creating an account or using TradeLoop (&quot;the Service&quot;), you agree to these Terms of Service. If you don&apos;t
+            agree, don&apos;t use the Service. We may update these terms from time to time; continued use after a change means you
+            accept the updated terms.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">2. What TradeLoop is</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            TradeLoop is a trading journal and analytics tool. It lets you log trades manually or sync them automatically from
+            supported brokers and prop firms, and it computes journaling, performance, and prop-firm evaluation statistics from
+            that data. <strong className="text-foreground">TradeLoop is not a broker, is not a prop firm, and does not provide
+            financial, investment, or trading advice.</strong> Nothing in the Service is a recommendation to buy, sell, or hold any
+            security or instrument.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">3. Not a substitute for your broker or prop firm&apos;s own records</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Statistics shown in TradeLoop — including prop-firm pass/breach status, drawdown, and profit-target progress — are
+            computed from the trade data available to us and are provided as a convenience tracker only. They are not an official
+            ruling from any prop firm. Always confirm your account status, balance, and evaluation outcome directly with your
+            broker or prop firm before making decisions based on it.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">4. Your account</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            You&apos;re responsible for keeping your login credentials secure and for all activity under your account. You must
+            provide accurate information when creating an account and keep it up to date.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">5. Broker & prop firm connections</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            If you connect a broker or prop firm account (e.g. via Rithmic or MetaTrader), you&apos;re granting TradeLoop
+            permission to read your trade history for the sole purpose of importing and journaling it. Connection credentials are
+            encrypted at rest. You can disconnect a broker or prop firm account at any time from Settings.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">6. Subscriptions & billing</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Paid plans are billed through our payment processor (Whop) on a recurring basis until cancelled. Prices and features
+            for each plan are listed on our <Link href="/pricing" className="text-primary hover:underline">pricing page</Link>.
+            You can cancel at any time; access continues until the end of the current billing period. Fees are non-refundable
+            except where required by law.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">7. Acceptable use</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Don&apos;t misuse the Service — no attempting to access other users&apos; data, reverse-engineering the platform, or
+            using it to violate any applicable law or a third party&apos;s (e.g. your broker&apos;s or prop firm&apos;s) terms of
+            service.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">8. Disclaimer & limitation of liability</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            The Service is provided &quot;as is&quot; without warranties of any kind. TradeLoop is not liable for trading losses,
+            missed profit targets, account breaches, or any decision made based on data shown in the app. To the maximum extent
+            permitted by law, our total liability for any claim related to the Service is limited to the amount you paid us in the
+            12 months before the claim.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">9. Termination</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            You can stop using the Service and delete your account at any time. We may suspend or terminate accounts that violate
+            these terms.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-semibold">10. Contact</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Questions about these terms? Email us at{" "}
+            <a href="mailto:support@tradeloop.pro" className="text-primary hover:underline">support@tradeloop.pro</a>.
+          </p>
+        </section>
+      </div>
+    </div>
+  )
+}
