@@ -76,7 +76,7 @@ export async function getProductIdForPlan(plan: PlanTier): Promise<string> {
   return product.id
 }
 
-// Legacy fallback only — checkouts created through startCheckout() carry
+// Legacy fallback only — checkouts created through createCheckout() carry
 // their tier directly in metadata.plan, which the webhook reads first, so
 // this is only relevant for a payment that didn't go through that flow.
 const PLAN_TIER_BY_ID: Record<string, PlanTier> = {

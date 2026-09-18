@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { subscriptions, user } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { tierFromPlanId, type PlanTier } from "@/lib/whop"
+import { findPendingCheckoutByPlan } from "@/lib/checkout"
 
 function tierFromMetadata(metadata: Record<string, unknown> | null | undefined): PlanTier | "unknown" {
   const value = metadata?.plan
@@ -26,30 +27,41 @@ async function resolveUserIdByEmail(email: string): Promise<string | null> {
   return match?.id ?? null
 }
 
+// The row this membership already has, or else the pending row its checkout
+// created (lib/checkout.ts) — found by the one-off plan id each checkout
+// generates, which ties the purchase to its user even when metadata or an
+// email isn't there to go on.
+async function findSubscriptionRow(membershipId: string, planId: string | null) {
+  const [byMembership] = await db.select().from(subscriptions).where(eq(subscriptions.whopMembershipId, membershipId))
+  if (byMembership) return byMembership
+  return planId ? await findPendingCheckoutByPlan(planId) : undefined
+}
+
 // payment.succeeded carries the buyer's email directly (Membership does
 // not), so this is what actually creates/refreshes a subscriptions row.
 async function handlePaymentSucceeded(payment: Record<string, any>) {
-  const membershipId: string | undefined = payment.membership_id ?? undefined
+  const membershipId: string | undefined = payment.membership_id ?? payment.membership?.id ?? undefined
   if (!membershipId) return
 
   const email: string | null = payment.customer_email ?? null
-  const planId: string | null = payment.plan_id ?? null
+  const planId: string | null = payment.plan_id ?? payment.plan?.id ?? null
   const metadataUserId: string | undefined = payment.metadata?.app_user_id
   const userId = metadataUserId ?? (email ? await resolveUserIdByEmail(email) : null)
-  // Checkouts created by startCheckout() carry the tier directly in
-  // metadata (it's copied from the checkout configuration onto the
-  // payment) — tierFromPlanId is only a fallback for a payment that didn't
-  // go through that flow.
+  // Checkouts created by createCheckout() (lib/checkout.ts) carry the tier
+  // directly in metadata (it's copied from the checkout configuration onto
+  // the payment) — tierFromPlanId is only a fallback for a payment that
+  // didn't go through that flow.
   const metaTier = tierFromMetadata(payment.metadata)
   const tier = metaTier !== "unknown" ? metaTier : tierFromPlanId(planId)
 
-  const [existing] = await db.select().from(subscriptions).where(eq(subscriptions.whopMembershipId, membershipId))
+  const existing = await findSubscriptionRow(membershipId, planId)
   if (existing) {
     await db
       .update(subscriptions)
       .set({
         userId: userId ?? existing.userId,
         email: email ?? existing.email,
+        whopMembershipId: membershipId,
         plan: tier === "unknown" ? existing.plan : tier,
         whopPlanId: planId ?? existing.whopPlanId,
         status: "active",
@@ -74,7 +86,7 @@ async function handlePaymentSucceeded(payment: Record<string, any>) {
 // So this can't just update a row payment.succeeded already created; for a
 // new trial it has to create one itself, or a trialing user would see no
 // Pro access for the entire trial. Membership carries the same metadata we
-// set in startCheckout() (copied through same as it is onto Payment), so
+// set in createCheckout() (copied through same as it is onto Payment), so
 // metadata.app_user_id resolves the user directly — no email on Membership
 // to fall back on the way payment.succeeded's handler does.
 async function handleMembershipChanged(eventName: string, membership: Record<string, any>) {
@@ -83,16 +95,18 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
 
   const status = eventName === "membership.activated" ? (membership.status ?? "active") : "canceled"
   const currentPeriodEnd = membership.current_period_end ? new Date(membership.current_period_end) : null
+  const planId: string | null = membership.plan_id ?? membership.plan?.id ?? null
   const metaTier = tierFromMetadata(membership.metadata)
-  const tier = metaTier !== "unknown" ? metaTier : tierFromPlanId(membership.plan_id)
+  const tier = metaTier !== "unknown" ? metaTier : tierFromPlanId(planId)
   const userId: string | undefined = membership.metadata?.app_user_id
 
-  const [existing] = await db.select().from(subscriptions).where(eq(subscriptions.whopMembershipId, membershipId))
+  const existing = await findSubscriptionRow(membershipId, planId)
   if (existing) {
     await db
       .update(subscriptions)
       .set({
         userId: userId ?? existing.userId,
+        whopMembershipId: membershipId,
         plan: tier === "unknown" ? existing.plan : tier,
         status,
         currentPeriodEnd,
@@ -104,7 +118,7 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
       userId: userId ?? null,
       email: "", // Membership carries no email — payment.succeeded backfills it once/if a real charge lands
       plan: tier === "unknown" ? "essential" : tier,
-      whopPlanId: membership.plan_id ?? null,
+      whopPlanId: planId,
       whopMembershipId: membershipId,
       status,
       currentPeriodEnd,
