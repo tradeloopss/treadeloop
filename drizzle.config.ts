@@ -2,6 +2,9 @@ import { defineConfig } from "drizzle-kit"
 
 export default defineConfig({
   schema: "./lib/db/schema.ts",
+  // Migrations applied to the hosted database by scripts/migrate.mjs on
+  // every Vercel build.
+  out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
     // Same fallbacks as lib/db/index.ts, so `drizzle-kit push` can target the
