@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { checkActivation } from "@/app/actions/subscriptions"
 import { Button } from "@/components/ui/button"
-import { Loader2, TrendingUp } from "lucide-react"
+import { Loader2 } from "lucide-react"
+import { BrandMark } from "@/components/brand-mark"
 
 const POLL_MS = 2_000
 // Whop's confirmation normally lands within seconds; after this long, stop
@@ -42,9 +43,7 @@ export function ActivatingPlan() {
   return (
     <div className="flex min-h-svh items-center justify-center bg-gradient-to-br from-background via-background to-accent/30 p-4">
       <div className="w-full max-w-sm rounded-2xl border bg-card p-8 text-center shadow-lg">
-        <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-          <TrendingUp className="size-7" />
-        </div>
+        <BrandMark className="mx-auto size-14" alt="TradeLoop" />
         {timedOut ? (
           <>
             <h1 className="mt-5 text-xl font-bold tracking-tight">Still confirming your payment</h1>

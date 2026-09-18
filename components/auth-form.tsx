@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { TrendingUp } from "lucide-react"
+import { BrandMark } from "@/components/brand-mark"
 
 // Google's own mark, required by their branding guidelines on any
 // "Sign in with Google" button.
@@ -95,9 +95,7 @@ export function AuthForm({
     <div className="flex min-h-svh items-center justify-center bg-gradient-to-br from-background via-background to-accent/30 p-4">
       <div className="w-full max-w-sm rounded-2xl border bg-card p-8 shadow-lg">
         <div className="flex flex-col items-center text-center">
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-            <TrendingUp className="size-7" />
-          </div>
+          <BrandMark className="size-14" alt="TradeLoop" />
           <h1 className="mt-5 text-2xl font-bold tracking-tight">{isSignUp ? "Welcome to TradeLoop" : "Sign in"}</h1>
           <p className="mt-2 text-sm text-muted-foreground">Journal smarter. Trade with clarity.</p>
         </div>

@@ -11,23 +11,8 @@ export const metadata: Metadata = {
   description:
     'Track, journal, and analyze your futures, stocks, options, forex, and crypto trades. Automated daily journaling, equity curves, P&L calendar, and performance reports.',
   generator: 'v0.app',
-  icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
-  },
+  // Favicon and app icons come from app/favicon.ico, app/icon.png and
+  // app/apple-icon.png (Next's file-based icon convention).
 }
 
 export const viewport: Viewport = {

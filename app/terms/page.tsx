@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { TrendingUp } from "lucide-react"
+import { BrandMark } from "@/components/brand-mark"
 
 export const metadata = { title: "Terms of Service — TradeLoop" }
 
@@ -8,9 +8,7 @@ export default function TermsPage() {
     <div className="min-h-svh bg-gradient-to-b from-background to-accent/20 px-4 py-16">
       <div className="mx-auto mb-10 flex max-w-3xl items-center justify-center gap-2">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrendingUp className="size-5" />
-          </div>
+          <BrandMark className="size-8" />
           <span className="text-lg font-semibold tracking-tight">TradeLoop</span>
         </Link>
       </div>

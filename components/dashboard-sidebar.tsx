@@ -22,7 +22,6 @@ import {
   CalendarDays,
   BookOpen,
   BarChart3,
-  TrendingUp,
   LogOut,
   Plug,
   CirclePlus,
@@ -36,6 +35,7 @@ import {
   ShieldCheck,
   Banknote,
 } from "lucide-react"
+import { BrandMark } from "@/components/brand-mark"
 
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -92,9 +92,7 @@ export function DashboardSidebar({ userName, userImage }: { userName: string; us
     <TooltipProvider>
       <header className="flex h-14 shrink-0 items-center justify-between border-b bg-sidebar px-4 text-sidebar-foreground md:hidden">
         <div className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrendingUp className="size-4" />
-          </div>
+          <BrandMark className="size-7" />
           <span className="font-semibold tracking-tight">TradeLoop</span>
         </div>
         <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open menu">
@@ -119,9 +117,7 @@ export function DashboardSidebar({ userName, userImage }: { userName: string; us
       >
         <div className={cn("flex items-center gap-2 px-5 py-5", collapsed ? "md:justify-center md:px-0" : "justify-between")}>
           <div className="flex items-center gap-2">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <TrendingUp className="size-5" />
-            </div>
+            <BrandMark className="size-8" />
             <span className={cn("text-lg font-semibold tracking-tight", collapsed && "md:hidden")}>TradeLoop</span>
           </div>
           <Button

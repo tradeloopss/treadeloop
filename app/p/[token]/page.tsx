@@ -10,7 +10,8 @@ import { TradePnlCard } from "@/components/trade-pnl-card"
 import { DailyPnlCard } from "@/components/daily-pnl-card"
 import { PayoutCertificate } from "@/components/payout-certificate"
 import { Card } from "@/components/ui/card"
-import { CheckCircle2, TrendingUp } from "lucide-react"
+import { CheckCircle2 } from "lucide-react"
+import { BrandMark } from "@/components/brand-mark"
 
 function resolveBaseUrl() {
   return (
@@ -41,9 +42,7 @@ export default async function SharedPage({
     return (
       <div className="flex min-h-svh flex-col items-center bg-gradient-to-br from-background via-background to-accent/30 p-4 py-10">
         <div className="mb-6 flex items-center gap-2">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrendingUp className="size-5" />
-          </div>
+          <BrandMark className="size-9" />
           <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
         </div>
         <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">Shared trade</p>
@@ -61,9 +60,7 @@ export default async function SharedPage({
     return (
       <div className="flex min-h-svh flex-col items-center bg-gradient-to-br from-background via-background to-accent/30 p-4 py-10">
         <div className="mb-6 flex items-center gap-2">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrendingUp className="size-5" />
-          </div>
+          <BrandMark className="size-9" />
           <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
         </div>
         <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -85,9 +82,7 @@ export default async function SharedPage({
     return (
       <div className="flex min-h-svh flex-col items-center bg-gradient-to-br from-background via-background to-accent/30 p-4 py-10">
         <div className="mb-6 flex items-center gap-2">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <TrendingUp className="size-5" />
-          </div>
+          <BrandMark className="size-9" />
           <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
         </div>
         <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -103,9 +98,7 @@ export default async function SharedPage({
   return (
     <div className="flex min-h-svh flex-col items-center bg-gradient-to-br from-background via-background to-accent/30 p-4 py-10">
       <div className="mb-6 flex items-center gap-2">
-        <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <TrendingUp className="size-5" />
-        </div>
+        <BrandMark className="size-9" />
         <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
       </div>
 
