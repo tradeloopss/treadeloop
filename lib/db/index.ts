@@ -17,9 +17,9 @@ function connectionString(): string | undefined {
   )
 }
 
-const url = connectionString()
+const raw = connectionString()
 
-if (!url && process.env.NODE_ENV === "production") {
+if (!raw && process.env.NODE_ENV === "production") {
   // Fail loudly at boot with the fix, instead of a 500 on every page that
   // touches the database.
   throw new Error(
@@ -27,12 +27,30 @@ if (!url && process.env.NODE_ENV === "production") {
   )
 }
 
+const isLocal = !raw || raw.includes("localhost") || raw.includes("127.0.0.1")
+
+// Supabase's connection string carries `sslmode=require`, and current pg
+// treats that as `verify-full` — which fails against the pooler, since it
+// serves a certificate that doesn't match the connection host ("self signed
+// certificate in certificate chain"). A `ssl` option alone doesn't help: the
+// mode parsed out of the URL wins. So the parameter is stripped from the
+// string and TLS is configured explicitly here instead. The connection is
+// still encrypted; only the certificate chain check is relaxed, which is the
+// documented way to reach a Supabase pooler from node-postgres.
+function withoutSslMode(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.delete("sslmode")
+    parsed.searchParams.delete("ssl")
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
 export const pool = new Pool({
-  connectionString: url,
-  // Hosted Postgres requires TLS, and Supabase's pooler presents a
-  // certificate that doesn't match the connection host, which node-postgres
-  // rejects by default. Local dev has no TLS at all.
-  ssl: url && !url.includes("localhost") && !url.includes("127.0.0.1") ? { rejectUnauthorized: false } : undefined,
+  connectionString: raw && !isLocal ? withoutSslMode(raw) : raw,
+  ssl: isLocal ? undefined : { rejectUnauthorized: false },
 })
 
 export const db = drizzle(pool, { schema })
