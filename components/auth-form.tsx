@@ -24,14 +24,26 @@ function GoogleMark() {
   )
 }
 
+// GitHub's own mark, as their brand guidelines require on a "Sign in with
+// GitHub" button.
+function GithubMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-5" fill="currentColor" aria-hidden="true">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  )
+}
+
 export function AuthForm({
   mode,
   redirectTo = "/dashboard",
   googleEnabled = false,
+  githubEnabled = false,
 }: {
   mode: "sign-in" | "sign-up"
   redirectTo?: string
   googleEnabled?: boolean
+  githubEnabled?: boolean
 }) {
   const router = useRouter()
   const [email, setEmail] = useState("")
@@ -39,21 +51,22 @@ export function AuthForm({
   const [name, setName] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [googleLoading, setGoogleLoading] = useState(false)
+  const [socialLoading, setSocialLoading] = useState<"google" | "github" | null>(null)
 
   const isSignUp = mode === "sign-up"
 
-  async function onGoogle() {
+  async function onSocial(provider: "google" | "github") {
+    const label = provider === "google" ? "Google" : "GitHub"
     setError(null)
-    setGoogleLoading(true)
+    setSocialLoading(provider)
     try {
-      // Better Auth redirects the browser to Google, so on success this call
-      // never returns — only the failure path needs handling here.
-      const { error } = await authClient.signIn.social({ provider: "google", callbackURL: redirectTo })
-      if (error) throw new Error(error.message ?? "Could not continue with Google")
+      // Better Auth redirects the browser to the provider, so on success this
+      // call never returns — only the failure path needs handling here.
+      const { error } = await authClient.signIn.social({ provider, callbackURL: redirectTo })
+      if (error) throw new Error(error.message ?? `Could not continue with ${label}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not continue with Google")
-      setGoogleLoading(false)
+      setError(err instanceof Error ? err.message : `Could not continue with ${label}`)
+      setSocialLoading(null)
     }
   }
 
@@ -89,18 +102,34 @@ export function AuthForm({
           <p className="mt-2 text-sm text-muted-foreground">Journal smarter. Trade with clarity.</p>
         </div>
 
-        {googleEnabled && (
+        {(googleEnabled || githubEnabled) && (
           <>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onGoogle}
-              disabled={googleLoading || loading}
-              className="mt-7 h-12 w-full rounded-xl text-base font-medium"
-            >
-              <GoogleMark />
-              {googleLoading ? "Redirecting…" : `Continue with Google`}
-            </Button>
+            <div className="mt-7 flex flex-col gap-2">
+              {googleEnabled && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onSocial("google")}
+                  disabled={socialLoading != null || loading}
+                  className="h-12 w-full rounded-xl text-base font-medium"
+                >
+                  <GoogleMark />
+                  {socialLoading === "google" ? "Redirecting…" : "Continue with Google"}
+                </Button>
+              )}
+              {githubEnabled && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onSocial("github")}
+                  disabled={socialLoading != null || loading}
+                  className="h-12 w-full rounded-xl text-base font-medium"
+                >
+                  <GithubMark />
+                  {socialLoading === "github" ? "Redirecting…" : "Continue with GitHub"}
+                </Button>
+              )}
+            </div>
             <div className="mt-5 flex items-center gap-3">
               <span className="h-px flex-1 bg-border" />
               <span className="text-xs text-muted-foreground">or</span>
@@ -109,7 +138,7 @@ export function AuthForm({
           </>
         )}
 
-        <form onSubmit={onSubmit} className={cn("flex flex-col gap-3", googleEnabled ? "mt-5" : "mt-7")}>
+        <form onSubmit={onSubmit} className={cn("flex flex-col gap-3", googleEnabled || githubEnabled ? "mt-5" : "mt-7")}>
           {isSignUp && (
             <div>
               <Label htmlFor="name" className="sr-only">Name</Label>

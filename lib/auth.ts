@@ -5,6 +5,9 @@ import { pool } from "@/lib/db"
 /** Whether Google OAuth credentials are configured on this deployment. */
 export const googleAuthEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
 
+/** Whether GitHub OAuth credentials are configured on this deployment. */
+export const githubAuthEnabled = Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
+
 export const auth = betterAuth({
   database: pool,
   baseURL:
@@ -18,17 +21,29 @@ export const auth = betterAuth({
     enabled: true,
     autoSignIn: true,
   },
-  // Google sign-in is only registered when credentials are actually present,
+  // A social provider is only registered when its credentials are actually present,
   // so a deployment without them fails closed rather than offering a button
   // that dead-ends on Google's error page. The UI reads the same flag
-  // (googleAuthEnabled) and hides the button in that case.
-  ...(googleAuthEnabled
+  // (googleAuthEnabled / githubAuthEnabled) and hides the button in that case.
+  ...(googleAuthEnabled || githubAuthEnabled
     ? {
         socialProviders: {
-          google: {
-            clientId: process.env.GOOGLE_CLIENT_ID!,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-          },
+          ...(googleAuthEnabled
+            ? {
+                google: {
+                  clientId: process.env.GOOGLE_CLIENT_ID!,
+                  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+                },
+              }
+            : {}),
+          ...(githubAuthEnabled
+            ? {
+                github: {
+                  clientId: process.env.GITHUB_CLIENT_ID!,
+                  clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+                },
+              }
+            : {}),
         },
       }
     : {}),
