@@ -3,12 +3,15 @@ import { getJournalEntries } from "@/app/actions/journal"
 import { computeDayPnl } from "@/lib/day-pnl"
 import { PageHeader } from "@/components/page-header"
 import { PnlCalendar } from "@/components/pnl-calendar"
+import { recordRequestTiming } from "@/lib/telemetry"
 
 export default async function CalendarPage() {
+  const startedAt = Date.now()
   const [rows, entries] = await Promise.all([getTrades(), getJournalEntries()])
   const byDay = computeDayPnl(rows, entries)
   const days = Array.from(byDay.values()).sort((a, b) => (a.date < b.date ? 1 : -1))
 
+  void recordRequestTiming("/calendar", Date.now() - startedAt)
   return (
     <div>
       <PageHeader title="Calendar" description="Daily net P&L — spot your best and worst trading days at a glance" />

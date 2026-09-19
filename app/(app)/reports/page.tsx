@@ -11,10 +11,12 @@ import { computeCrossAnalysis } from "@/lib/cross-analysis"
 import { StatCard } from "@/components/stat-card"
 import { Card } from "@/components/ui/card"
 import { UpgradePrompt } from "@/components/upgrade-prompt"
+import { recordRequestTiming } from "@/lib/telemetry"
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 export default async function ReportsPage() {
+  const startedAt = Date.now()
   const session = await auth.api.getSession({ headers: await headers() })
   const pro = session?.user ? await isPro(session.user.id) : false
   const rows = await getTrades()
@@ -83,6 +85,7 @@ export default async function ReportsPage() {
     exitTime: t.exitTime ? new Date(t.exitTime) : null,
   }))
 
+  void recordRequestTiming("/reports", Date.now() - startedAt)
   return (
     <div>
       <PageHeader title="Reports" description="Deep-dive analytics across markets, timing, and risk" />

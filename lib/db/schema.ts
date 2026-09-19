@@ -508,3 +508,36 @@ export const userOnboarding = pgTable("user_onboarding", {
   userId: text("userId").primaryKey(),
   seededAt: timestamp("seededAt").notNull().defaultNow(),
 })
+
+// One row per call to an external API (Anthropic, MetaApi) with tokens or
+// units used, so the admin System page can show usage and estimated cost.
+export const apiUsage = pgTable(
+  "api_usage",
+  {
+    id: serial("id").primaryKey(),
+    provider: text("provider").notNull(), // anthropic | metaapi
+    operation: text("operation").notNull(), // e.g. journal_narrative, fetch_snapshot
+    userId: text("userId"),
+    inputTokens: integer("inputTokens"),
+    outputTokens: integer("outputTokens"),
+    status: text("status").notNull(), // ok | error
+    error: text("error"),
+    durationMs: integer("durationMs"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("api_usage_created_idx").on(t.createdAt)]
+)
+
+// Server-side timing of the app's own pages and actions, sampled so the
+// System page can show p50/p95 per route without a third-party APM.
+export const requestTimings = pgTable(
+  "request_timings",
+  {
+    id: serial("id").primaryKey(),
+    route: text("route").notNull(),
+    durationMs: integer("durationMs").notNull(),
+    status: integer("status"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("request_timings_created_idx").on(t.createdAt)]
+)

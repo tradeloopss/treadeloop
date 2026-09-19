@@ -11,8 +11,10 @@ import { TradesTable, type TradeRow } from "@/components/trades-table"
 import { StatCard } from "@/components/stat-card"
 import { BiggestLossAnalysis } from "@/components/biggest-loss-analysis"
 import { AccountCustomizer } from "@/components/account-customizer"
+import { recordRequestTiming } from "@/lib/telemetry"
 
 export default async function TradesPage() {
+  const startedAt = Date.now()
   const session = await auth.api.getSession({ headers: await headers() })
   const [rows, accounts, activeAccountIds, playbooks, lockedAccountIds] = await Promise.all([
     getTrades(),
@@ -60,6 +62,7 @@ export default async function TradesPage() {
   const avgLoss = lossAmounts.length ? lossAmounts.reduce((a, b) => a + b, 0) / lossAmounts.length : 0
   const lossAnalysis = analyzeBiggestLoss(rows, avgLoss)
 
+  void recordRequestTiming("/trades", Date.now() - startedAt)
   return (
     <div>
       <PageHeader

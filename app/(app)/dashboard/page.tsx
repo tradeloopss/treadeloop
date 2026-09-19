@@ -33,8 +33,10 @@ import { cn } from "@/lib/utils"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { DollarSign, Percent, Scale, Activity, TrendingUp, ArrowRight, Wallet } from "lucide-react"
+import { recordRequestTiming } from "@/lib/telemetry"
 
 export default async function DashboardPage() {
+  const startedAt = Date.now()
   const session = await auth.api.getSession({ headers: await headers() })
   const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template] = await Promise.all([
     getTrades(),
@@ -337,6 +339,7 @@ export default async function DashboardPage() {
     ),
   }
 
+  void recordRequestTiming("/dashboard", Date.now() - startedAt)
   return (
     <div>
       <AutoSyncBanner events={syncEvents} />

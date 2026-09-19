@@ -2,6 +2,7 @@ import { pool } from "@/lib/db"
 import { ownerEmails } from "@/lib/subscription"
 import { PLAN_PRICING, type PlanTier } from "@/lib/whop"
 import { RATE_LIMIT_PATTERN } from "@/lib/sync-runs"
+import { ANTHROPIC_PRICE_PER_M } from "@/lib/telemetry"
 
 // Read-only queries behind the admin pages. Raw SQL because these are
 // aggregates across many tables; every value comes from real rows.
@@ -771,4 +772,93 @@ export async function listPublicShares(limit = 200): Promise<PublicShare[]> {
     ) x order by "createdAt" desc limit $1`,
     [limit]
   )
+}
+
+// --- System -------------------------------------------------------------------------------
+
+export async function getDatabaseHealth() {
+  const [size] = await q<{ db: string; db_bytes: string; connections: string; max_connections: string; version: string }>(`
+    select pg_size_pretty(pg_database_size(current_database())) as db,
+      pg_database_size(current_database()) as db_bytes,
+      (select count(*) from pg_stat_activity where datname = current_database()) as connections,
+      current_setting('max_connections') as max_connections,
+      split_part(version(), ' on ', 1) as version
+  `)
+  const tables = await q<{ table: string; rows: string; total: string; total_bytes: string; seq_scans: string; idx_scans: string | null }>(`
+    select c.relname as "table", coalesce(s.n_live_tup, 0) as rows,
+      pg_size_pretty(pg_total_relation_size(c.oid)) as total, pg_total_relation_size(c.oid) as total_bytes,
+      coalesce(s.seq_scan, 0) as seq_scans, s.idx_scan as idx_scans
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    left join pg_stat_user_tables s on s.relid = c.oid
+    where n.nspname = 'public' and c.relkind = 'r'
+    order by pg_total_relation_size(c.oid) desc limit 12
+  `)
+  // Slow statements need the pg_stat_statements extension; Supabase has it
+  // on by default, the local dev database usually doesn't.
+  let slowQueries: { query: string; calls: number; meanMs: number; totalMs: number }[] | null = null
+  try {
+    const rows = await q<{ query: string; calls: string; mean_ms: string; total_ms: string }>(`
+      select left(regexp_replace(query, '\\s+', ' ', 'g'), 160) as query, calls,
+        round(mean_exec_time::numeric, 1) as mean_ms, round(total_exec_time::numeric) as total_ms
+      from pg_stat_statements
+      where dbid = (select oid from pg_database where datname = current_database())
+        and query not ilike '%pg_stat_statements%' and query not ilike '%pg_catalog%' and calls > 5
+      order by mean_exec_time desc limit 10
+    `)
+    slowQueries = rows.map((r) => ({ query: r.query, calls: n(r.calls), meanMs: Number(r.mean_ms), totalMs: n(r.total_ms) }))
+  } catch {
+    slowQueries = null
+  }
+  return {
+    size: size.db,
+    sizeBytes: n(size.db_bytes),
+    connections: n(size.connections),
+    maxConnections: n(size.max_connections),
+    version: size.version,
+    tables: tables.map((t) => ({ table: t.table, rows: n(t.rows), total: t.total, totalBytes: n(t.total_bytes), seqScans: n(t.seq_scans), idxScans: t.idx_scans == null ? null : n(t.idx_scans) })),
+    slowQueries,
+  }
+}
+
+// p50/p95 server time per route over the last 24h, from the sampled timings.
+export async function getRouteTimings() {
+  return q<{ route: string; samples: string; p50: string; p95: string; max: string }>(`
+    select route, count(*) as samples,
+      percentile_cont(0.5) within group (order by "durationMs") as p50,
+      percentile_cont(0.95) within group (order by "durationMs") as p95,
+      max("durationMs") as max
+    from request_timings where "createdAt" > now() - interval '24 hours'
+    group by route order by p95 desc
+  `).then((rows) => rows.map((r) => ({ route: r.route, samples: n(r.samples), p50: Math.round(Number(r.p50)), p95: Math.round(Number(r.p95)), max: n(r.max) })))
+}
+
+export async function getApiUsage() {
+  const rows = await q<{ provider: string; operation: string; calls: string; errors: string; input_tokens: string; output_tokens: string; avg_ms: string | null; last: Date | null }>(`
+    select provider, operation, count(*) as calls, count(*) filter (where status = 'error') as errors,
+      coalesce(sum("inputTokens"), 0) as input_tokens, coalesce(sum("outputTokens"), 0) as output_tokens,
+      round(avg("durationMs")) as avg_ms, max("createdAt") as last
+    from api_usage where "createdAt" > now() - interval '30 days'
+    group by provider, operation order by provider, calls desc
+  `)
+  const recentErrors = await q<{ provider: string; operation: string; error: string | null; createdAt: Date }>(
+    `select provider, operation, error, "createdAt" from api_usage where status = 'error' order by "createdAt" desc limit 10`
+  )
+  const usage = rows.map((r) => {
+    const input = n(r.input_tokens)
+    const output = n(r.output_tokens)
+    return {
+      provider: r.provider,
+      operation: r.operation,
+      calls: n(r.calls),
+      errors: n(r.errors),
+      inputTokens: input,
+      outputTokens: output,
+      avgMs: r.avg_ms == null ? null : n(r.avg_ms),
+      last: r.last,
+      // Anthropic is metered per token at list price; MetaApi is a flat
+      // subscription, so no per-call cost is estimated for it.
+      estimatedCostUsd: r.provider === "anthropic" ? (input * ANTHROPIC_PRICE_PER_M.input + output * ANTHROPIC_PRICE_PER_M.output) / 1e6 : null,
+    }
+  })
+  return { usage, recentErrors }
 }

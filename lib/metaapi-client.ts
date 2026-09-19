@@ -2,6 +2,7 @@
 // export resolves to its browser build (which references `window`), and
 // breaks module evaluation in this server-only file.
 import MetaApi from "metaapi.cloud-sdk/esm-node"
+import { recordApiUsage } from "@/lib/telemetry"
 import type { ImportedTrade } from "@/lib/trade-import"
 
 export type MtPlatform = "mt4" | "mt5"
@@ -30,7 +31,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 // exact server-name match skips the fast "not found" path and proceeds into
 // slow real account creation, so on that rare case the stray account this
 // creates is torn down immediately before returning.
-export async function searchServers(token: string, query: string, platform: MtPlatform): Promise<BrokerServer[]> {
+async function searchServersImpl(token: string, query: string, platform: MtPlatform): Promise<BrokerServer[]> {
   const api = new MetaApi(token)
   try {
     const account = await withTimeout(
@@ -79,7 +80,7 @@ export type ProvisionResult = {
 // after that, so this app never needs to persist it. Immediately narrows the
 // admin token down to reader-only access on just this account before
 // returning, since account-scoped read access is all any future sync needs.
-export async function provisionAccount(
+async function provisionAccountImpl(
   token: string,
   params: { name: string; login: string; investorPassword: string; server: string; platform: MtPlatform }
 ): Promise<ProvisionResult> {
@@ -202,7 +203,7 @@ export type AccountSnapshot = {
   currency: string
 }
 
-export async function fetchAccountSnapshot(
+async function fetchAccountSnapshotImpl(
   token: string,
   metaApiAccountId: string,
   accountLabel: string,
@@ -230,3 +231,22 @@ export async function fetchAccountSnapshot(
     api.close()
   }
 }
+
+// Every MetaApi call is recorded for the admin System page (usage + errors).
+function metered<A extends unknown[], R>(operation: string, fn: (...args: A) => Promise<R>) {
+  return async (...args: A): Promise<R> => {
+    const startedAt = Date.now()
+    try {
+      const result = await fn(...args)
+      void recordApiUsage({ provider: "metaapi", operation, startedAt })
+      return result
+    } catch (err) {
+      void recordApiUsage({ provider: "metaapi", operation, startedAt, error: err })
+      throw err
+    }
+  }
+}
+
+export const searchServers = metered("search_servers", searchServersImpl)
+export const provisionAccount = metered("provision_account", provisionAccountImpl)
+export const fetchAccountSnapshot = metered("fetch_snapshot", fetchAccountSnapshotImpl)

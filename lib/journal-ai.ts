@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { recordApiUsage } from "@/lib/telemetry"
 
 const client = process.env.ANTHROPIC_API_KEY ? new Anthropic() : null
 
@@ -38,6 +39,7 @@ Date: ${day}
 Trades:
 ${lines.join("\n")}`
 
+  const startedAt = Date.now()
   try {
     const response = await client.messages.create({
       model: "claude-opus-5",
@@ -45,10 +47,18 @@ ${lines.join("\n")}`
       output_config: { effort: "low" },
       messages: [{ role: "user", content: prompt }],
     })
+    void recordApiUsage({
+      provider: "anthropic",
+      operation: "journal_narrative",
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      startedAt,
+    })
     const block = response.content.find((b) => b.type === "text")
     const text = block && "text" in block ? block.text.trim() : ""
     return text || null
-  } catch {
+  } catch (err) {
+    void recordApiUsage({ provider: "anthropic", operation: "journal_narrative", startedAt, error: err })
     return null
   }
 }

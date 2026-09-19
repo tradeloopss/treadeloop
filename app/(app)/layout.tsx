@@ -13,9 +13,12 @@ import { AnnouncementBanners } from "@/components/announcement-banners"
 import { ImpersonationBanner } from "@/components/impersonation-banner"
 import { CrispChat } from "@/components/crisp-chat"
 import { seedStarterTemplates } from "@/lib/starter-templates"
+import { recordRequestTiming } from "@/lib/telemetry"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const startedAt = Date.now()
+  const requestHeaders = await headers()
+  const session = await auth.api.getSession({ headers: requestHeaders })
   if (!session?.user) redirect("/sign-in")
 
   // No active subscription (new sign-up, or a trial/plan that lapsed). Rather
@@ -35,6 +38,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ])
   const locked = plan === null
   const impersonating = !!session.session.impersonatedBy
+  // Server time for this layout's own work (session + plan + announcements).
+  // Pages measure themselves the same way via recordRequestTiming.
+  void recordRequestTiming("(app) layout", Date.now() - startedAt)
   const isAdmin = !impersonating && (isAdminRole(session.user.role) || isOwnerEmail(session.user.email))
 
   return (

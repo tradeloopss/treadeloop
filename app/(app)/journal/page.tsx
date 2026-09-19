@@ -5,8 +5,10 @@ import { formatCurrency } from "@/lib/calc"
 import { PageHeader } from "@/components/page-header"
 import { JournalList, type JournalTrade, type JournalDayEntry } from "@/components/journal-list"
 import { StatCard } from "@/components/stat-card"
+import { recordRequestTiming } from "@/lib/telemetry"
 
 export default async function JournalPage() {
+  const startedAt = Date.now()
   const [rows, entries, accounts, activeAccountIds] = await Promise.all([
     getTrades(),
     getJournalEntries(),
@@ -37,6 +39,7 @@ export default async function JournalPage() {
   const breakevens = closed.filter((t) => Number(t.pnl) === 0).length
   const totalPnl = closed.reduce((sum, t) => sum + Number(t.pnl), 0)
 
+  void recordRequestTiming("/journal", Date.now() - startedAt)
   return (
     <div>
       <PageHeader
