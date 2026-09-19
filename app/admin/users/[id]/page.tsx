@@ -10,6 +10,7 @@ import { TicketStatus } from "@/components/ticket-status"
 import { isOwnerEmail, rowGrantsAccess } from "@/lib/subscription"
 import { UserActions } from "@/components/admin/user-actions"
 import { ForceSyncButton, RevokeGrantButton } from "@/components/admin/row-actions"
+import { MembershipControls } from "@/components/admin/whop-controls"
 import { EmptyRow, Panel, StatePill, SyncStatus, fmtAgo, fmtBytes, fmtDate, fmtDateTime } from "@/components/admin/ui"
 
 const PROVIDER_LABELS: Record<string, string> = { credential: "Email & password", google: "Google", github: "GitHub" }
@@ -162,7 +163,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           <Panel title="Subscriptions" description="Newest first. Pending = checkout started but not completed.">
             <ul className="divide-y text-sm">
               {profile.subscriptions.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+                <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
                   <span>
                     <span className="font-medium capitalize">{s.plan}</span>
                     <span className="text-muted-foreground">
@@ -173,6 +174,11 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
                     <StatePill state={s.source === "admin" && !rowGrantsAccess(s) && s.status === "active" ? "expired" : s.status} />
                     {s.source === "admin" && rowGrantsAccess(s) && can.grant && <RevokeGrantButton subscriptionId={s.id} />}
                   </span>
+                  {s.source === "whop" && s.whopMembershipId && can.grant && (
+                    <div className="w-full pt-1">
+                      <MembershipControls membershipId={s.whopMembershipId} status={s.status} cancelAtPeriodEnd={false} />
+                    </div>
+                  )}
                 </li>
               ))}
               {profile.subscriptions.length === 0 && <li className="py-6 text-center text-muted-foreground">Never started a plan.</li>}

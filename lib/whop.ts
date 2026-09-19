@@ -4,7 +4,8 @@ export type PlanTier = "essential" | "pro"
 export type Billing = "monthly" | "annual"
 
 export function getWhopClient() {
-  return new WhopClient({ token: process.env.WHOP_API_KEY })
+  // WHOP_API_URL is only set in tests, to point the SDK at a stand-in server.
+  return new WhopClient({ token: process.env.WHOP_API_KEY, ...(process.env.WHOP_API_URL ? { baseUrl: process.env.WHOP_API_URL } : {}) })
 }
 
 // The per-month price shown on /pricing. Annual bills the full-year total

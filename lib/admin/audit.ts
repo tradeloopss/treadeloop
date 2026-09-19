@@ -23,6 +23,14 @@ export const ACTION_LABELS: Record<string, string> = {
   "import.dismiss": "Dismissed failed import",
   "import.download": "Downloaded an imported file",
   "broker.mass_sync": "Re-synced all connections",
+  "billing.refund": "Refunded a payment",
+  "billing.retry_payment": "Retried a failed payment",
+  "billing.pause": "Paused billing",
+  "billing.resume": "Resumed billing",
+  "billing.cancel": "Canceled a subscription",
+  "billing.extend": "Extended a subscription",
+  "billing.promo_create": "Created promo code",
+  "billing.promo_delete": "Deleted promo code",
 }
 
 export async function logAdminAction(

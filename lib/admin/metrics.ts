@@ -683,3 +683,58 @@ export async function getUserStorage(userId: string) {
   const parts = { trades: n(row.trades), journal: n(row.journal), playbooks: n(row.playbooks), accounts: n(row.accounts), imports: n(row.imports) }
   return { ...parts, total: Object.values(parts).reduce((a, b) => a + b, 0) }
 }
+
+// --- Revenue retention -----------------------------------------------------------------
+
+// Net revenue retention over the trailing 30 days, estimated at list price
+// from the subscription rows: MRR held today by the users who were paying 30
+// days ago, over what they paid then. Expansion (upgrades) counts for, churn
+// and downgrades against; new customers are excluded by definition.
+export async function getRevenueRetention() {
+  const rows = await q<{ userId: string; plan_then: string | null; billing_then: string | null; plan_now: string | null; billing_now: string | null; access_now: boolean }>(`
+    with paying_then as (
+      select distinct on ("userId") "userId", plan, billing
+      from subscriptions
+      where source = 'whop' and "userId" is not null and status in ('active', 'past_due')
+        and "createdAt" <= now() - interval '30 days'
+        and ("updatedAt" >= now() - interval '30 days' or status in ('active', 'past_due'))
+      order by "userId", "updatedAt" desc
+    ),
+    now_rows as (
+      select distinct on ("userId") "userId", plan, billing, status in ('active', 'past_due') as access
+      from subscriptions where source = 'whop' and "userId" is not null and status <> 'pending'
+      order by "userId", (status in ('active', 'past_due')) desc, "updatedAt" desc
+    )
+    select t."userId", t.plan as plan_then, t.billing as billing_then, n.plan as plan_now, n.billing as billing_now, coalesce(n.access, false) as access_now
+    from paying_then t left join now_rows n on n."userId" = t."userId"
+  `)
+  let then = 0
+  let now = 0
+  let churned = 0
+  let expanded = 0
+  let contracted = 0
+  for (const r of rows) {
+    const before = monthlyPrice(r.plan_then ?? "", r.billing_then)
+    const after = r.access_now ? monthlyPrice(r.plan_now ?? "", r.billing_now) : 0
+    then += before
+    now += after
+    if (after === 0) churned++
+    else if (after > before) expanded++
+    else if (after < before) contracted++
+  }
+  return { cohort: rows.length, mrrThen: then, mrrNow: now, nrr: then > 0 ? now / then : null, churned, expanded, contracted }
+}
+
+// Subscriptions at risk: Whop says the last renewal failed (past_due), or
+// a trial ends within 3 days with no payment yet.
+export async function getBillingRisks() {
+  return q<{ userId: string | null; email: string; plan: string; status: string; currentPeriodEnd: Date | null; whopMembershipId: string | null; updatedAt: Date }>(`
+    select s."userId", coalesce(u.email, s.email) as email, s.plan, s.status, s."currentPeriodEnd", s."whopMembershipId", s."updatedAt"
+    from subscriptions s left join "user" u on u.id = s."userId"
+    where s.source = 'whop' and (
+      s.status = 'past_due'
+      or (s.status = 'trialing' and s."currentPeriodEnd" is not null and s."currentPeriodEnd" < now() + interval '3 days')
+    )
+    order by s."currentPeriodEnd" nulls last limit 50
+  `)
+}

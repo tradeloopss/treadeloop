@@ -15,6 +15,7 @@ import { isOwnerEmail } from "@/lib/subscription"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
 import { sendEmail } from "@/lib/email"
 import { importCsvText, logImport } from "@/lib/trade-importer"
+import * as whop from "@/lib/admin/whop"
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -331,5 +332,116 @@ export async function resyncAllRithmic() {
       }
     })
     return `Re-syncing ${connections.length} Rithmic connection${connections.length === 1 ? "" : "s"} — results appear below as they finish.`
+  })
+}
+
+// --- Whop billing ------------------------------------------------------------------
+
+// The subscriptions row for a Whop membership, so local access can follow a
+// change made here without waiting for the webhook.
+async function localSubscription(membershipId: string) {
+  const [row] = await db.select().from(subscriptions).where(eq(subscriptions.whopMembershipId, membershipId))
+  return row ?? null
+}
+
+export async function refundWhopPayment(paymentId: string, partialAmount: number | null, email: string | null) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    if (partialAmount != null && (!Number.isFinite(partialAmount) || partialAmount <= 0)) throw new Error("Enter a positive amount.")
+    await whop.refundPayment(paymentId, partialAmount)
+    const target = email ? (await db.select({ id: user.id }).from(user).where(eq(user.email, email.toLowerCase())))[0] : null
+    await logAdminAction(admin, "billing.refund", target?.id ?? null, { paymentId, partialAmount, email })
+    return partialAmount != null ? `Refunded $${partialAmount.toFixed(2)}.` : "Payment fully refunded."
+  })
+}
+
+export async function retryWhopPayment(paymentId: string, email: string | null) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    await whop.retryPayment(paymentId)
+    await logAdminAction(admin, "billing.retry_payment", null, { paymentId, email })
+    return "Whop is retrying the charge."
+  })
+}
+
+export async function pauseWhopMembership(membershipId: string, untilIso: string | null) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    await whop.pauseMembership(membershipId, untilIso)
+    const local = await localSubscription(membershipId)
+    await logAdminAction(admin, "billing.pause", local?.userId ?? null, { membershipId, until: untilIso })
+    return untilIso ? `Billing paused until ${new Date(untilIso).toLocaleDateString("en-US", { dateStyle: "medium" })}. Access continues.` : "Billing paused. Access continues until resumed."
+  })
+}
+
+export async function resumeWhopMembership(membershipId: string) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    await whop.resumeMembership(membershipId)
+    const local = await localSubscription(membershipId)
+    await logAdminAction(admin, "billing.resume", local?.userId ?? null, { membershipId })
+    return "Billing resumed."
+  })
+}
+
+export async function cancelWhopMembership(membershipId: string, atPeriodEnd: boolean, reason: string) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    await whop.cancelMembership(membershipId, atPeriodEnd, reason.trim())
+    const local = await localSubscription(membershipId)
+    if (local && !atPeriodEnd) {
+      await db.update(subscriptions).set({ status: "canceled", updatedAt: new Date() }).where(eq(subscriptions.id, local.id))
+    }
+    await logAdminAction(admin, "billing.cancel", local?.userId ?? null, { membershipId, atPeriodEnd, reason: reason.trim() || null })
+    return atPeriodEnd ? "Subscription will end at the current period's end." : "Subscription canceled; access removed."
+  })
+}
+
+export async function extendWhopMembership(membershipId: string, days: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error("Days must be between 1 and 365.")
+    await whop.extendMembership(membershipId, days)
+    const local = await localSubscription(membershipId)
+    if (local) {
+      const base = local.currentPeriodEnd && local.currentPeriodEnd.getTime() > Date.now() ? local.currentPeriodEnd : new Date()
+      await db
+        .update(subscriptions)
+        .set({ currentPeriodEnd: new Date(base.getTime() + days * 86400_000), status: local.status === "canceled" || local.status === "expired" ? "active" : local.status, updatedAt: new Date() })
+        .where(eq(subscriptions.id, local.id))
+    }
+    await logAdminAction(admin, "billing.extend", local?.userId ?? null, { membershipId, days })
+    return `Extended by ${days} day${days === 1 ? "" : "s"}; the next charge moves out by the same amount.`
+  })
+}
+
+export async function createWhopPromoCode(input: {
+  code: string
+  promoType: "percentage" | "flat_amount"
+  amountOff: number
+  durationMonths: number
+  newUsersOnly: boolean
+  onePerCustomer: boolean
+  stock: number | null
+  expiresAt: string | null
+}) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    const code = input.code.trim().toUpperCase()
+    if (!/^[A-Z0-9_-]{3,32}$/.test(code)) throw new Error("Codes are 3–32 letters, numbers, dashes or underscores.")
+    if (!Number.isFinite(input.amountOff) || input.amountOff <= 0) throw new Error("Enter a discount amount.")
+    if (input.promoType === "percentage" && input.amountOff > 100) throw new Error("A percentage can't exceed 100.")
+    if (!Number.isInteger(input.durationMonths) || input.durationMonths < 1) throw new Error("Duration is at least 1 month.")
+    await whop.createPromoCode({ ...input, code })
+    await logAdminAction(admin, "billing.promo_create", null, { ...input, code })
+    return `Promo code ${code} created.`
+  })
+}
+
+export async function deleteWhopPromoCode(id: string, code: string | null) {
+  return run(async () => {
+    const admin = await assertAdmin({ billing: ["manage"] })
+    await whop.deletePromoCode(id)
+    await logAdminAction(admin, "billing.promo_delete", null, { id, code })
   })
 }
