@@ -6,7 +6,7 @@ import { Languages } from "lucide-react"
 import { setLocale } from "@/app/actions/locale"
 import { useLocale } from "@/components/locale-provider"
 import { cn } from "@/lib/utils"
-import type { Locale } from "@/lib/i18n"
+import { LOCALE_CHOICE_OFFERED, OFFERED_LOCALES, type Locale } from "@/lib/i18n"
 
 // Each language is named in itself, so a visitor who landed in the wrong
 // one can still read the way out.
@@ -18,7 +18,10 @@ export function LanguageSwitcher({ className, compact = false }: { className?: s
   const locale = useLocale()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const next: Locale = locale === "ar" ? "en" : "ar"
+  // With one language on offer there is nothing to switch to, so the control
+  // isn't rendered at all rather than shown doing nothing.
+  const next = OFFERED_LOCALES.find((l) => l !== locale)
+  if (!LOCALE_CHOICE_OFFERED || !next) return null
 
   return (
     <button

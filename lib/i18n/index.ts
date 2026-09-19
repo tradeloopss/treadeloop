@@ -6,9 +6,24 @@
 // in the current locale's dictionary and falls back to the English when
 // there's no entry, so an untranslated string is never blank. Placeholders
 // are written {name} and filled from the second argument.
+// Every locale that exists in this repo, translated and ready.
 export const LOCALES = ["en", "ar"] as const
 export type Locale = (typeof LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = "en"
+
+// The locales actually served right now. Arabic is fully translated (see
+// ./ar.ts) but shelved — put "ar" back in this list and it returns whole:
+// the language switcher reappears, visitors from Arabic-speaking countries
+// get Arabic by default again, and the terms and privacy pages serve their
+// Arabic text. Nothing else has to change.
+export const OFFERED_LOCALES: readonly Locale[] = ["en"]
+
+// Whether to show a way to switch at all — one locale needs no picker.
+export const LOCALE_CHOICE_OFFERED = OFFERED_LOCALES.length > 1
+
+export function isOffered(value: unknown): value is Locale {
+  return isLocale(value) && OFFERED_LOCALES.includes(value)
+}
 export const LOCALE_COOKIE = "locale"
 // The request header proxy.ts sets so server components know the locale
 // without re-deriving it.
@@ -36,7 +51,8 @@ export function makeT(messages: Messages): TFunction {
   return (key, vars) => translate(messages, key, vars)
 }
 
-// Countries where Arabic is the (or an) official language — the Arab
+// Countries where Arabic is the (or an) official language — only consulted
+// while "ar" is in OFFERED_LOCALES above. — the Arab
 // League's members across the Middle East and North/East Africa, plus
 // Western Sahara and Chad. Someone visiting from one of these gets the
 // Arabic version by default; Iran, Turkey and Israel are Middle Eastern

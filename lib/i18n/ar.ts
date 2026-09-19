@@ -1,6 +1,10 @@
 import type { Messages } from "./index"
 
 // Arabic dictionary, keyed by the English source string (see index.ts).
+//
+// SHELVED: Arabic is not being served at the moment — "ar" is absent from
+// OFFERED_LOCALES in ./index.ts. This file is kept complete and current so
+// putting it back is that one-line change; nothing here needs redoing.
 // Terms are kept consistent throughout: prop firm = شركة التمويل,
 // evaluation = التقييم, funded = مموَّل, payout = سحب الأرباح,
 // drawdown = التراجع, trailing = متحرّك, playbook = خطة التداول.

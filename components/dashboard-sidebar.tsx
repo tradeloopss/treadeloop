@@ -37,6 +37,7 @@ import {
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
+import { LOCALE_CHOICE_OFFERED } from "@/lib/i18n"
 import { useT } from "@/components/locale-provider"
 
 const links = [
@@ -250,10 +251,12 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                 </div>
               </div>
 
-              <div className="flex items-center justify-between px-1.5 py-1">
-                <span className="text-sm">{t("Language")}</span>
-                <LanguageSwitcher className="-me-2" />
-              </div>
+              {LOCALE_CHOICE_OFFERED && (
+                <div className="flex items-center justify-between px-1.5 py-1">
+                  <span className="text-sm">{t("Language")}</span>
+                  <LanguageSwitcher className="-me-2" />
+                </div>
+              )}
 
               <DropdownMenuSeparator />
 
