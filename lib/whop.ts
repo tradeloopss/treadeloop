@@ -41,9 +41,11 @@ export function promoPrice(price: number, now: Date = new Date()): number {
   return Math.round(price * (1 - PROMO.percentOff / 100) * 100) / 100
 }
 
-export function renewalPriceFor(plan: PlanTier, billing: Billing): { amount: number; billingPeriodDays: number; trialPeriodDays: number } {
+// withTrial is false for someone who has already had their free trial
+// (lib/subscription.ts hasUsedTrial): the plan then bills from day one.
+export function renewalPriceFor(plan: PlanTier, billing: Billing, withTrial = true): { amount: number; billingPeriodDays: number; trialPeriodDays: number } {
   const pricing = PLAN_PRICING[plan]
-  const trialPeriodDays = TRIAL_DAYS[billing]
+  const trialPeriodDays = withTrial ? TRIAL_DAYS[billing] : 0
   if (billing === "annual") {
     return { amount: Math.round(promoPrice(pricing.annualPrice) * 12 * 100) / 100, billingPeriodDays: 365, trialPeriodDays }
   }

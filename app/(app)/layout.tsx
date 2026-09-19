@@ -5,7 +5,7 @@ import { and, eq, gt, isNull, or } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { announcements } from "@/lib/db/schema"
-import { getUserPlan, isOwnerEmail } from "@/lib/subscription"
+import { getUserPlan, hasUsedTrial, isOwnerEmail } from "@/lib/subscription"
 import { isAdminRole } from "@/lib/admin/roles"
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
 import { SubscriptionPaywall } from "@/components/subscription-paywall"
@@ -37,6 +37,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .where(and(eq(announcements.active, true), or(isNull(announcements.endsAt), gt(announcements.endsAt, new Date())))),
   ])
   const locked = plan === null
+  // Only matters for the paywall: whether to offer the free trial or (once
+  // they've had it) a plan that starts today.
+  const trialEligible = locked ? !(await hasUsedTrial(session.user.id, session.user.email)) : true
   const impersonating = !!session.session.impersonatedBy
   // Server time for this layout's own work (session + plan + announcements).
   // Pages measure themselves the same way via recordRequestTiming.
@@ -59,7 +62,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </main>
         </div>
 
-        {locked && <SubscriptionPaywall userName={session.user.name || session.user.email} />}
+        {locked && <SubscriptionPaywall userName={session.user.name || session.user.email} trialEligible={trialEligible} />}
       </div>
       {!impersonating && <CrispChat email={session.user.email} name={session.user.name} />}
     </div>

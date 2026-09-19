@@ -2,11 +2,7 @@ import { db } from "@/lib/db"
 import { subscriptions } from "@/lib/db/schema"
 import { and, desc, eq, gt, isNotNull } from "drizzle-orm"
 import { getWhopClient, renewalPriceFor, getProductIdForPlan, PLAN_PRICING, type PlanTier, type Billing } from "@/lib/whop"
-
-// A checkout the user has started but Whop hasn't confirmed yet. Not in
-// lib/subscription.ts's ACTIVE_STATUSES, so it never grants access by
-// itself — it only remembers which Whop plan belongs to which user.
-export const PENDING_STATUS = "pending"
+import { hasUsedTrial, PENDING_STATUS } from "@/lib/subscription"
 
 // Membership statuses that mean the user should have access right now,
 // mapped to what gets stored. "canceling" is an active membership that
@@ -26,12 +22,16 @@ const GRANTING_STATUS: Record<string, string> = {
 // use it to tie the resulting membership back to this user even if Whop
 // drops the metadata. The tier and billing interval also travel in the
 // configuration's metadata, which Whop copies onto the payment/membership.
+//
+// The free trial is decided here, not by the button that was clicked: one
+// per person, so someone who has had theirs gets a plan that bills today.
 export async function createCheckout(
   user: { id: string; email: string },
   plan: PlanTier,
   billing: Billing
 ): Promise<string> {
-  const { amount, billingPeriodDays, trialPeriodDays } = renewalPriceFor(plan, billing)
+  const withTrial = !(await hasUsedTrial(user.id, user.email))
+  const { amount, billingPeriodDays, trialPeriodDays } = renewalPriceFor(plan, billing, withTrial)
   const title = `${PLAN_PRICING[plan].title} (${billing === "annual" ? "Annual" : "Monthly"})`
   const productId = await getProductIdForPlan(plan)
 
@@ -42,7 +42,7 @@ export async function createCheckout(
       product_id: productId,
       renewal_price: amount,
       billing_period: billingPeriodDays,
-      trial_period_days: trialPeriodDays,
+      ...(trialPeriodDays > 0 ? { trial_period_days: trialPeriodDays } : {}),
       currency: "usd",
       plan_type: "renewal",
     },

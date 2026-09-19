@@ -5,8 +5,8 @@ import { startCheckout } from "@/app/actions/subscriptions"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { Check, Minus, Gift, Tag } from "lucide-react"
-import { TRIAL_DAYS, PROMO, isPromoActive, promoPrice, type PlanTier, type Billing } from "@/lib/whop"
+import { Check, Minus, Gift, Tag, CalendarCheck } from "lucide-react"
+import { TRIAL_DAYS, PROMO, isPromoActive, promoPrice, renewalPriceFor, type PlanTier, type Billing } from "@/lib/whop"
 
 interface FeatureGroup {
   title: string
@@ -99,7 +99,13 @@ const PLANS: Plan[] = [
   },
 ]
 
-export function PricingPlans() {
+// trialEligible is false for someone who has already had their free trial
+// (lib/subscription.ts hasUsedTrial): the cards then sell the plan as
+// starting today, and lib/checkout.ts creates it without a trial whatever
+// this shows — the flag only keeps what's promised in step with what's
+// charged. Visitors who aren't signed in are shown the trial; whether they
+// actually get one is settled once they're signed in.
+export function PricingPlans({ trialEligible = true }: { trialEligible?: boolean }) {
   const [billing, setBilling] = useState<Billing>("annual")
   const [pending, startTransition] = useTransition()
   const [loadingTier, setLoadingTier] = useState<PlanTier | null>(null)
@@ -159,6 +165,9 @@ export function PricingPlans() {
           const fullPrice = billing === "annual" ? plan.annualPrice : plan.monthlyPrice
           const price = promoActive ? promoPrice(fullPrice) : fullPrice
           const trialDays = TRIAL_DAYS[billing]
+          // What Whop charges at checkout when there's no trial: the whole
+          // year up front on annual, one month on monthly.
+          const chargeToday = renewalPriceFor(plan.tier, billing, false).amount
           return (
             <div key={plan.name} className="relative h-full">
               {plan.featured && (
@@ -172,19 +181,33 @@ export function PricingPlans() {
                   <p className="text-sm text-muted-foreground">{plan.tagline}</p>
                 </div>
 
-                {promoActive && (
+                {(promoActive || !trialEligible) && (
                   <div className="mt-4 flex items-baseline gap-2">
                     <span className="text-3xl font-bold tracking-tight">${price.toFixed(2)}</span>
-                    <span className="text-lg text-muted-foreground line-through">${fullPrice.toFixed(2)}</span>
+                    {promoActive && <span className="text-lg text-muted-foreground line-through">${fullPrice.toFixed(2)}</span>}
                     <span className="text-sm text-muted-foreground">/mo</span>
                   </div>
                 )}
 
-                <div className={cn("flex items-center gap-1.5 rounded-lg bg-[var(--gain)]/10 px-3 py-2 text-[var(--gain)]", promoActive ? "mt-3" : "mt-4")}>
-                  <Gift className="size-4 shrink-0" />
-                  <p className="text-sm font-semibold">{trialDays} days free, then ${price.toFixed(2)}/mo</p>
-                </div>
-                <p className="mt-1.5 px-1 text-xs text-muted-foreground">No charge today · cancel anytime before your trial ends</p>
+                {trialEligible ? (
+                  <>
+                    <div className={cn("flex items-center gap-1.5 rounded-lg bg-[var(--gain)]/10 px-3 py-2 text-[var(--gain)]", promoActive ? "mt-3" : "mt-4")}>
+                      <Gift className="size-4 shrink-0" />
+                      <p className="text-sm font-semibold">{trialDays} days free, then ${price.toFixed(2)}/mo</p>
+                    </div>
+                    <p className="mt-1.5 px-1 text-xs text-muted-foreground">No charge today · cancel anytime before your trial ends</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-muted px-3 py-2 text-foreground">
+                      <CalendarCheck className="size-4 shrink-0 text-primary" />
+                      <p className="text-sm font-semibold">
+                        {billing === "annual" ? `$${chargeToday.toFixed(2)} today for the year` : `$${chargeToday.toFixed(2)} today, then monthly`}
+                      </p>
+                    </div>
+                    <p className="mt-1.5 px-1 text-xs text-muted-foreground">Access starts right away · cancel anytime</p>
+                  </>
+                )}
 
                 <Button
                   onClick={() => onCheckout(plan.tier)}
@@ -192,7 +215,7 @@ export function PricingPlans() {
                   variant={plan.featured ? "default" : "outline"}
                   className={cn("mt-4 h-10", plan.featured && "bg-gradient-to-r from-violet-600 to-fuchsia-500")}
                 >
-                  {pending && loadingTier === plan.tier ? "Redirecting…" : plan.cta}
+                  {pending && loadingTier === plan.tier ? "Redirecting…" : trialEligible ? plan.cta : `Subscribe to ${plan.name}`}
                 </Button>
 
                 <div className="mt-6 flex-1 space-y-4">

@@ -1,10 +1,15 @@
 import { db } from "@/lib/db"
 import { subscriptions, user } from "@/lib/db/schema"
-import { desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm"
 
 // past_due keeps access during the grace period Whop gives a failed renewal
 // before it lapses to canceled/expired.
 const ACTIVE_STATUSES = ["active", "trialing", "past_due"]
+
+// A checkout the user has started but Whop hasn't confirmed yet (written by
+// lib/checkout.ts). Never grants access by itself — it only remembers which
+// Whop plan belongs to which user.
+export const PENDING_STATUS = "pending"
 
 // Site owner(s) always get full Pro access, independent of Whop — set in
 // .env.local as a comma-separated list.
@@ -46,6 +51,27 @@ export async function getUserPlan(userId: string): Promise<"pro" | "essential" |
   if (active.some((r) => r.plan === "pro")) return "pro"
   if (active.length > 0) return "essential"
   return null
+}
+
+// Whether this person has already had their free trial. Every Whop checkout
+// created for a first-time subscriber carries one, so any Whop membership
+// that ever existed for them — under this account, or under their email in
+// case they come back with a new account — means the trial is spent, however
+// it ended. Pending rows are checkouts that were never completed, and admin
+// grants aren't trials, so neither counts.
+export async function hasUsedTrial(userId: string, email: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.source, "whop"),
+        ne(subscriptions.status, PENDING_STATUS),
+        or(eq(subscriptions.userId, userId), sql`lower(${subscriptions.email}) = ${email.toLowerCase()}`)
+      )
+    )
+    .limit(1)
+  return row != null
 }
 
 export async function isPro(userId: string): Promise<boolean> {

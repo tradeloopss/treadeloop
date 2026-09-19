@@ -6,8 +6,8 @@ import { subscriptions } from "@/lib/db/schema"
 import { and, desc, eq, ne } from "drizzle-orm"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
-import { createCheckout, confirmPendingCheckouts, PENDING_STATUS } from "@/lib/checkout"
-import { getUserPlan } from "@/lib/subscription"
+import { createCheckout, confirmPendingCheckouts } from "@/lib/checkout"
+import { getUserPlan, PENDING_STATUS } from "@/lib/subscription"
 import type { PlanTier, Billing } from "@/lib/whop"
 
 async function getSession() {
