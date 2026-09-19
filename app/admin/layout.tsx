@@ -20,6 +20,7 @@ const SECTIONS: (NavItem & { needs: Permissions })[] = [
   { href: "/admin/analytics", label: "Analytics", icon: "analytics", needs: { analytics: ["view"] } },
   { href: "/admin/security", label: "Security", icon: "security", needs: { security: ["view"] } },
   { href: "/admin/announcements", label: "Announcements", icon: "announcements", needs: { announcements: ["manage"] } },
+  { href: "/admin/templates", label: "Content", icon: "content", needs: { announcements: ["manage"] } },
   { href: "/admin/audit", label: "Audit log", icon: "audit", needs: { audit: ["view"] } },
   { href: "/admin/team", label: "Team & roles", icon: "team", needs: { team: ["manage"] } },
 ]

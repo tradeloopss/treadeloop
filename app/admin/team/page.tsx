@@ -10,7 +10,7 @@ const ROLE_SUMMARY: [string, string][] = [
   ["Super Admin", "Everything: users, billing, brokers, announcements, audit log and the team."],
   ["Support", "View users, log in as them, suspend and sign them out, view billing, force broker syncs."],
   ["Billing Manager", "View users and revenue, grant and revoke free plans."],
-  ["Content", "Publish and turn off announcements."],
+  ["Content", "Announcements, starter tags and playbooks, and taking down public share links."],
 ]
 
 export default async function AdminTeamPage() {

@@ -481,3 +481,30 @@ export const syncRuns = pgTable(
   },
   (t) => [index("sync_runs_created_idx").on(t.createdAt), index("sync_runs_connection_idx").on(t.broker, t.connectionId)]
 )
+
+// Tags and playbooks every new user starts with, editable from the admin
+// panel. Copied into the user's own rows on their first sign-in
+// (lib/starter-templates.ts), so later edits here don't touch existing users.
+export const starterTagGroups = pgTable("starter_tag_groups", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  color: text("color").notNull().default("violet"),
+  options: jsonb("options").$type<string[]>().notNull().default([]),
+  sortOrder: integer("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+export const starterPlaybooks = pgTable("starter_playbooks", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  rules: jsonb("rules").$type<string[]>().notNull().default([]),
+  sortOrder: integer("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+// Set once the starter templates have been copied for a user.
+export const userOnboarding = pgTable("user_onboarding", {
+  userId: text("userId").primaryKey(),
+  seededAt: timestamp("seededAt").notNull().defaultNow(),
+})

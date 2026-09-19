@@ -738,3 +738,37 @@ export async function getBillingRisks() {
     order by s."currentPeriodEnd" nulls last limit 50
   `)
 }
+
+// --- Content ---------------------------------------------------------------------------
+
+export async function listStarterTemplates() {
+  const [groups, books] = await Promise.all([
+    q<{ id: number; name: string; color: string; options: string[]; sortOrder: number }>(`select id, name, color, options, "sortOrder" from starter_tag_groups order by "sortOrder", id`),
+    q<{ id: number; name: string; description: string | null; rules: string[]; sortOrder: number }>(`select id, name, description, rules, "sortOrder" from starter_playbooks order by "sortOrder", id`),
+  ])
+  const [seeded] = await q(`select count(*) from user_onboarding`)
+  return { groups, books, seededUsers: n(seeded.count) }
+}
+
+export type PublicShare = { kind: "playbook" | "trade" | "daily" | "payout"; id: number; userId: string; email: string | null; label: string; token: string; createdAt: Date }
+
+// Every live public link, newest first. Tokens are shown so staff can open
+// the page a visitor would see.
+export async function listPublicShares(limit = 200): Promise<PublicShare[]> {
+  return q<PublicShare>(
+    `select * from (
+      select 'playbook' as kind, p.id, p."userId", u.email, 'Playbook: ' || p.name as label, p."shareToken" as token, p."createdAt"
+        from playbooks p left join "user" u on u.id = p."userId" where p."shareToken" is not null
+      union all
+      select 'trade', t.id, t."userId", u.email, 'Trade: ' || t.symbol || ' ' || t.side, t."shareToken", t."createdAt"
+        from trades t left join "user" u on u.id = t."userId" where t."shareToken" is not null
+      union all
+      select 'daily', d.id, d."userId", u.email, case when d.period = 'weekly' then 'Weekly P&L: ' else 'Daily P&L: ' end || d.date, d.token, d."createdAt"
+        from daily_pnl_shares d left join "user" u on u.id = d."userId"
+      union all
+      select 'payout', s.id, s."userId", u.email, 'Payout certificate: ' || s."periodStart", s.token, s."createdAt"
+        from payout_shares s left join "user" u on u.id = s."userId"
+    ) x order by "createdAt" desc limit $1`,
+    [limit]
+  )
+}

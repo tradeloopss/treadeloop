@@ -12,6 +12,7 @@ import { SubscriptionPaywall } from "@/components/subscription-paywall"
 import { AnnouncementBanners } from "@/components/announcement-banners"
 import { ImpersonationBanner } from "@/components/impersonation-banner"
 import { CrispChat } from "@/components/crisp-chat"
+import { seedStarterTemplates } from "@/lib/starter-templates"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -23,8 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // they're subscribing to. The blurred layer is inert — aria-hidden and
   // pointer-events-none — so nothing behind the paywall is clickable or
   // reachable by keyboard.
-  const [plan, live] = await Promise.all([
+  const [plan, , live] = await Promise.all([
     getUserPlan(session.user.id),
+    // Starter tags/playbooks on the first visit (no-op after that).
+    session.session.impersonatedBy ? Promise.resolve() : seedStarterTemplates(session.user.id),
     db
       .select({ id: announcements.id, message: announcements.message, level: announcements.level })
       .from(announcements)

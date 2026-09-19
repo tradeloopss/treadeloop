@@ -4,10 +4,10 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { after } from "next/server"
 import { revalidatePath } from "next/cache"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { announcements, importEvents, rithmicConnections, subscriptions, supportMessages, supportTickets, twoFactor, user } from "@/lib/db/schema"
+import { announcements, dailyPnlShares, importEvents, payoutShares, playbooks, rithmicConnections, starterPlaybooks, starterTagGroups, subscriptions, supportMessages, supportTickets, trades, twoFactor, user } from "@/lib/db/schema"
 import { assertAdmin } from "@/lib/admin/guard"
 import { logAdminAction } from "@/lib/admin/audit"
 import { isAdminRole, type AdminRole } from "@/lib/admin/access"
@@ -443,5 +443,95 @@ export async function deleteWhopPromoCode(id: string, code: string | null) {
     const admin = await assertAdmin({ billing: ["manage"] })
     await whop.deletePromoCode(id)
     await logAdminAction(admin, "billing.promo_delete", null, { id, code })
+  })
+}
+
+// --- Starter templates ------------------------------------------------------------
+
+function cleanList(values: string[], max: number, what: string) {
+  const list = values.map((v) => v.trim()).filter(Boolean)
+  if (list.length > max) throw new Error(`Keep ${what} to ${max} or fewer.`)
+  if (list.some((v) => v.length > 80)) throw new Error(`Each ${what.replace(/s$/, "")} is at most 80 characters.`)
+  return [...new Set(list)]
+}
+
+export async function saveStarterTagGroup(input: { id: number | null; name: string; color: string; options: string[] }) {
+  return run(async () => {
+    const admin = await assertAdmin({ announcements: ["manage"] })
+    const name = input.name.trim()
+    if (!name || name.length > 60) throw new Error("Give the group a name (up to 60 characters).")
+    const options = cleanList(input.options, 30, "tags")
+    const color = /^[a-z]+$/.test(input.color) ? input.color : "violet"
+    if (input.id) {
+      await db.update(starterTagGroups).set({ name, color, options }).where(eq(starterTagGroups.id, input.id))
+    } else {
+      const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(starterTagGroups)
+      await db.insert(starterTagGroups).values({ name, color, options, sortOrder: Number(count) })
+    }
+    await logAdminAction(admin, "templates.tag_group", null, { id: input.id, name, options: options.length })
+    revalidatePath("/admin/templates")
+  })
+}
+
+export async function deleteStarterTagGroup(id: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ announcements: ["manage"] })
+    const [row] = await db.delete(starterTagGroups).where(eq(starterTagGroups.id, id)).returning({ name: starterTagGroups.name })
+    if (!row) throw new Error("Not found")
+    await logAdminAction(admin, "templates.tag_group_delete", null, { id, name: row.name })
+  })
+}
+
+export async function saveStarterPlaybook(input: { id: number | null; name: string; description: string; rules: string[] }) {
+  return run(async () => {
+    const admin = await assertAdmin({ announcements: ["manage"] })
+    const name = input.name.trim()
+    if (!name || name.length > 80) throw new Error("Give the playbook a name (up to 80 characters).")
+    const description = input.description.trim().slice(0, 500) || null
+    const rules = cleanList(input.rules, 20, "rules")
+    if (input.id) {
+      await db.update(starterPlaybooks).set({ name, description, rules }).where(eq(starterPlaybooks.id, input.id))
+    } else {
+      const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(starterPlaybooks)
+      await db.insert(starterPlaybooks).values({ name, description, rules, sortOrder: Number(count) })
+    }
+    await logAdminAction(admin, "templates.playbook", null, { id: input.id, name, rules: rules.length })
+    revalidatePath("/admin/templates")
+  })
+}
+
+export async function deleteStarterPlaybook(id: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ announcements: ["manage"] })
+    const [row] = await db.delete(starterPlaybooks).where(eq(starterPlaybooks.id, id)).returning({ name: starterPlaybooks.name })
+    if (!row) throw new Error("Not found")
+    await logAdminAction(admin, "templates.playbook_delete", null, { id, name: row.name })
+  })
+}
+
+// --- Public share moderation -----------------------------------------------------
+
+// Turns off one public link. The owner can share again; this just kills the
+// current URL.
+export async function disableShare(kind: "playbook" | "trade" | "daily" | "payout", id: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ announcements: ["manage"] })
+    let userId: string | null = null
+    if (kind === "playbook") {
+      const [row] = await db.update(playbooks).set({ shareToken: null }).where(eq(playbooks.id, id)).returning({ userId: playbooks.userId })
+      userId = row?.userId ?? null
+    } else if (kind === "trade") {
+      const [row] = await db.update(trades).set({ shareToken: null }).where(eq(trades.id, id)).returning({ userId: trades.userId })
+      userId = row?.userId ?? null
+    } else if (kind === "daily") {
+      const [row] = await db.delete(dailyPnlShares).where(eq(dailyPnlShares.id, id)).returning({ userId: dailyPnlShares.userId })
+      userId = row?.userId ?? null
+    } else {
+      const [row] = await db.delete(payoutShares).where(eq(payoutShares.id, id)).returning({ userId: payoutShares.userId })
+      userId = row?.userId ?? null
+    }
+    if (!userId) throw new Error("Share not found")
+    await logAdminAction(admin, "share.disable", userId, { kind, id })
+    return "Link disabled."
   })
 }

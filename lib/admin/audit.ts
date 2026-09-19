@@ -31,6 +31,11 @@ export const ACTION_LABELS: Record<string, string> = {
   "billing.extend": "Extended a subscription",
   "billing.promo_create": "Created promo code",
   "billing.promo_delete": "Deleted promo code",
+  "templates.tag_group": "Saved starter tag group",
+  "templates.tag_group_delete": "Deleted starter tag group",
+  "templates.playbook": "Saved starter playbook",
+  "templates.playbook_delete": "Deleted starter playbook",
+  "share.disable": "Disabled a public share link",
 }
 
 export async function logAdminAction(
