@@ -52,13 +52,13 @@ export function renewalPriceFor(plan: PlanTier, billing: Billing): { amount: num
 
 // Whop requires an existing product for a dynamically-created renewal plan
 // ("you must pass in product details") — it won't create one inline from
-// just a title. These are the two products already set up in the Whop
-// dashboard (from the checkout links originally shared: .../essentials-8c
-// and .../pro-fa-b247), resolved to their prod_ id by route slug and cached
-// per server process since they never change.
+// just a title. These are the two products in the "Tradeloop" Whop company
+// (biz_ncEDz95gP2drt0), which is the company WHOP_API_KEY belongs to — a
+// key can only create checkouts for its own company's products. Resolved
+// to their prod_ id by route slug and cached per server process.
 const PRODUCT_ROUTE_BY_TIER: Record<PlanTier, string> = {
-  essential: "essentials-8c",
-  pro: "pro-fa-b247",
+  essential: "tradeloop-e7",
+  pro: "tradeloop-3c",
 }
 
 const cachedProductIds: Partial<Record<PlanTier, string>> = {}

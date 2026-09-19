@@ -31,7 +31,7 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T> {
 let accountIdCache: string | null = null
 export async function whopAccountId(): Promise<string> {
   if (accountIdCache) return accountIdCache
-  const product = await guarded(() => getWhopClient().products.retrieve({ id: "pro-fa-b247" }))
+  const product = await guarded(() => getWhopClient().products.retrieve({ id: "tradeloop-3c" }))
   const id = (product as { account?: { id?: string } }).account?.id
   if (!id) throw new Error("Couldn't determine the Whop company id from the Pro product.")
   accountIdCache = id
