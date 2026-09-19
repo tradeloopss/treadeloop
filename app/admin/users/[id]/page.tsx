@@ -4,13 +4,13 @@ import { ArrowLeft } from "lucide-react"
 import { requireAdmin } from "@/lib/admin/guard"
 import { roleCan, ROLE_LABELS, isAdminRole } from "@/lib/admin/access"
 import { ACTION_LABELS } from "@/lib/admin/audit"
-import { getUserProfile, listSecurityEvents, listUserTickets } from "@/lib/admin/metrics"
+import { getUserProfile, getUserStorage, listImports, listSecurityEvents, listSyncRuns, listUserTickets } from "@/lib/admin/metrics"
 import { SecurityEventsTable } from "@/components/admin/security-events-table"
 import { TicketStatus } from "@/components/ticket-status"
 import { isOwnerEmail, rowGrantsAccess } from "@/lib/subscription"
 import { UserActions } from "@/components/admin/user-actions"
 import { ForceSyncButton, RevokeGrantButton } from "@/components/admin/row-actions"
-import { EmptyRow, Panel, StatePill, SyncStatus, fmtAgo, fmtDate, fmtDateTime } from "@/components/admin/ui"
+import { EmptyRow, Panel, StatePill, SyncStatus, fmtAgo, fmtBytes, fmtDate, fmtDateTime } from "@/components/admin/ui"
 
 const PROVIDER_LABELS: Record<string, string> = { credential: "Email & password", google: "Google", github: "GitHub" }
 
@@ -34,9 +34,12 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   if (!profile) notFound()
   const canSecurity = roleCan(admin.role, { security: ["view"] })
   const canSupport = roleCan(admin.role, { support: ["view"] })
-  const [security, tickets] = await Promise.all([
+  const [security, tickets, storage, imports, syncRuns] = await Promise.all([
     canSecurity ? listSecurityEvents({ userId: id, limit: 15 }) : Promise.resolve(null),
     canSupport ? listUserTickets(id) : Promise.resolve([]),
+    getUserStorage(id),
+    listImports({ userId: id, limit: 10 }),
+    listSyncRuns({ userId: id, limit: 10 }),
   ])
   const { user, counts } = profile
 
@@ -112,7 +115,10 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
               </div>
             ))}
           </dl>
-          <p className="mt-4 text-xs text-muted-foreground">Last trade logged {fmtAgo(counts.lastTrade)}.</p>
+          <p className="mt-4 text-xs text-muted-foreground">
+            Last trade logged {fmtAgo(counts.lastTrade)}. Storage {fmtBytes(storage.total)}
+            {storage.total > 0 && ` (trades ${fmtBytes(storage.trades)}, journal ${fmtBytes(storage.journal)}, imports ${fmtBytes(storage.imports)})`}.
+          </p>
         </Panel>
 
         <Panel title="Connected brokers" className="xl:col-span-2">
@@ -196,6 +202,45 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
               </li>
             ))}
             {profile.sessions.length === 0 && <li className="py-6 text-center text-muted-foreground">No sessions on record.</li>}
+          </ul>
+        </Panel>
+
+        <Panel title="File imports" description="CSV and report uploads, newest first.">
+          <ul className="divide-y text-sm">
+            {imports.map((i) => (
+              <li key={i.id} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0">
+                  <span className="block truncate">{i.fileName ?? "(unnamed file)"}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {i.source ?? "Unrecognized"} · {fmtAgo(i.createdAt)}
+                    {i.status === "imported" ? ` · ${i.imported} new, ${i.duplicates} duplicates` : ` · ${i.error}`}
+                  </span>
+                </span>
+                <StatePill state={i.status === "imported" ? "active" : i.resolvedAt ? "inactive" : "suspended"}>
+                  {i.status === "imported" ? "Imported" : i.resolvedAt ? "Handled" : "Failed"}
+                </StatePill>
+              </li>
+            ))}
+            {imports.length === 0 && <li className="py-6 text-center text-muted-foreground">No file imports.</li>}
+          </ul>
+        </Panel>
+
+        <Panel title="Broker sync runs" description="Latest sync attempts for this user's connections.">
+          <ul className="divide-y text-sm">
+            {syncRuns.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0">
+                  <span className="block">
+                    {r.broker === "rithmic" ? "Rithmic" : "MetaTrader"} · {r.trigger === "auto" ? "background" : r.trigger}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {fmtAgo(r.createdAt)}{r.status === "ok" ? ` · ${r.imported ?? 0} new` : ` · ${r.error}`}
+                  </span>
+                </span>
+                <StatePill state={r.status === "ok" ? "active" : "suspended"}>{r.status === "ok" ? "OK" : "Error"}</StatePill>
+              </li>
+            ))}
+            {syncRuns.length === 0 && <li className="py-6 text-center text-muted-foreground">No sync runs recorded.</li>}
           </ul>
         </Panel>
 

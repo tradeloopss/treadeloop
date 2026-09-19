@@ -19,6 +19,10 @@ export const ACTION_LABELS: Record<string, string> = {
   "user.send_password_reset": "Sent password reset email",
   "support.reply": "Replied to support request",
   "support.status": "Changed support request status",
+  "import.retry": "Retried failed import",
+  "import.dismiss": "Dismissed failed import",
+  "import.download": "Downloaded an imported file",
+  "broker.mass_sync": "Re-synced all connections",
 }
 
 export async function logAdminAction(

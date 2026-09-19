@@ -11,6 +11,7 @@ import { provisionAccount, fetchAccountSnapshot, searchServers, type MtPlatform,
 import { computePnl } from "@/lib/calc"
 import { regenerateJournalForDay } from "@/app/actions/trades"
 import { requirePro } from "@/lib/subscription"
+import { recordSyncRun } from "@/lib/sync-runs"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -130,7 +131,7 @@ export async function connectMetaTrader(formData: FormData) {
 
   // Pull the account's current balance and trade history right away, rather
   // than leaving the account at its default $0 balance until a manual sync.
-  await syncMetaTrader(connectionId).catch(() => {})
+  await syncMetaTrader(connectionId, "connect").catch(() => {})
 
   revalidatePath("/settings")
 }
@@ -143,7 +144,7 @@ export async function disconnectMetaTrader(connectionId: number) {
   revalidatePath("/settings")
 }
 
-export async function syncMetaTrader(connectionId: number) {
+export async function syncMetaTrader(connectionId: number, trigger: "manual" | "connect" = "manual") {
   const userId = await getUserId()
   const [connection] = await db
     .select()
@@ -154,6 +155,7 @@ export async function syncMetaTrader(connectionId: number) {
     throw new Error("Your MetaTrader connection has expired — reconnect to keep syncing")
   }
 
+  const startedAt = Date.now()
   try {
     const token = decrypt(connection.tokenEnc)
     const from = connection.lastSyncFrom ?? new Date(0)
@@ -226,8 +228,10 @@ export async function syncMetaTrader(connectionId: number) {
     revalidatePath("/reports")
     revalidatePath("/settings")
 
+    await recordSyncRun({ broker: "metatrader", connectionId, userId, trigger, startedAt, imported: toImport.length })
     return { imported: toImport.length }
   } catch (err) {
+    await recordSyncRun({ broker: "metatrader", connectionId, userId, trigger, startedAt, error: err })
     await db
       .update(metatraderConnections)
       .set({ lastSyncStatus: "error", lastSyncError: err instanceof Error ? err.message : "Sync failed" })

@@ -10,6 +10,7 @@ import { fetchRithmicFills } from "@/lib/rithmic-client"
 import { reconstructTrades, type ParsedFill } from "@/lib/fill-reconstruction"
 import { computePnl, contractMultiplierForSymbol } from "@/lib/calc"
 import { regenerateJournalForDay } from "@/app/actions/trades"
+import { recordSyncRun, type SyncTrigger } from "@/lib/sync-runs"
 
 export type RithmicConnectionRow = typeof rithmicConnections.$inferSelect
 
@@ -80,7 +81,8 @@ export async function importFillsForConnection(
 // auto-sync job calls this outside any request context. Callers that DO
 // have a session (the manual "Sync now" button) are responsible for
 // verifying the connection belongs to the caller before invoking this.
-export async function syncRithmicConnection(connection: RithmicConnectionRow): Promise<{ imported: number }> {
+export async function syncRithmicConnection(connection: RithmicConnectionRow, trigger: SyncTrigger = "auto"): Promise<{ imported: number }> {
+  const startedAt = Date.now()
   try {
     const password = decrypt(connection.passwordEnc)
     // Always re-pull full history rather than fetching since the last sync:
@@ -98,12 +100,14 @@ export async function syncRithmicConnection(connection: RithmicConnectionRow): P
     )
 
     const imported = await importFillsForConnection(connection.userId, connection.id, connection.accountId!, fills)
+    await recordSyncRun({ broker: "rithmic", connectionId: connection.id, userId: connection.userId, trigger, startedAt, imported })
     return { imported }
   } catch (err) {
     await db
       .update(rithmicConnections)
       .set({ lastSyncStatus: "error", lastSyncError: err instanceof Error ? err.message : "Sync failed" })
       .where(eq(rithmicConnections.id, connection.id))
+    await recordSyncRun({ broker: "rithmic", connectionId: connection.id, userId: connection.userId, trigger, startedAt, error: err })
     throw err
   }
 }

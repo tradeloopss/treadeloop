@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
 import { discoverAccountsAndFills, listRithmicSystems } from "@/lib/rithmic-client"
 import { importFillsForConnection, syncRithmicConnection } from "@/lib/rithmic-sync"
+import { recordSyncRun } from "@/lib/sync-runs"
 import { requirePro } from "@/lib/subscription"
 import { matchFirmFromSystemName, defaultPresetForFirm } from "@/lib/propfirm-auto-detect"
 
@@ -161,9 +162,14 @@ export async function connectRithmic(formData: FormData) {
     }
 
     const fills = fillsByAccountId.get(account.accountId) ?? []
-    await importFillsForConnection(userId, connectionId, accountId, fills).catch((err) => {
-      console.error("Rithmic initial import failed", err)
-    })
+    const startedAt = Date.now()
+    await importFillsForConnection(userId, connectionId, accountId, fills).then(
+      (imported) => recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, imported }),
+      (err) => {
+        console.error("Rithmic initial import failed", err)
+        return recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, error: err })
+      }
+    )
   }
 
   revalidatePath("/settings")
@@ -188,7 +194,7 @@ export async function syncRithmic(connectionId: number) {
     .where(and(eq(rithmicConnections.id, connectionId), eq(rithmicConnections.userId, userId)))
   if (!connection) throw new Error("Connection not found")
 
-  const result = await syncRithmicConnection(connection)
+  const result = await syncRithmicConnection(connection, "manual")
 
   revalidatePath("/dashboard")
   revalidatePath("/trades")

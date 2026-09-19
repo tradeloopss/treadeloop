@@ -436,3 +436,48 @@ export const supportMessages = pgTable(
   },
   (t) => [index("support_messages_ticket_idx").on(t.ticketId)]
 )
+
+// One row per CSV/report import attempt (app/actions/broker.ts). Failed
+// attempts keep the uploaded file (up to 2 MB) so staff can see what the
+// broker exported and re-run the import once the parser is fixed.
+export const importEvents = pgTable(
+  "import_events",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    source: text("source"), // Tradovate | NinjaTrader | MetaTrader 4/5 | null when unrecognized
+    fileName: text("fileName"),
+    fileSize: integer("fileSize"),
+    status: text("status").notNull(), // imported | failed
+    totalRows: integer("totalRows"),
+    skippedRows: integer("skippedRows"),
+    imported: integer("imported"),
+    duplicates: integer("duplicates"),
+    error: text("error"),
+    accountId: integer("accountId"),
+    fileContent: text("fileContent"),
+    retryOf: integer("retryOf"),
+    resolvedAt: timestamp("resolvedAt"), // a failure staff retried or dismissed
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("import_events_created_idx").on(t.createdAt), index("import_events_user_idx").on(t.userId)]
+)
+
+// Every broker sync attempt — background, the user's "Sync now", an admin's
+// forced or mass re-sync, and the first sync on connect (lib/sync-runs.ts).
+export const syncRuns = pgTable(
+  "sync_runs",
+  {
+    id: serial("id").primaryKey(),
+    broker: text("broker").notNull(), // rithmic | metatrader
+    connectionId: integer("connectionId").notNull(),
+    userId: text("userId").notNull(),
+    trigger: text("trigger").notNull(), // auto | manual | admin | connect
+    status: text("status").notNull(), // ok | error
+    imported: integer("imported"),
+    error: text("error"),
+    durationMs: integer("durationMs"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("sync_runs_created_idx").on(t.createdAt), index("sync_runs_connection_idx").on(t.broker, t.connectionId)]
+)

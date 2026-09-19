@@ -1,6 +1,7 @@
 import { pool } from "@/lib/db"
 import { ownerEmails } from "@/lib/subscription"
 import { PLAN_PRICING, type PlanTier } from "@/lib/whop"
+import { RATE_LIMIT_PATTERN } from "@/lib/sync-runs"
 
 // Read-only queries behind the admin pages. Raw SQL because these are
 // aggregates across many tables; every value comes from real rows.
@@ -560,4 +561,125 @@ export async function listUserTickets(userId: string) {
     `select id, subject, status, "lastMessageAt" from support_tickets where "userId" = $1 order by "lastMessageAt" desc limit 20`,
     [userId]
   )
+}
+
+// --- Imports ---------------------------------------------------------------------------
+
+export type ImportRow = {
+  id: number
+  userId: string
+  email: string | null
+  source: string | null
+  fileName: string | null
+  fileSize: number | null
+  status: string
+  totalRows: number | null
+  imported: number | null
+  duplicates: number | null
+  error: string | null
+  hasFile: boolean
+  header: string | null
+  retryOf: number | null
+  resolvedAt: Date | null
+  createdAt: Date
+}
+
+const IMPORT_COLUMNS = `i.id, i."userId", u.email, i.source, i."fileName", i."fileSize", i.status, i."totalRows", i.imported, i.duplicates, i.error,
+  i."fileContent" is not null as "hasFile", left(split_part(i."fileContent", E'\n', 1), 200) as header, i."retryOf", i."resolvedAt", i."createdAt"`
+
+export async function getImportStats() {
+  const [totals] = await q(`
+    select count(*) as total,
+      count(*) filter (where status = 'failed') as failed,
+      count(*) filter (where status = 'failed' and "resolvedAt" is null) as open_failures,
+      coalesce(sum(imported), 0) as trades
+    from import_events where "createdAt" > now() - interval '7 days'
+  `)
+  const bySource = await q<{ source: string; total: string; failed: string }>(`
+    select coalesce(source, 'Unrecognized') as source, count(*) as total, count(*) filter (where status = 'failed') as failed
+    from import_events where "createdAt" > now() - interval '30 days' group by 1 order by 2 desc
+  `)
+  return { total7d: n(totals.total), failed7d: n(totals.failed), openFailures: n(totals.open_failures), trades7d: n(totals.trades), bySource }
+}
+
+export async function listImports(opts: { failedOnly?: boolean; userId?: string; limit?: number }) {
+  const params: unknown[] = []
+  const where: string[] = []
+  if (opts.failedOnly) where.push(`i.status = 'failed' and i."resolvedAt" is null`)
+  if (opts.userId) {
+    params.push(opts.userId)
+    where.push(`i."userId" = $${params.length}`)
+  }
+  return q<ImportRow>(
+    `select ${IMPORT_COLUMNS} from import_events i left join "user" u on u.id = i."userId"
+     ${where.length ? `where ${where.join(" and ")}` : ""} order by i."createdAt" desc limit ${opts.limit ?? 50}`,
+    params
+  )
+}
+
+export async function getImportFile(id: number) {
+  const [row] = await q<{ fileName: string | null; fileContent: string | null; userId: string }>(
+    `select "fileName", "fileContent", "userId" from import_events where id = $1`,
+    [id]
+  )
+  return row ?? null
+}
+
+// --- Sync jobs ----------------------------------------------------------------------------
+
+export async function getSyncStats() {
+  const perBroker = await q<{ broker: string; runs: string; failed: string; imported: string; avg_ms: string | null; last_auto: Date | null }>(`
+    select broker, count(*) as runs, count(*) filter (where status = 'error') as failed, coalesce(sum(imported), 0) as imported,
+      round(avg("durationMs")) as avg_ms, max("createdAt") filter (where trigger = 'auto') as last_auto
+    from sync_runs where "createdAt" > now() - interval '24 hours' group by broker
+  `)
+  const recentErrors = await q<{ error: string }>(`select error from sync_runs where status = 'error' and "createdAt" > now() - interval '24 hours'`)
+  const [heartbeat] = await q<{ last: Date | null }>(`select max("createdAt") as last from sync_runs where trigger = 'auto'`)
+  return {
+    perBroker: perBroker.map((b) => ({
+      broker: b.broker,
+      runs: n(b.runs),
+      failed: n(b.failed),
+      imported: n(b.imported),
+      avgMs: b.avg_ms == null ? null : n(b.avg_ms),
+    })),
+    rateLimited24h: recentErrors.filter((e) => RATE_LIMIT_PATTERN.test(e.error ?? "")).length,
+    lastAutoRun: heartbeat?.last ?? null,
+  }
+}
+
+export async function listSyncRuns(opts: { status?: string; userId?: string; limit?: number }) {
+  const params: unknown[] = []
+  const where: string[] = []
+  if (opts.status === "error") where.push(`r.status = 'error'`)
+  if (opts.userId) {
+    params.push(opts.userId)
+    where.push(`r."userId" = $${params.length}`)
+  }
+  return q<{ id: number; broker: string; connectionId: number; userId: string; email: string | null; trigger: string; status: string; imported: number | null; error: string | null; durationMs: number | null; createdAt: Date }>(
+    `select r.id, r.broker, r."connectionId", r."userId", u.email, r.trigger, r.status, r.imported, r.error, r."durationMs", r."createdAt"
+     from sync_runs r left join "user" u on u.id = r."userId"
+     ${where.length ? `where ${where.join(" and ")}` : ""} order by r."createdAt" desc limit ${opts.limit ?? 50}`,
+    params
+  )
+}
+
+// --- Storage -----------------------------------------------------------------------------
+
+// Bytes each part of a user's data takes on disk (row sizes; indexes not
+// counted). TradeLoop stores no uploaded files besides failed imports.
+export async function getUserStorage(userId: string) {
+  const [row] = await q(
+    `select
+      (select coalesce(sum(pg_column_size(t.*)), 0) from trades t where t."userId" = $1) as trades,
+      (select coalesce(sum(pg_column_size(j.*)), 0) from journal_entries j where j."userId" = $1) as journal,
+      (select coalesce(sum(pg_column_size(p.*)), 0) from playbooks p where p."userId" = $1) as playbooks,
+      (select coalesce(sum(pg_column_size(a.*)), 0) from trading_accounts a where a."userId" = $1)
+        + (select coalesce(sum(pg_column_size(r.*)), 0) from prop_firm_rules r where r."userId" = $1)
+        + (select coalesce(sum(pg_column_size(x.*)), 0) from prop_firm_transactions x where x."userId" = $1) as accounts,
+      (select coalesce(sum(pg_column_size(i.*)), 0) from import_events i where i."userId" = $1) as imports`,
+    [userId]
+  )
+  const parts = { trades: n(row.trades), journal: n(row.journal), playbooks: n(row.playbooks), accounts: n(row.accounts), imports: n(row.imports) }
+  return { ...parts, total: Object.values(parts).reduce((a, b) => a + b, 0) }
 }

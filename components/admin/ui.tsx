@@ -12,6 +12,13 @@ export const fmtMoney = (value: number) => (Math.abs(value) >= 100_000 ? `$${com
 export const fmtPercent = (value: number | null) =>
   value == null ? "—" : value === 0 ? "0%" : `${(value * 100).toFixed(value < 0.1 ? 1 : 0)}%`
 
+export function fmtBytes(bytes: number | null | undefined) {
+  if (bytes == null) return "—"
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+}
+
 export function fmtDate(value: Date | string | null | undefined) {
   if (!value) return "—"
   return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })

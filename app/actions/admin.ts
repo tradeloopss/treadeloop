@@ -2,17 +2,19 @@
 
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
+import { after } from "next/server"
 import { revalidatePath } from "next/cache"
 import { and, eq } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { announcements, rithmicConnections, subscriptions, supportMessages, supportTickets, twoFactor, user } from "@/lib/db/schema"
+import { announcements, importEvents, rithmicConnections, subscriptions, supportMessages, supportTickets, twoFactor, user } from "@/lib/db/schema"
 import { assertAdmin } from "@/lib/admin/guard"
 import { logAdminAction } from "@/lib/admin/audit"
 import { isAdminRole, type AdminRole } from "@/lib/admin/access"
 import { isOwnerEmail } from "@/lib/subscription"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
 import { sendEmail } from "@/lib/email"
+import { importCsvText, logImport } from "@/lib/trade-importer"
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -170,7 +172,7 @@ export async function forceRithmicSync(connectionId: number) {
     const [connection] = await db.select().from(rithmicConnections).where(eq(rithmicConnections.id, connectionId))
     if (!connection) throw new Error("Connection not found")
     try {
-      const { imported } = await syncRithmicConnection(connection)
+      const { imported } = await syncRithmicConnection(connection, "admin")
       await logAdminAction(admin, "broker.force_sync", connection.userId, { connectionId, broker: "rithmic", imported })
       return `Sync finished — ${imported} new trade${imported === 1 ? "" : "s"} imported.`
     } catch (err) {
@@ -275,5 +277,59 @@ export async function setTicketStatus(ticketId: number, status: "open" | "waitin
     const [ticket] = await db.update(supportTickets).set({ status }).where(eq(supportTickets.id, ticketId)).returning({ userId: supportTickets.userId })
     if (!ticket) throw new Error("Request not found")
     await logAdminAction(admin, "support.status", ticket.userId, { ticketId, status })
+  })
+}
+
+// --- Imports & sync jobs ---------------------------------------------------------
+
+// Re-runs a failed import with today's parser, into the same user's account —
+// for when a broker changed its export format and the parser has since been
+// fixed. The original stays in the log, marked resolved.
+export async function retryImport(importId: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ brokers: ["sync"] })
+    const [event] = await db.select().from(importEvents).where(eq(importEvents.id, importId))
+    if (!event) throw new Error("Import not found")
+    if (event.status !== "failed" || !event.fileContent) throw new Error("Only failed imports with their file kept can be retried.")
+    try {
+      const result = await importCsvText(event.userId, event.fileContent, event.accountId)
+      await logImport({ userId: event.userId, fileName: event.fileName, csvText: event.fileContent, accountId: event.accountId, retryOf: importId, result })
+      await db.update(importEvents).set({ resolvedAt: new Date() }).where(eq(importEvents.id, importId))
+      await logAdminAction(admin, "import.retry", event.userId, { importId, ...result })
+      revalidatePath("/dashboard")
+      revalidatePath("/trades")
+      return `Imported ${result.imported} trade${result.imported === 1 ? "" : "s"} from ${result.source} (${result.duplicates} already there).`
+    } catch (err) {
+      await logImport({ userId: event.userId, fileName: event.fileName, csvText: event.fileContent, accountId: event.accountId, retryOf: importId, error: err })
+      await logAdminAction(admin, "import.retry", event.userId, { importId, error: err instanceof Error ? err.message : String(err) })
+      throw new Error(`Still failing: ${err instanceof Error ? err.message : err}`)
+    }
+  })
+}
+
+export async function dismissImport(importId: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ brokers: ["sync"] })
+    const [event] = await db.update(importEvents).set({ resolvedAt: new Date() }).where(eq(importEvents.id, importId)).returning({ userId: importEvents.userId })
+    if (!event) throw new Error("Import not found")
+    await logAdminAction(admin, "import.dismiss", event.userId, { importId })
+  })
+}
+
+// Syncs every Rithmic connection one after another, after the response is
+// sent (bounded by the function's max duration; the background job picks up
+// anything left). Progress shows up in the sync-runs list as it goes.
+export async function resyncAllRithmic() {
+  return run(async () => {
+    const admin = await assertAdmin({ brokers: ["sync"] })
+    const connections = await db.select().from(rithmicConnections)
+    if (connections.length === 0) return "There are no Rithmic connections."
+    await logAdminAction(admin, "broker.mass_sync", null, { broker: "rithmic", connections: connections.length })
+    after(async () => {
+      for (const connection of connections) {
+        await syncRithmicConnection(connection, "admin").catch(() => {})
+      }
+    })
+    return `Re-syncing ${connections.length} Rithmic connection${connections.length === 1 ? "" : "s"} — results appear below as they finish.`
   })
 }
