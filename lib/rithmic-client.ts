@@ -45,12 +45,21 @@ const PROTO_FILES = [
   "response_rithmic_system_info.proto",
   "request_time_bar_replay.proto",
   "response_time_bar_replay.proto",
+  // Account balance / risk limits. These five are from the same SDK, via
+  // its public mirrors (github.com/rundef/async_rithmic), verified against
+  // Rithmic's sandbox before use.
+  "request_account_rms_info.proto",
+  "response_account_rms_info.proto",
+  "request_pnl_position_snapshot.proto",
+  "response_pnl_position_snapshot.proto",
+  "account_pnl_position_update.proto",
 ]
 
 // SysInfraType per request_login.proto's enum — which login a session is
 // for determines which request templates are valid on it.
 const ORDER_PLANT = 2
 const HISTORY_PLANT = 3
+const PNL_PLANT = 4
 
 let cachedRoot: protobuf.Root | null = null
 function getRoot(): protobuf.Root {
@@ -60,6 +69,10 @@ function getRoot(): protobuf.Root {
     const source = fs.readFileSync(path.join(PROTO_DIR, f), "utf8")
     protobuf.parse(source, root, { keepCase: false })
   }
+  // Every Rithmic message carries template_id in the same field, so a
+  // stream that mixes message types (the PnL snapshot) can be told apart
+  // before picking the full type to decode with.
+  protobuf.parse('syntax = "proto3"; package rti; message Base { int32 template_id = 154467; }', root, { keepCase: false })
   cachedRoot = root
   return root
 }
@@ -108,6 +121,30 @@ export interface RithmicAccount {
   ibId: string
   accountId: string
   accountName: string
+}
+
+// The risk limits Rithmic's RMS enforces on an account (ResponseAccountRmsInfo).
+// For a prop firm account the auto-liquidate threshold, where the firm sets
+// one, is the trailing-drawdown line the firm itself liquidates at.
+export interface RithmicAccountRms {
+  accountId: string
+  algorithm: string | null
+  lossLimit: number | null
+  minAccountBalance: number | null
+  autoLiquidateThreshold: number | null
+}
+
+// The account's money as Rithmic sees it right now (AccountPnLPositionUpdate
+// snapshot from the PnL plant). accountBalance is the settled balance the
+// firm's dashboard shows; open P&L is what's floating on open positions.
+export interface RithmicAccountSnapshot {
+  accountId: string
+  accountBalance: number
+  cashOnHand: number | null
+  openPositionPnl: number
+  closedPositionPnl: number
+  minAccountBalance: number | null
+  at: Date
 }
 
 async function connect(uri: string): Promise<WebSocket> {
@@ -215,9 +252,13 @@ async function withSession<T>(
   })
 }
 
-async function listAccountsInSession(ws: WebSocket, root: protobuf.Root): Promise<RithmicAccount[]> {
+async function fetchLoginInfo(ws: WebSocket, root: protobuf.Root): Promise<{ fcmId: string; ibId: string; userType: number }> {
   ws.send(encode(root, "RequestLoginInfo", { templateId: 300 }))
-  const loginInfo = decode(root, "ResponseLoginInfo", await waitForOne(ws))
+  return decode(root, "ResponseLoginInfo", await waitForOne(ws))
+}
+
+async function listAccountsInSession(ws: WebSocket, root: protobuf.Root, loginInfo?: { fcmId: string; ibId: string; userType: number }): Promise<RithmicAccount[]> {
+  loginInfo ??= await fetchLoginInfo(ws, root)
 
   ws.send(
     encode(root, "RequestAccountList", {
@@ -231,6 +272,110 @@ async function listAccountsInSession(ws: WebSocket, root: protobuf.Root): Promis
   return list
     .filter((a) => a.accountId)
     .map((a) => ({ fcmId: a.fcmId, ibId: a.ibId, accountId: a.accountId, accountName: a.accountName || a.accountId }))
+}
+
+// Rithmic sends absent numeric fields as 0/"" — for a threshold that's
+// "not set", not a real zero — so anything non-positive reads as unknown.
+function positiveOrNull(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+// RMS limits for every account under the login, in one request (template
+// 304/305, same order-plant session as the account list).
+async function fetchRmsInfoInSession(ws: WebSocket, root: protobuf.Root, loginInfo: { fcmId: string; ibId: string; userType: number }): Promise<Map<string, RithmicAccountRms>> {
+  ws.send(encode(root, "RequestAccountRmsInfo", { templateId: 304, fcmId: loginInfo.fcmId, ibId: loginInfo.ibId, userType: loginInfo.userType }))
+  const { list } = await collectUntilRpCode(root, ws, "ResponseAccountRmsInfo")
+  const byAccount = new Map<string, RithmicAccountRms>()
+  for (const r of list) {
+    if (!r.accountId) continue
+    byAccount.set(r.accountId, {
+      accountId: r.accountId,
+      algorithm: r.algorithm || null,
+      lossLimit: positiveOrNull(r.lossLimit),
+      minAccountBalance: positiveOrNull(r.minAccountBalance),
+      autoLiquidateThreshold: positiveOrNull(r.autoLiquidateThreshold),
+    })
+  }
+  return byAccount
+}
+
+// Collects every message up to and including the one whose template_id is
+// `terminalTemplateId`. Rithmic emits a response's messages back to back
+// within one tick, so the listener has to be in place before the request
+// goes out and stay on until the terminator — a one-shot listener re-armed
+// between messages misses the second one (which is how the PnL snapshot's
+// 403 terminator was being lost).
+function collectUntilTemplate(root: protobuf.Root, ws: WebSocket, terminalTemplateId: number, timeoutMs = 20000): Promise<{ list: WebSocket.RawData[]; terminal: WebSocket.RawData }> {
+  const Base = root.lookupType("Base")
+  return new Promise((resolve, reject) => {
+    const list: WebSocket.RawData[] = []
+    const timeout = setTimeout(() => {
+      ws.off("message", onMessage)
+      reject(new Error(`Timed out waiting for template ${terminalTemplateId}`))
+    }, timeoutMs)
+    const onMessage = (data: WebSocket.RawData) => {
+      const templateId = (Base.decode(data as Buffer) as unknown as { templateId: number }).templateId
+      if (templateId === terminalTemplateId) {
+        clearTimeout(timeout)
+        ws.off("message", onMessage)
+        resolve({ list, terminal: data })
+      } else {
+        list.push(data)
+      }
+    }
+    ws.on("message", onMessage)
+  })
+}
+
+// Current balance for each account. Lives on the PnL plant, which is a
+// separate login from the order plant, so this always opens its own
+// session (queued and spaced like every other one). RequestPnLPositionSnapshot
+// (402) answers with one AccountPnLPositionUpdate (451) per account plus an
+// InstrumentPnLPositionUpdate (450) per open position, then the 403 terminator.
+export async function fetchAccountSnapshots(
+  user: string,
+  password: string,
+  systemName: string,
+  gatewayUri: string,
+  accounts: Pick<RithmicAccount, "fcmId" | "ibId" | "accountId">[],
+): Promise<Map<string, RithmicAccountSnapshot>> {
+  if (accounts.length === 0) return new Map()
+  return withSession(
+    user,
+    password,
+    systemName,
+    gatewayUri,
+    async (ws, root) => {
+      const Base = root.lookupType("Base")
+      const snapshots = new Map<string, RithmicAccountSnapshot>()
+      for (const account of accounts) {
+        const collected = collectUntilTemplate(root, ws, 403)
+        ws.send(encode(root, "RequestPnLPositionSnapshot", { templateId: 402, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId }))
+        const { list, terminal } = await collected
+        const response = decode(root, "ResponsePnLPositionSnapshot", terminal)
+        if (response.rpCode.length > 0 && response.rpCode[0] !== "0" && response.rpCode[0] !== "7") {
+          throw new Error(`PnL snapshot request failed: ${response.rpCode.join(", ")}`)
+        }
+        for (const raw of list) {
+          if ((Base.decode(raw as Buffer) as unknown as { templateId: number }).templateId !== 451) continue
+          const m = decode(root, "AccountPnLPositionUpdate", raw)
+          if (!m.accountId || m.accountBalance == null || m.accountBalance === "") continue
+          snapshots.set(m.accountId, {
+            accountId: m.accountId,
+            accountBalance: Number(m.accountBalance),
+            cashOnHand: m.cashOnHand ? Number(m.cashOnHand) : null,
+            openPositionPnl: Number(m.openPositionPnl || 0),
+            closedPositionPnl: Number(m.closedPositionPnl || 0),
+            minAccountBalance: positiveOrNull(m.minAccountBalance),
+            at: new Date(),
+          })
+        }
+      }
+      return snapshots
+    },
+    PNL_PLANT,
+  )
 }
 
 export async function listRithmicAccounts(
@@ -299,6 +444,25 @@ export async function fetchRithmicFills(
   return withSession(user, password, systemName, gatewayUri, (ws, root) => fetchFillsInSession(ws, root, account, since))
 }
 
+// The periodic sync's order-plant session: fills plus the account's current
+// RMS limits, so the liquidation floor follows the trailing drawdown as it
+// moves rather than staying at whatever it was on connect.
+export async function fetchRithmicFillsAndRms(
+  user: string,
+  password: string,
+  systemName: string,
+  gatewayUri: string,
+  account: Pick<RithmicAccount, "fcmId" | "ibId" | "accountId">,
+  since: Date,
+): Promise<{ fills: ParsedFill[]; rms: RithmicAccountRms | undefined }> {
+  return withSession(user, password, systemName, gatewayUri, async (ws, root) => {
+    const fills = await fetchFillsInSession(ws, root, account, since)
+    const loginInfo = await fetchLoginInfo(ws, root)
+    const rms = await fetchRmsInfoInSession(ws, root, loginInfo).catch(() => new Map<string, RithmicAccountRms>())
+    return { fills, rms: rms.get(account.accountId) }
+  })
+}
+
 // Combined discovery + fill-fetch for the initial connect flow, in ONE
 // session. Rithmic (at least this account) rejects a second login attempted
 // right after a prior session closes in the same process — confirmed by
@@ -311,14 +475,21 @@ export async function discoverAccountsAndFills(
   systemName: string,
   gatewayUri: string,
   since: Date,
-): Promise<{ accounts: RithmicAccount[]; fillsByAccountId: Map<string, ParsedFill[]> }> {
+): Promise<{ accounts: RithmicAccount[]; fillsByAccountId: Map<string, ParsedFill[]>; rmsByAccountId: Map<string, RithmicAccountRms> }> {
   return withSession(user, password, systemName, gatewayUri, async (ws, root) => {
-    const accounts = await listAccountsInSession(ws, root)
+    const loginInfo = await fetchLoginInfo(ws, root)
+    const accounts = await listAccountsInSession(ws, root, loginInfo)
+    // Risk limits are informational — a login that can list accounts but
+    // not read RMS shouldn't fail the whole connect over it.
+    const rmsByAccountId = await fetchRmsInfoInSession(ws, root, loginInfo).catch((err) => {
+      console.warn("[rithmic] could not read RMS info:", err instanceof Error ? err.message : err)
+      return new Map<string, RithmicAccountRms>()
+    })
     const fillsByAccountId = new Map<string, ParsedFill[]>()
     for (const account of accounts) {
       fillsByAccountId.set(account.accountId, await fetchFillsInSession(ws, root, account, since))
     }
-    return { accounts, fillsByAccountId }
+    return { accounts, fillsByAccountId, rmsByAccountId }
   })
 }
 

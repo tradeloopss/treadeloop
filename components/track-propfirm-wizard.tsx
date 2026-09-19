@@ -4,7 +4,8 @@ import { useState, useTransition } from "react"
 import type React from "react"
 import type { PropFirmAccount } from "@/app/actions/propfirm"
 import { createManualPropFirmAccount } from "@/app/actions/propfirm"
-import { PROP_FIRM_NAMES, getPresetPrograms, type PropFirmPreset } from "@/lib/propfirm-presets"
+import { PROP_FIRM_NAMES, getPresetPrograms, presetSizes, resolvePresetRules, type PropFirmPreset } from "@/lib/propfirm-presets"
+import { formatCurrency } from "@/lib/calc"
 import { RulesForm } from "@/components/propfirm-tracker"
 import { ConnectForm } from "@/components/rithmic-connect"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
@@ -86,15 +87,27 @@ function BackButton({ onClick }: { onClick: () => void }) {
   )
 }
 
-function PresetChips({ preset }: { preset: PropFirmPreset }) {
+const money = (n: number) => formatCurrency(n).replace(/\.00$/, "")
+
+// The plan's thresholds for one account size (the $50K figures until a size
+// is picked), in the dollars the firm publishes; percentages only for a
+// plan whose figures we only know as percentages.
+function PresetChips({ preset, size, phase = "evaluation" }: { preset: PropFirmPreset; size?: number; phase?: string }) {
+  const sized = preset.sizes != null
+  const r = resolvePresetRules(preset, size && size > 0 ? size : 50_000, phase)
+  const dd = `${r.drawdownType === "trailing" ? "Trailing" : "Static"} DD`
   return (
     <div className="flex flex-wrap gap-1.5 text-[11px]">
-      {preset.profitTargetPct != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Target {preset.profitTargetPct}%</span>}
-      <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
-        {preset.drawdownType === "trailing" ? "Trailing" : "Static"} DD {preset.maxDrawdownPct}%
-      </span>
-      {preset.dailyLossLimitPct != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Daily loss {preset.dailyLossLimitPct}%</span>}
-      {preset.minTradingDays != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">{preset.minTradingDays}+ days</span>}
+      {r.profitTargetAmount != null && (
+        <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Target {sized ? money(r.profitTargetAmount) : `${r.profitTargetPct}%`}</span>
+      )}
+      <span className="rounded-full bg-muted px-2 py-0.5 font-medium">{dd} {sized ? money(r.maxDrawdownAmount) : `${r.maxDrawdownPct}%`}</span>
+      {r.dailyLossLimitPct != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Daily loss {sized ? money(r.dailyLossLimitAmount!) : `${r.dailyLossLimitPct}%`}</span>}
+      {r.minTradingDays != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">{r.minTradingDays}+ days</span>}
+      {r.consistencyPct != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">{r.consistencyPct}% consistency</span>}
+      {r.minPayoutDays != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Payout after {r.minPayoutDays} days</span>}
+      {r.payoutCap != null && <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Payout cap {money(r.payoutCap)}</span>}
+      {sized && !size && <span className="rounded-full px-2 py-0.5 text-muted-foreground">on $50K</span>}
     </div>
   )
 }
@@ -112,12 +125,18 @@ function ManualDetailsForm({
   const [startingBalance, setStartingBalance] = useState("")
   const [currentBalance, setCurrentBalance] = useState("")
   const [phase, setPhase] = useState("evaluation")
-  const [profitTargetPct, setProfitTargetPct] = useState(preset?.profitTargetPct?.toString() ?? "")
-  const [maxDrawdownPct, setMaxDrawdownPct] = useState(preset?.maxDrawdownPct.toString() ?? "")
-  const [drawdownType, setDrawdownType] = useState<"trailing" | "static">(preset?.drawdownType ?? "trailing")
-  const [dailyLossLimitPct, setDailyLossLimitPct] = useState(preset?.dailyLossLimitPct?.toString() ?? "")
-  const [minTradingDays, setMinTradingDays] = useState(preset?.minTradingDays?.toString() ?? "")
+  // Custom-firm rules, in dollars (a preset's rules are resolved from the
+  // size and phase on submit instead).
+  const [profitTargetAmount, setProfitTargetAmount] = useState("")
+  const [maxDrawdownAmount, setMaxDrawdownAmount] = useState("")
+  const [drawdownType, setDrawdownType] = useState<"trailing" | "static">("trailing")
+  const [dailyLossLimitAmount, setDailyLossLimitAmount] = useState("")
+  const [minTradingDays, setMinTradingDays] = useState("")
+  const [consistencyPct, setConsistencyPct] = useState("")
   const [pending, startTransition] = useTransition()
+  const sizes = preset ? presetSizes(preset) : []
+  const sizeNumber = Number(startingBalance) || 0
+  const funded = phase === "funded"
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -126,13 +145,27 @@ function ManualDetailsForm({
     formData.set("planType", preset?.program ?? "")
     formData.set("name", name)
     formData.set("phase", phase)
-    formData.set("profitTargetPct", profitTargetPct)
-    formData.set("maxDrawdownPct", maxDrawdownPct)
-    formData.set("drawdownType", drawdownType)
-    formData.set("dailyLossLimitPct", dailyLossLimitPct)
-    formData.set("minTradingDays", minTradingDays)
     formData.set("startingBalance", startingBalance)
     formData.set("currentBalance", currentBalance)
+    if (preset) {
+      const r = resolvePresetRules(preset, sizeNumber, phase)
+      formData.set("profitTargetAmount", r.profitTargetAmount?.toString() ?? "")
+      formData.set("maxDrawdownAmount", r.maxDrawdownAmount.toString())
+      formData.set("drawdownType", r.drawdownType)
+      formData.set("dailyLossLimitAmount", r.dailyLossLimitAmount?.toString() ?? "")
+      formData.set("minTradingDays", r.minTradingDays?.toString() ?? "")
+      formData.set("consistencyPct", r.consistencyPct?.toString() ?? "")
+      formData.set("minPayoutDays", r.minPayoutDays?.toString() ?? "")
+      formData.set("minDayProfit", r.minDayProfit?.toString() ?? "")
+      formData.set("payoutCap", r.payoutCap?.toString() ?? "")
+    } else {
+      formData.set("profitTargetAmount", funded ? "" : profitTargetAmount)
+      formData.set("maxDrawdownAmount", maxDrawdownAmount)
+      formData.set("drawdownType", drawdownType)
+      formData.set("dailyLossLimitAmount", dailyLossLimitAmount)
+      formData.set("minTradingDays", funded ? "" : minTradingDays)
+      formData.set("consistencyPct", consistencyPct)
+    }
     startTransition(async () => {
       try {
         await createManualPropFirmAccount(formData)
@@ -147,25 +180,47 @@ function ManualDetailsForm({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       {preset ? (
-        <div className="space-y-1.5 rounded-md border bg-muted/30 p-3">
-          <p className="text-xs font-medium text-muted-foreground">{firm} — {preset.program}</p>
-          <PresetChips preset={preset} />
+        <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+          <p className="text-xs font-medium text-muted-foreground">{firm} — {preset.program}{funded ? " · funded" : ""}</p>
+          {sizes.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {sizes.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStartingBalance(String(s))}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors hover:bg-accent/40",
+                    sizeNumber === s && "border-primary bg-primary/10 text-primary",
+                  )}
+                >
+                  ${s / 1000}K
+                </button>
+              ))}
+            </div>
+          )}
+          <PresetChips preset={preset} size={sizeNumber || undefined} phase={phase} />
+          {sizes.length > 0 && sizeNumber > 0 && !sizes.includes(sizeNumber) && (
+            <p className="text-xs text-[var(--chart-4)]">{firm} doesn&apos;t list a ${sizeNumber.toLocaleString()} account — these are the $50K figures scaled, so check them.</p>
+          )}
           <p className="text-xs text-muted-foreground">{preset.notes}</p>
         </div>
       ) : (
         <>
           <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
             <Info className="mt-0.5 size-3.5 shrink-0" />
-            We don&apos;t have {firm} in our presets yet — enter its rules yourself.
+            We don&apos;t have {firm} in our presets yet — enter its rules yourself, in dollars, the way the firm publishes them.
           </p>
           <div className="grid grid-cols-2 gap-3">
+            {!funded && (
+              <div className="space-y-1.5">
+                <Label htmlFor="profitTargetAmount">Profit target ($)</Label>
+                <Input id="profitTargetAmount" type="number" step="any" placeholder="Leave blank if none" value={profitTargetAmount} onChange={(e) => setProfitTargetAmount(e.target.value)} />
+              </div>
+            )}
             <div className="space-y-1.5">
-              <Label htmlFor="profitTargetPct">Profit target %</Label>
-              <Input id="profitTargetPct" type="number" step="0.01" placeholder="Leave blank if none" value={profitTargetPct} onChange={(e) => setProfitTargetPct(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="maxDrawdownPct">Max drawdown %</Label>
-              <Input id="maxDrawdownPct" type="number" step="0.01" required value={maxDrawdownPct} onChange={(e) => setMaxDrawdownPct(e.target.value)} />
+              <Label htmlFor="maxDrawdownAmount">Max drawdown ($)</Label>
+              <Input id="maxDrawdownAmount" type="number" step="any" required value={maxDrawdownAmount} onChange={(e) => setMaxDrawdownAmount(e.target.value)} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -180,13 +235,21 @@ function ManualDetailsForm({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="dailyLossLimitPct">Daily loss limit %</Label>
-              <Input id="dailyLossLimitPct" type="number" step="0.01" placeholder="Leave blank if none" value={dailyLossLimitPct} onChange={(e) => setDailyLossLimitPct(e.target.value)} />
+              <Label htmlFor="dailyLossLimitAmount">Daily loss limit ($)</Label>
+              <Input id="dailyLossLimitAmount" type="number" step="any" placeholder="Leave blank if none" value={dailyLossLimitAmount} onChange={(e) => setDailyLossLimitAmount(e.target.value)} />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="minTradingDays">Min trading days</Label>
-            <Input id="minTradingDays" type="number" placeholder="Leave blank if none" value={minTradingDays} onChange={(e) => setMinTradingDays(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            {!funded && (
+              <div className="space-y-1.5">
+                <Label htmlFor="minTradingDays">Min trading days</Label>
+                <Input id="minTradingDays" type="number" placeholder="Leave blank if none" value={minTradingDays} onChange={(e) => setMinTradingDays(e.target.value)} />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="consistencyPct">Consistency rule (%)</Label>
+              <Input id="consistencyPct" type="number" step="any" placeholder="Leave blank if none" value={consistencyPct} onChange={(e) => setConsistencyPct(e.target.value)} />
+            </div>
           </div>
         </>
       )}
@@ -198,7 +261,7 @@ function ManualDetailsForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="startingBalance">Account size</Label>
+          <Label htmlFor="startingBalance">Account size ($)</Label>
           <Input id="startingBalance" type="number" step="any" required placeholder="50000" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value)} />
         </div>
         <div className="space-y-1.5">

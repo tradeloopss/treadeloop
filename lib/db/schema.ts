@@ -93,6 +93,14 @@ export const tradingAccounts = pgTable("trading_accounts", {
   // a live source (e.g. MetaApi). Null for manual/CSV-imported accounts,
   // which fall back to startingBalance + net P&L from imported trades.
   currentBalance: numeric("currentBalance", { precision: 18, scale: 2 }),
+  // When currentBalance was last read from the broker. Null for accounts
+  // whose balance was typed in by hand.
+  balanceUpdatedAt: timestamp("balanceUpdatedAt"),
+  // The liquidation floor the broker's risk system reports for this account
+  // (Rithmic's auto-liquidate threshold / minimum account balance), when it
+  // reports one — the prop firm's own trailing-drawdown line, straight from
+  // the source. Null when unknown.
+  brokerDrawdownFloor: numeric("brokerDrawdownFloor", { precision: 18, scale: 2 }),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 
@@ -164,6 +172,20 @@ export const propFirmRules = pgTable("prop_firm_rules", {
   drawdownType: text("drawdownType").notNull().default("trailing"), // trailing | static
   dailyLossLimitPct: numeric("dailyLossLimitPct", { precision: 6, scale: 2 }), // null = no daily limit
   minTradingDays: integer("minTradingDays"), // null = no minimum
+  // Exact dollar thresholds, the way firms publish them. When set they take
+  // precedence over the percentages above (which are kept for display and
+  // for rows from before these existed); lib/propfirm-rules.ts reads both.
+  profitTargetAmount: numeric("profitTargetAmount", { precision: 18, scale: 2 }),
+  maxDrawdownAmount: numeric("maxDrawdownAmount", { precision: 18, scale: 2 }),
+  dailyLossLimitAmount: numeric("dailyLossLimitAmount", { precision: 18, scale: 2 }),
+  // Largest profitable day may be at most this % of profit (since the last
+  // payout, once funded). null = no consistency rule.
+  consistencyPct: numeric("consistencyPct", { precision: 6, scale: 2 }),
+  // Funded-stage payout rules: qualifying days (at or above minDayProfit)
+  // needed before a payout request, and the most one request can be for.
+  minPayoutDays: integer("minPayoutDays"),
+  minDayProfit: numeric("minDayProfit", { precision: 18, scale: 2 }),
+  payoutCap: numeric("payoutCap", { precision: 18, scale: 2 }),
   // Dollar P&L that happened before this account was added to the tracker
   // (e.g. entered as "current balance: $52,000" against a $50,000 starting
   // size) — applied once as an opening offset in the evaluation walk so

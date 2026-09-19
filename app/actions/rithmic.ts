@@ -7,11 +7,12 @@ import { and, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
-import { discoverAccountsAndFills, listRithmicSystems } from "@/lib/rithmic-client"
-import { importFillsForConnection, syncRithmicConnection } from "@/lib/rithmic-sync"
+import { discoverAccountsAndFills, fetchAccountSnapshots, listRithmicSystems, type RithmicAccountSnapshot } from "@/lib/rithmic-client"
+import { applyBrokerSnapshot, importFillsForConnection, syncRithmicConnection } from "@/lib/rithmic-sync"
 import { recordSyncRun } from "@/lib/sync-runs"
 import { requirePro } from "@/lib/subscription"
 import { matchFirmFromSystemName, defaultPresetForFirm } from "@/lib/propfirm-auto-detect"
+import { resolvePresetRules } from "@/lib/propfirm-presets"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -67,10 +68,17 @@ export async function connectRithmic(formData: FormData) {
   // Rithmic rejects a second login attempted right after a prior one closes,
   // so account discovery and the first sync must share a single session.
   const since = new Date(0)
-  const { accounts, fillsByAccountId } = await discoverAccountsAndFills(login, password, systemName, gatewayUri, since)
+  const { accounts, fillsByAccountId, rmsByAccountId } = await discoverAccountsAndFills(login, password, systemName, gatewayUri, since)
   if (accounts.length === 0) {
     throw new Error("No Rithmic accounts found for that login")
   }
+  // Balances live on a different Rithmic plant, so they're a second session.
+  // Not fatal if it fails — the account still connects, just without a
+  // starting size until the next sync gets one.
+  const snapshots = await fetchAccountSnapshots(login, password, systemName, gatewayUri, accounts).catch((err) => {
+    console.warn("[rithmic] could not read account balances on connect:", err instanceof Error ? err.message : err)
+    return new Map<string, RithmicAccountSnapshot>()
+  })
 
   const passwordEnc = encrypt(password)
 
@@ -89,29 +97,10 @@ export async function connectRithmic(formData: FormData) {
             .returning({ id: tradingAccounts.id })
         )[0].id
 
-    // Auto-attach prop firm rules from the Rithmic system name — only when
-    // this account has no rules yet, so it never overwrites a user's own
-    // manual setup on a reconnect/resync.
-    const [existingRules] = await db.select({ id: propFirmRules.id }).from(propFirmRules).where(eq(propFirmRules.accountId, accountId))
-    if (!existingRules) {
-      const matchedFirm = matchFirmFromSystemName(systemName)
-      const preset = matchedFirm ? defaultPresetForFirm(matchedFirm) : null
-      if (matchedFirm && preset) {
-        await db.insert(propFirmRules).values({
-          accountId,
-          userId,
-          firmName: matchedFirm,
-          planType: preset.program,
-          phase: "evaluation",
-          profitTargetPct: preset.profitTargetPct != null ? String(preset.profitTargetPct) : null,
-          maxDrawdownPct: String(preset.maxDrawdownPct),
-          drawdownType: preset.drawdownType,
-          dailyLossLimitPct: preset.dailyLossLimitPct != null ? String(preset.dailyLossLimitPct) : null,
-          minTradingDays: preset.minTradingDays,
-          autoDetected: true,
-        })
-      }
-    }
+    // Import the fills first: the starting balance is worked back from the
+    // broker's balance minus every realized trade, so the trades have to be
+    // in before the snapshot is applied.
+    const fills = fillsByAccountId.get(account.accountId) ?? []
 
     // Reconnecting the same login+account refreshes it instead of duplicating.
     const existingConnection = await db
@@ -161,7 +150,6 @@ export async function connectRithmic(formData: FormData) {
       connectionId = inserted.id
     }
 
-    const fills = fillsByAccountId.get(account.accountId) ?? []
     const startedAt = Date.now()
     await importFillsForConnection(userId, connectionId, accountId, fills).then(
       (imported) => recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, imported }),
@@ -170,6 +158,41 @@ export async function connectRithmic(formData: FormData) {
         return recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, error: err })
       }
     )
+
+    const snapshot = snapshots.get(account.accountId)
+    if (snapshot) await applyBrokerSnapshot(accountId, snapshot, rmsByAccountId.get(account.accountId))
+
+    // Auto-attach prop firm rules from the Rithmic system name — only when
+    // this account has no rules yet, so it never overwrites a user's own
+    // manual setup on a reconnect/resync. Sized to the starting balance
+    // just worked out above, since most firms' thresholds are per-size
+    // dollar figures rather than a flat percentage.
+    const [existingRules] = await db.select({ id: propFirmRules.id }).from(propFirmRules).where(eq(propFirmRules.accountId, accountId))
+    if (!existingRules) {
+      const matchedFirm = matchFirmFromSystemName(systemName)
+      const preset = matchedFirm ? defaultPresetForFirm(matchedFirm) : null
+      if (matchedFirm && preset) {
+        const [sized] = await db.select({ startingBalance: tradingAccounts.startingBalance }).from(tradingAccounts).where(eq(tradingAccounts.id, accountId))
+        const rules = resolvePresetRules(preset, Number(sized?.startingBalance ?? 0), "evaluation")
+        await db.insert(propFirmRules).values({
+          accountId,
+          userId,
+          firmName: matchedFirm,
+          planType: preset.program,
+          phase: "evaluation",
+          profitTargetPct: rules.profitTargetPct != null ? String(rules.profitTargetPct) : null,
+          maxDrawdownPct: String(rules.maxDrawdownPct),
+          drawdownType: rules.drawdownType,
+          dailyLossLimitPct: rules.dailyLossLimitPct != null ? String(rules.dailyLossLimitPct) : null,
+          minTradingDays: rules.minTradingDays,
+          profitTargetAmount: rules.profitTargetAmount != null ? String(rules.profitTargetAmount) : null,
+          maxDrawdownAmount: String(rules.maxDrawdownAmount),
+          dailyLossLimitAmount: rules.dailyLossLimitAmount != null ? String(rules.dailyLossLimitAmount) : null,
+          consistencyPct: rules.consistencyPct != null ? String(rules.consistencyPct) : null,
+          autoDetected: true,
+        })
+      }
+    }
   }
 
   revalidatePath("/settings")

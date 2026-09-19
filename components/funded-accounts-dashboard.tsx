@@ -76,7 +76,9 @@ export function FundedAccountsDashboard({
     return points
   }, [fundedTrades])
 
-  const fundedBalance = fundedAccounts.reduce((sum, acc) => sum + acc.startingBalance + (acc.evaluation?.netProfit ?? 0), 0)
+  // The evaluation's balance lands on the broker's own figure for a linked
+  // account, so it's used ahead of size + P&L.
+  const fundedBalance = fundedAccounts.reduce((sum, acc) => sum + (acc.evaluation?.currentBalance ?? acc.startingBalance), 0)
 
   if (fundedAccounts.length === 0) {
     return (
@@ -134,13 +136,23 @@ export function FundedAccountsDashboard({
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Funded accounts</h2>
         <ul className="divide-y">
           {fundedAccounts.map((acc) => {
-            const balance = acc.startingBalance + (acc.evaluation?.netProfit ?? 0)
+            const balance = acc.evaluation?.currentBalance ?? acc.startingBalance
             const netProfit = acc.evaluation?.netProfit ?? 0
+            const ev = acc.evaluation
+            const payoutNote =
+              ev == null
+                ? null
+                : ev.payoutEligible
+                  ? `Payout ready${ev.payoutAvailable != null ? `: ${formatCurrency(ev.payoutAvailable, acc.currency)}` : ""}`
+                  : acc.rules?.minPayoutDays != null
+                    ? `${ev.qualifyingDays}/${acc.rules.minPayoutDays} qualifying days towards a payout`
+                    : null
             return (
               <li key={acc.id} className="flex items-center justify-between py-2.5">
                 <div>
                   <p className="text-sm font-medium">{acc.name}</p>
                   <p className="text-xs text-muted-foreground">{acc.firmName ?? "Firm not set"} · {acc.planType ?? "Plan not set"}</p>
+                  {payoutNote && <p className={cn("text-xs", ev?.payoutEligible ? "text-[var(--gain)]" : "text-muted-foreground")}>{payoutNote}</p>}
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-semibold tabular-nums">{formatCurrency(balance, acc.currency)}</p>

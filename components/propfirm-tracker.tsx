@@ -12,7 +12,7 @@ import {
 } from "@/app/actions/propfirm"
 import { formatCurrency } from "@/lib/calc"
 import { cn } from "@/lib/utils"
-import { PROP_FIRM_NAMES, getPresetPrograms, type PropFirmPreset } from "@/lib/propfirm-presets"
+import { PROP_FIRM_NAMES, getPresetPrograms, presetSizes, resolvePresetRules, type PropFirmPreset } from "@/lib/propfirm-presets"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,8 +57,18 @@ import {
   CalendarClock,
   List,
   LayoutGrid,
+  Wallet,
 } from "lucide-react"
 import { toast } from "sonner"
+
+function fmtAgo(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
 
 const CUSTOM = "__custom__"
 
@@ -92,28 +102,51 @@ const STATUS_META = {
   breached: { label: "Breached", icon: ShieldAlert, className: "border-[var(--loss)]/30 text-[var(--loss)]" },
 }
 
+// Rule thresholds are entered in dollars — the unit firms publish them in —
+// with the percentage of the account size shown alongside. Picking a plan
+// fills them in for this account's size and phase from the preset, and
+// changing the phase or size re-fills them while a plan is selected.
 export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDone: () => void }) {
   const initialFirm = account.firmName && PROP_FIRM_NAMES.includes(account.firmName) ? account.firmName : CUSTOM
+  const rules = account.rules
+  const size0 = account.startingBalance
+  const fromPct = (pct: number | null | undefined) => (pct != null && size0 > 0 ? Math.round(size0 * pct) / 100 : null)
   const [firm, setFirm] = useState<string>(initialFirm)
   const [program, setProgram] = useState<string>(account.planType ?? "")
   const [customFirmName, setCustomFirmName] = useState(initialFirm === CUSTOM ? (account.firmName ?? "") : "")
-  const [phase, setPhase] = useState(account.rules?.phase ?? "evaluation")
-  const [profitTargetPct, setProfitTargetPct] = useState(account.rules?.profitTargetPct?.toString() ?? "")
-  const [maxDrawdownPct, setMaxDrawdownPct] = useState(account.rules?.maxDrawdownPct?.toString() ?? "")
-  const [drawdownType, setDrawdownType] = useState(account.rules?.drawdownType ?? "trailing")
-  const [dailyLossLimitPct, setDailyLossLimitPct] = useState(account.rules?.dailyLossLimitPct?.toString() ?? "")
-  const [minTradingDays, setMinTradingDays] = useState(account.rules?.minTradingDays?.toString() ?? "")
+  const [phase, setPhase] = useState(rules?.phase ?? "evaluation")
+  const [size, setSize] = useState(size0 > 0 ? String(size0) : "")
+  const [profitTargetAmount, setProfitTargetAmount] = useState((rules?.profitTargetAmount ?? fromPct(rules?.profitTargetPct))?.toString() ?? "")
+  const [maxDrawdownAmount, setMaxDrawdownAmount] = useState((rules?.maxDrawdownAmount ?? fromPct(rules?.maxDrawdownPct))?.toString() ?? "")
+  const [drawdownType, setDrawdownType] = useState(rules?.drawdownType ?? "trailing")
+  const [dailyLossLimitAmount, setDailyLossLimitAmount] = useState((rules?.dailyLossLimitAmount ?? fromPct(rules?.dailyLossLimitPct))?.toString() ?? "")
+  const [minTradingDays, setMinTradingDays] = useState(rules?.minTradingDays?.toString() ?? "")
+  const [consistencyPct, setConsistencyPct] = useState(rules?.consistencyPct?.toString() ?? "")
+  const [minPayoutDays, setMinPayoutDays] = useState(rules?.minPayoutDays?.toString() ?? "")
+  const [minDayProfit, setMinDayProfit] = useState(rules?.minDayProfit?.toString() ?? "")
+  const [payoutCap, setPayoutCap] = useState(rules?.payoutCap?.toString() ?? "")
   const [pending, startTransition] = useTransition()
 
   const programs = firm !== CUSTOM ? getPresetPrograms(firm) : []
   const activePreset: PropFirmPreset | undefined = programs.find((p) => p.program === program)
+  const sizeNumber = Number(size) || 0
+  const funded = phase === "funded"
+  const pctLabel = (amount: string) => {
+    const n = Number(amount)
+    return sizeNumber > 0 && n > 0 ? `${(Math.round((n / sizeNumber) * 10000) / 100).toString()}% of account` : null
+  }
 
-  function applyPreset(preset: PropFirmPreset) {
-    setProfitTargetPct(preset.profitTargetPct?.toString() ?? "")
-    setMaxDrawdownPct(preset.maxDrawdownPct.toString())
-    setDrawdownType(preset.drawdownType)
-    setDailyLossLimitPct(preset.dailyLossLimitPct?.toString() ?? "")
-    setMinTradingDays(preset.minTradingDays?.toString() ?? "")
+  function applyPreset(preset: PropFirmPreset, forSize: number, forPhase: string) {
+    const r = resolvePresetRules(preset, forSize, forPhase)
+    setProfitTargetAmount(r.profitTargetAmount?.toString() ?? "")
+    setMaxDrawdownAmount(r.maxDrawdownAmount.toString())
+    setDrawdownType(r.drawdownType)
+    setDailyLossLimitAmount(r.dailyLossLimitAmount?.toString() ?? "")
+    setMinTradingDays(r.minTradingDays?.toString() ?? "")
+    setConsistencyPct(r.consistencyPct?.toString() ?? "")
+    setMinPayoutDays(r.minPayoutDays?.toString() ?? "")
+    setMinDayProfit(r.minDayProfit?.toString() ?? "")
+    setPayoutCap(r.payoutCap?.toString() ?? "")
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -122,11 +155,16 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
     formData.set("firmName", firm === CUSTOM ? customFirmName : firm)
     formData.set("planType", firm === CUSTOM ? "" : program)
     formData.set("phase", phase)
-    formData.set("profitTargetPct", profitTargetPct)
-    formData.set("maxDrawdownPct", maxDrawdownPct)
+    formData.set("startingBalance", size)
+    formData.set("profitTargetAmount", funded ? "" : profitTargetAmount)
+    formData.set("maxDrawdownAmount", maxDrawdownAmount)
     formData.set("drawdownType", drawdownType)
-    formData.set("dailyLossLimitPct", dailyLossLimitPct)
-    formData.set("minTradingDays", minTradingDays)
+    formData.set("dailyLossLimitAmount", dailyLossLimitAmount)
+    formData.set("minTradingDays", funded ? "" : minTradingDays)
+    formData.set("consistencyPct", consistencyPct)
+    formData.set("minPayoutDays", funded ? minPayoutDays : "")
+    formData.set("minDayProfit", funded ? minDayProfit : "")
+    formData.set("payoutCap", funded ? payoutCap : "")
     startTransition(async () => {
       try {
         await savePropFirmRules(account.id, formData)
@@ -137,6 +175,8 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
       }
     })
   }
+
+  const sizes = activePreset ? presetSizes(activePreset) : []
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -168,7 +208,7 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
               if (!v) return
               setProgram(v)
               const preset = programs.find((p) => p.program === v)
-              if (preset) applyPreset(preset)
+              if (preset) applyPreset(preset, sizeNumber, phase)
             }}
             disabled={firm === CUSTOM}
           >
@@ -201,40 +241,95 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
         </p>
       )}
 
-      <div className="space-y-1.5">
-        <Label>Phase</Label>
-        <Select value={phase} onValueChange={(v) => v && setPhase(v)}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="evaluation">Evaluation</SelectItem>
-            <SelectItem value="verification">Verification</SelectItem>
-            <SelectItem value="funded">Funded</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="profitTargetPct">Profit target %</Label>
-          <Input
-            id="profitTargetPct"
-            type="number"
-            step="0.01"
-            placeholder="Leave blank if none"
-            value={profitTargetPct}
-            onChange={(e) => setProfitTargetPct(e.target.value)}
-          />
+          <Label>Phase</Label>
+          <Select
+            value={phase}
+            onValueChange={(v) => {
+              if (!v) return
+              setPhase(v)
+              if (activePreset) applyPreset(activePreset, sizeNumber, v)
+            }}
+          >
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="evaluation">Evaluation</SelectItem>
+              <SelectItem value="verification">Verification</SelectItem>
+              <SelectItem value="funded">Funded</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="maxDrawdownPct">Max drawdown %</Label>
+          <Label htmlFor="rules-size">Account size ($)</Label>
           <Input
-            id="maxDrawdownPct"
+            id="rules-size"
             type="number"
-            step="0.01"
-            required
-            value={maxDrawdownPct}
-            onChange={(e) => setMaxDrawdownPct(e.target.value)}
+            step="any"
+            min="0"
+            placeholder="50000"
+            value={size}
+            onChange={(e) => {
+              setSize(e.target.value)
+              const n = Number(e.target.value)
+              if (activePreset && n > 0) applyPreset(activePreset, n, phase)
+            }}
           />
+        </div>
+      </div>
+      {sizes.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {sizes.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                setSize(String(s))
+                if (activePreset) applyPreset(activePreset, s, phase)
+              }}
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors hover:bg-accent/40",
+                sizeNumber === s && "border-primary bg-primary/10 text-primary",
+              )}
+            >
+              ${s / 1000}K
+            </button>
+          ))}
+        </div>
+      )}
+      {size0 <= 0 && (
+        <p className="flex items-start gap-1.5 text-xs text-[var(--chart-4)]">
+          <Info className="mt-0.5 size-3.5 shrink-0" />
+          This account has no size yet, so every threshold below reads as $0 until you set one.
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        {!funded && (
+          <div className="space-y-1.5">
+            <Label htmlFor="profitTargetAmount">Profit target ($)</Label>
+            <Input
+              id="profitTargetAmount"
+              type="number"
+              step="any"
+              placeholder="Leave blank if none"
+              value={profitTargetAmount}
+              onChange={(e) => setProfitTargetAmount(e.target.value)}
+            />
+            {pctLabel(profitTargetAmount) && <p className="text-[11px] text-muted-foreground">{pctLabel(profitTargetAmount)}</p>}
+          </div>
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="maxDrawdownAmount">Max drawdown ($)</Label>
+          <Input
+            id="maxDrawdownAmount"
+            type="number"
+            step="any"
+            required
+            value={maxDrawdownAmount}
+            onChange={(e) => setMaxDrawdownAmount(e.target.value)}
+          />
+          {pctLabel(maxDrawdownAmount) && <p className="text-[11px] text-muted-foreground">{pctLabel(maxDrawdownAmount)}</p>}
         </div>
       </div>
 
@@ -250,33 +345,69 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="dailyLossLimitPct">Daily loss limit %</Label>
+          <Label htmlFor="dailyLossLimitAmount">Daily loss limit ($)</Label>
           <Input
-            id="dailyLossLimitPct"
+            id="dailyLossLimitAmount"
             type="number"
-            step="0.01"
+            step="any"
             placeholder="Leave blank if none"
-            value={dailyLossLimitPct}
-            onChange={(e) => setDailyLossLimitPct(e.target.value)}
+            value={dailyLossLimitAmount}
+            onChange={(e) => setDailyLossLimitAmount(e.target.value)}
           />
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="minTradingDays">Min trading days</Label>
-        <Input
-          id="minTradingDays"
-          type="number"
-          placeholder="Leave blank if none"
-          value={minTradingDays}
-          onChange={(e) => setMinTradingDays(e.target.value)}
-        />
+      <div className="grid grid-cols-2 gap-3">
+        {!funded && (
+          <div className="space-y-1.5">
+            <Label htmlFor="minTradingDays">Min trading days</Label>
+            <Input
+              id="minTradingDays"
+              type="number"
+              placeholder="Leave blank if none"
+              value={minTradingDays}
+              onChange={(e) => setMinTradingDays(e.target.value)}
+            />
+          </div>
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="consistencyPct">Consistency rule (%)</Label>
+          <Input
+            id="consistencyPct"
+            type="number"
+            step="any"
+            placeholder="Leave blank if none"
+            value={consistencyPct}
+            onChange={(e) => setConsistencyPct(e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">Best day may be at most this share of {funded ? "profit since the last payout" : "total profit"}.</p>
+        </div>
       </div>
+
+      {funded && (
+        <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+          <p className="text-xs font-medium">Payout rules</p>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="minPayoutDays">Qualifying days</Label>
+              <Input id="minPayoutDays" type="number" placeholder="e.g. 3" value={minPayoutDays} onChange={(e) => setMinPayoutDays(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="minDayProfit">Day counts at ($)</Label>
+              <Input id="minDayProfit" type="number" step="any" placeholder="e.g. 200" value={minDayProfit} onChange={(e) => setMinDayProfit(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="payoutCap">Max per payout ($)</Label>
+              <Input id="payoutCap" type="number" step="any" placeholder="No cap" value={payoutCap} onChange={(e) => setPayoutCap(e.target.value)} />
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">Payout progress counts from the last payout you logged on this account.</p>
+        </div>
+      )}
 
       <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        Percentages are of your account's starting balance. Presets are researched, not official — double check
-        against your firm's current rules before relying on this.
+        Presets are researched, not official — double check against your firm's current rules before relying on this.
       </p>
 
       <DialogFooter>
@@ -399,10 +530,16 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
   const StatusIcon = meta.icon
   const stepLabel = rules.phase === "evaluation" ? "Step 1" : rules.phase === "verification" ? "Step 2" : "Funded"
 
-  const drawdownPct = (evaluation.currentDrawdownAmount / evaluation.drawdownLimitAmount) * 100
+  const drawdownPct = evaluation.drawdownLimitAmount > 0 ? (evaluation.currentDrawdownAmount / evaluation.drawdownLimitAmount) * 100 : 0
   const dailyLossPct = evaluation.dailyLossLimitAmount ? (evaluation.worstDayLossAmount / evaluation.dailyLossLimitAmount) * 100 : 0
   const ddReference = rules.drawdownType === "trailing" ? evaluation.peakBalance : account.startingBalance
   const floor = ddReference - evaluation.drawdownLimitAmount
+  const funded = rules.phase === "funded"
+  const consistencyPct = evaluation.consistencySharePct
+  const consistencyBar = rules.consistencyPct != null && consistencyPct != null ? (consistencyPct / rules.consistencyPct) * 100 : 0
+  const payoutDaysBar = rules.minPayoutDays ? (evaluation.qualifyingDays / rules.minPayoutDays) * 100 : evaluation.cycleNetProfit > 0 ? 100 : 0
+  const pct = (amount: number | null) =>
+    amount != null && account.startingBalance > 0 ? ` (${Math.round((amount / account.startingBalance) * 10000) / 100}%)` : ""
 
   return (
     <Card className="space-y-4 p-5">
@@ -449,9 +586,24 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
             ({evaluation.netProfit >= 0 ? "+" : ""}
             {formatCurrency(evaluation.netProfit, account.currency)})
           </span>
+          {account.balanceUpdatedAt && (
+            <span className="ml-1.5 text-xs text-muted-foreground" title="Balance as reported by Rithmic">
+              · from Rithmic {fmtAgo(account.balanceUpdatedAt)}
+            </span>
+          )}
         </p>
         <p className="text-sm text-muted-foreground">{account.firmName ?? "Firm not set"}</p>
       </div>
+      {account.startingBalance <= 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-[var(--chart-4)]/40 bg-[var(--chart-4)]/10 px-3 py-2 text-sm">
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--chart-4)]" />
+          <span>
+            This account has no size, so its limits read as $0.{" "}
+            <button type="button" className="font-medium underline" onClick={() => setOpen(true)}>Set the account size</button>
+            {account.balanceUpdatedAt == null && " — or sync it from Rithmic and it's worked out from the balance."}
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
         <CalendarClock className="size-4 shrink-0" />
@@ -494,7 +646,7 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
             </span>
             <div className="w-40 shrink-0">
               <p className="text-sm font-medium">Profit: {formatCurrency(evaluation.netProfit, account.currency)}</p>
-              <p className="text-xs text-muted-foreground">Target: {rules.profitTargetPct}%</p>
+              <p className="text-xs text-muted-foreground">Target: {formatCurrency(evaluation.profitTargetAmount, account.currency)}{pct(evaluation.profitTargetAmount)}</p>
             </div>
             <div className="flex-1"><Bar pct={evaluation.profitProgressPct ?? 0} tone="gain" /></div>
             <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{Math.round(evaluation.profitProgressPct ?? 0)}%</span>
@@ -508,7 +660,7 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
             </span>
             <div className="w-40 shrink-0">
               <p className="text-sm font-medium">{formatCurrency(evaluation.worstDayLossAmount, account.currency)}</p>
-              <p className="text-xs text-muted-foreground">Maximum daily loss: {rules.dailyLossLimitPct}%</p>
+              <p className="text-xs text-muted-foreground">Max daily loss: {formatCurrency(evaluation.dailyLossLimitAmount, account.currency)}</p>
             </div>
             <div className="flex-1"><Bar pct={dailyLossPct} tone="loss" /></div>
             <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{Math.round(dailyLossPct)}%</span>
@@ -522,12 +674,55 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
           <div className="w-40 shrink-0">
             <p className="text-sm font-medium">Drawdown: {formatCurrency(evaluation.currentDrawdownAmount, account.currency)}</p>
             <p className="text-xs text-muted-foreground">
-              Max: {formatCurrency(evaluation.drawdownLimitAmount, account.currency)} ({rules.maxDrawdownPct}%) · Floor: {formatCurrency(floor, account.currency)}
+              Max: {formatCurrency(evaluation.drawdownLimitAmount, account.currency)}{pct(evaluation.drawdownLimitAmount)} · Floor: {formatCurrency(floor, account.currency)}
             </p>
+            {account.brokerDrawdownFloor != null && (
+              <p className="text-xs text-muted-foreground" title="The liquidation threshold Rithmic's risk system reports for this account">
+                Rithmic floor: {formatCurrency(account.brokerDrawdownFloor, account.currency)}
+              </p>
+            )}
           </div>
           <div className="flex-1"><Bar pct={drawdownPct} tone="loss" /></div>
           <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{Math.round(drawdownPct)}%</span>
         </div>
+
+        {rules.consistencyPct != null && (
+          <div className="flex items-center gap-3">
+            <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", evaluation.consistencyMet ? "bg-[var(--gain)]/10 text-[var(--gain)]" : "bg-[var(--loss)]/10 text-[var(--loss)]")}>
+              {evaluation.consistencyMet ? <CheckCircle2 className="size-4" /> : <AlertCircle className="size-4" />}
+            </span>
+            <div className="w-40 shrink-0">
+              <p className="text-sm font-medium">Best day: {consistencyPct == null ? "—" : `${Math.round(consistencyPct)}% of profit`}</p>
+              <p className="text-xs text-muted-foreground">Consistency limit: {rules.consistencyPct}%{funded ? " · since last payout" : ""}</p>
+            </div>
+            <div className="flex-1"><Bar pct={consistencyBar} tone="loss" /></div>
+            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{consistencyPct == null ? "—" : `${Math.round(consistencyPct)}%`}</span>
+          </div>
+        )}
+
+        {funded && (
+          <div className="flex items-center gap-3">
+            <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", evaluation.payoutEligible ? "bg-[var(--gain)]/10 text-[var(--gain)]" : "bg-muted text-muted-foreground")}>
+              <Wallet className="size-4" />
+            </span>
+            <div className="w-40 shrink-0">
+              <p className="text-sm font-medium">
+                {evaluation.payoutEligible ? "Payout ready" : "Next payout"}
+                {evaluation.payoutAvailable != null && <>: {formatCurrency(evaluation.payoutAvailable, account.currency)}</>}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {rules.minPayoutDays != null
+                  ? `${evaluation.qualifyingDays}/${rules.minPayoutDays} qualifying days${rules.minDayProfit != null ? ` (${formatCurrency(rules.minDayProfit, account.currency)}+)` : ""}`
+                  : `${formatCurrency(evaluation.cycleNetProfit, account.currency)} since last payout`}
+                {rules.payoutCap != null && ` · cap ${formatCurrency(rules.payoutCap, account.currency)}`}
+              </p>
+            </div>
+            <div className="flex-1"><Bar pct={payoutDaysBar} tone="gain" /></div>
+            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">
+              {rules.minPayoutDays != null ? `${evaluation.qualifyingDays}/${rules.minPayoutDays}` : evaluation.payoutEligible ? "✓" : "—"}
+            </span>
+          </div>
+        )}
 
         {rules.minTradingDays != null && (
           <div className="flex items-center gap-3">
