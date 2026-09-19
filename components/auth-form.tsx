@@ -79,8 +79,10 @@ export function AuthForm({
         const { error } = await authClient.signUp.email({ email, password, name })
         if (error) throw new Error(error.message ?? "Could not create account")
       } else {
-        const { error } = await authClient.signIn.email({ email, password })
+        const { data, error } = await authClient.signIn.email({ email, password })
         if (error) throw new Error(error.message ?? "Invalid email or password")
+        // 2FA accounts: the auth client is already navigating to /two-factor.
+        if (data && "twoFactorRedirect" in data && data.twoFactorRedirect) return
       }
       router.push(redirectTo)
       router.refresh()
@@ -168,6 +170,14 @@ export function AuthForm({
               required
             />
           </div>
+          {!isSignUp && (
+            <Link
+              href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
+              className="-mt-1 self-end text-xs font-medium text-muted-foreground hover:text-primary"
+            >
+              Forgot password?
+            </Link>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" disabled={loading} className="mt-2 h-12 w-full rounded-xl text-base font-semibold">
             {loading ? "Please wait…" : isSignUp ? "Sign up" : "Sign in"}

@@ -1,8 +1,10 @@
 import { betterAuth } from "better-auth"
 import { nextCookies } from "better-auth/next-js"
-import { admin } from "better-auth/plugins"
+import { admin, twoFactor } from "better-auth/plugins"
 import { pool } from "@/lib/db"
 import { ac, roles, ADMIN_ROLES } from "@/lib/admin/access"
+import { sendEmail } from "@/lib/email"
+import { securityEventsPlugin } from "@/lib/security"
 
 /** Whether Google OAuth credentials are configured on this deployment. */
 export const googleAuthEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
@@ -11,6 +13,7 @@ export const googleAuthEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process
 export const githubAuthEnabled = Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
 
 export const auth = betterAuth({
+  appName: "TradeLoop",
   database: pool,
   baseURL:
     process.env.BETTER_AUTH_URL ??
@@ -22,6 +25,22 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
+    // The link lands on /reset-password with the token; a successful reset
+    // signs the account out everywhere else.
+    sendResetPassword: async ({ user, url }) => {
+      await sendEmail({
+        to: user.email,
+        subject: "Reset your TradeLoop password",
+        text: `Someone asked to reset the password for your TradeLoop account.
+
+Choose a new password here (the link works for one hour):
+${url}
+
+If it wasn't you, ignore this email — your password stays the same.`,
+      })
+    },
+    resetPasswordTokenExpiresIn: 60 * 60,
+    revokeSessionsOnPasswordReset: true,
   },
   // A social provider is only registered when its credentials are actually present,
   // so a deployment without them fails closed rather than offering a button
@@ -103,6 +122,11 @@ export const auth = betterAuth({
       impersonationSessionDuration: 30 * 60,
       bannedUserMessage: "This account has been suspended. Contact support@tradeloop.pro.",
     }),
+    // Authenticator-app codes with backup codes. Google-only accounts have no
+    // password to confirm with, so they can turn it on without one.
+    twoFactor({ issuer: "TradeLoop", allowPasswordless: true }),
+    // After twoFactor on purpose — see lib/security.ts.
+    securityEventsPlugin(),
     // Must stay last so it sees the cookies every other plugin sets.
     nextCookies(),
   ],

@@ -15,6 +15,10 @@ export const ACTION_LABELS: Record<string, string> = {
   "broker.force_sync": "Forced broker sync",
   "announcement.create": "Created announcement",
   "announcement.update": "Updated announcement",
+  "user.reset_2fa": "Reset two-step verification",
+  "user.send_password_reset": "Sent password reset email",
+  "support.reply": "Replied to support request",
+  "support.status": "Changed support request status",
 }
 
 export async function logAdminAction(

@@ -249,9 +249,9 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
 
               <DropdownMenuSeparator />
 
-              <DropdownMenuItem render={<a href="mailto:support@tradeloop.pro" />}>
+              <DropdownMenuItem render={<Link href="/support" />}>
                 <HelpCircle className="size-4" />
-                Help
+                Help &amp; support
               </DropdownMenuItem>
               <DropdownMenuItem render={<Link href="/settings" />}>
                 <Plug className="size-4" />

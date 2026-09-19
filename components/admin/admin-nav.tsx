@@ -3,11 +3,11 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Activity, CreditCard, Gauge, Megaphone, PlugZap, ScrollText, ShieldCheck, Users } from "lucide-react"
+import { Activity, CreditCard, Gauge, LifeBuoy, Lock, Megaphone, PlugZap, ScrollText, ShieldCheck, Users } from "lucide-react"
 
-const ICONS = { overview: Gauge, users: Users, billing: CreditCard, brokers: PlugZap, analytics: Activity, announcements: Megaphone, audit: ScrollText, team: ShieldCheck }
+const ICONS = { overview: Gauge, users: Users, billing: CreditCard, brokers: PlugZap, analytics: Activity, announcements: Megaphone, audit: ScrollText, team: ShieldCheck, support: LifeBuoy, security: Lock }
 
-export type NavItem = { href: string; label: string; icon: keyof typeof ICONS }
+export type NavItem = { href: string; label: string; icon: keyof typeof ICONS; badge?: number }
 
 export function AdminNav({ items }: { items: NavItem[] }) {
   const pathname = usePathname()
@@ -27,6 +27,11 @@ export function AdminNav({ items }: { items: NavItem[] }) {
           >
             <Icon className="size-4" aria-hidden="true" />
             {item.label}
+            {!!item.badge && (
+              <span className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums" aria-label={`${item.badge} waiting`}>
+                {item.badge}
+              </span>
+            )}
           </Link>
         )
       })}

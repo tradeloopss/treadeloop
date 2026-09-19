@@ -4,7 +4,9 @@ import { ArrowLeft } from "lucide-react"
 import { requireAdmin } from "@/lib/admin/guard"
 import { roleCan, ROLE_LABELS, isAdminRole } from "@/lib/admin/access"
 import { ACTION_LABELS } from "@/lib/admin/audit"
-import { getUserProfile } from "@/lib/admin/metrics"
+import { getUserProfile, listSecurityEvents, listUserTickets } from "@/lib/admin/metrics"
+import { SecurityEventsTable } from "@/components/admin/security-events-table"
+import { TicketStatus } from "@/components/ticket-status"
 import { isOwnerEmail, rowGrantsAccess } from "@/lib/subscription"
 import { UserActions } from "@/components/admin/user-actions"
 import { ForceSyncButton, RevokeGrantButton } from "@/components/admin/row-actions"
@@ -30,6 +32,12 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   const { id } = await params
   const profile = await getUserProfile(id)
   if (!profile) notFound()
+  const canSecurity = roleCan(admin.role, { security: ["view"] })
+  const canSupport = roleCan(admin.role, { support: ["view"] })
+  const [security, tickets] = await Promise.all([
+    canSecurity ? listSecurityEvents({ userId: id, limit: 15 }) : Promise.resolve(null),
+    canSupport ? listUserTickets(id) : Promise.resolve([]),
+  ])
   const { user, counts } = profile
 
   const owner = isOwnerEmail(user.email)
@@ -40,7 +48,9 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
     ban: roleCan(admin.role, { user: ["ban"] }) && !owner && (!isAdminRole(user.role) || admin.role === "super_admin"),
     revoke: roleCan(admin.role, { session: ["revoke"] }),
     grant: roleCan(admin.role, { billing: ["manage"] }),
+    security: roleCan(admin.role, { security: ["manage"] }) && (!isAdminRole(user.role) || admin.role === "super_admin"),
   }
+  const hasPassword = profile.providers.some((p) => p.providerId === "credential")
   const canSync = roleCan(admin.role, { brokers: ["sync"] })
   const canBilling = roleCan(admin.role, { billing: ["view"] })
 
@@ -66,7 +76,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           </p>
         )}
         <div className="mt-4">
-          <UserActions userId={user.id} userLabel={user.email} banned={!!user.banned} isSelf={user.id === admin.id} can={can} />
+          <UserActions userId={user.id} userLabel={user.email} banned={!!user.banned} isSelf={user.id === admin.id} twoFactorEnabled={!!user.twoFactorEnabled} hasPassword={hasPassword} can={can} />
         </div>
       </div>
 
@@ -78,7 +88,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
             <dt className="text-muted-foreground">Email verified</dt>
             <dd>{user.emailVerified ? "Yes" : "No"}</dd>
             <dt className="text-muted-foreground">Two-factor auth</dt>
-            <dd className="text-muted-foreground">Not offered on TradeLoop yet</dd>
+            <dd>{user.twoFactorEnabled ? "On (authenticator app)" : "Off"}</dd>
             <dt className="text-muted-foreground">Role</dt>
             <dd>{owner ? "Owner (Super Admin)" : isAdminRole(user.role) ? ROLE_LABELS[user.role] : "Trader"}</dd>
             <dt className="text-muted-foreground">User ID</dt>
@@ -188,6 +198,33 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
             {profile.sessions.length === 0 && <li className="py-6 text-center text-muted-foreground">No sessions on record.</li>}
           </ul>
         </Panel>
+
+        {security && (
+          <Panel title="Security activity" description="Latest sign-ins, failed attempts and credential changes." className="xl:col-span-2">
+            <div className="overflow-x-auto">
+              <SecurityEventsTable rows={security.rows} showUser={false} empty={<tr><td colSpan={4} className="py-6 text-center text-sm text-muted-foreground">Nothing recorded yet.</td></tr>} />
+            </div>
+          </Panel>
+        )}
+
+        {canSupport && (
+          <Panel title="Support requests">
+            <ul className="divide-y text-sm">
+              {tickets.map((t) => (
+                <li key={t.id}>
+                  <Link href={`/admin/support/${t.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-primary">
+                    <span className="truncate">{t.subject}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{fmtAgo(t.lastMessageAt)}</span>
+                      <TicketStatus status={t.status} forStaff />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              {tickets.length === 0 && <li className="py-6 text-center text-muted-foreground">No requests.</li>}
+            </ul>
+          </Panel>
+        )}
 
         <Panel title="Admin activity on this account" className="xl:col-span-2">
           <ul className="divide-y text-sm">

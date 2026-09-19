@@ -38,7 +38,12 @@ export function SubscriptionPaywall({ userName }: { userName: string }) {
           <PricingPlans />
 
           <div className="mt-8 flex flex-col items-center gap-3 border-t pt-6">
-            <p className="text-xs text-muted-foreground">Not ready yet? Your account stays exactly as it is.</p>
+            <p className="text-xs text-muted-foreground">
+              Not ready yet? Your account stays exactly as it is. Questions or billing trouble?{" "}
+              <a href="/support" className="font-medium text-primary hover:underline">
+                Contact support
+              </a>
+            </p>
             <Button variant="outline" onClick={onSignOut}>
               <LogOut className="size-4" />
               Log out

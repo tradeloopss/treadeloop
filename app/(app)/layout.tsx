@@ -11,6 +11,7 @@ import { DashboardSidebar } from "@/components/dashboard-sidebar"
 import { SubscriptionPaywall } from "@/components/subscription-paywall"
 import { AnnouncementBanners } from "@/components/announcement-banners"
 import { ImpersonationBanner } from "@/components/impersonation-banner"
+import { CrispChat } from "@/components/crisp-chat"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -51,6 +52,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
         {locked && <SubscriptionPaywall userName={session.user.name || session.user.email} />}
       </div>
+      {!impersonating && <CrispChat email={session.user.email} name={session.user.name} />}
     </div>
   )
 }

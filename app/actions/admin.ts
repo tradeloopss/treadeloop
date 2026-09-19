@@ -6,12 +6,13 @@ import { revalidatePath } from "next/cache"
 import { and, eq } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { announcements, rithmicConnections, subscriptions, user } from "@/lib/db/schema"
+import { announcements, rithmicConnections, subscriptions, supportMessages, supportTickets, twoFactor, user } from "@/lib/db/schema"
 import { assertAdmin } from "@/lib/admin/guard"
 import { logAdminAction } from "@/lib/admin/audit"
 import { isAdminRole, type AdminRole } from "@/lib/admin/access"
 import { isOwnerEmail } from "@/lib/subscription"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
+import { sendEmail } from "@/lib/email"
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -21,8 +22,16 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     revalidatePath("/admin", "layout")
     return { ok: true, ...(message ? { message } : {}) }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Something went wrong" }
+    return { ok: false, error: describeError(err) }
   }
+}
+
+// Drizzle wraps database errors as "Failed query: <sql>" and keeps the real
+// reason on `cause`; show the reason.
+function describeError(err: unknown) {
+  if (!(err instanceof Error)) return "Something went wrong"
+  const cause = (err as { cause?: unknown }).cause
+  return cause instanceof Error && err.message.startsWith("Failed query") ? `Database error: ${cause.message}` : err.message
 }
 
 async function getTarget(userId: string) {
@@ -197,5 +206,74 @@ export async function setAnnouncementActive(id: number, active: boolean) {
     await db.update(announcements).set({ active }).where(eq(announcements.id, id))
     await logAdminAction(admin, "announcement.update", null, { id, active })
     revalidatePath("/", "layout")
+  })
+}
+
+// --- Security ------------------------------------------------------------------
+
+// For a user who lost their authenticator: removes 2FA so they can sign in
+// with just their password, then set it up again.
+export async function resetTwoFactor(userId: string) {
+  return run(async () => {
+    const admin = await assertAdmin({ security: ["manage"] })
+    const target = await getTarget(userId)
+    if (isAdminRole(target.role) && admin.role !== "super_admin") throw new Error("Only a Super Admin can reset another admin's 2FA.")
+    await db.delete(twoFactor).where(eq(twoFactor.userId, userId))
+    await db.update(user).set({ twoFactorEnabled: false }).where(eq(user.id, userId))
+    await logAdminAction(admin, "user.reset_2fa", userId)
+    return "Two-step verification removed. They can sign in with their password and set it up again."
+  })
+}
+
+export async function sendPasswordResetEmail(userId: string) {
+  return run(async () => {
+    const admin = await assertAdmin({ security: ["manage"] })
+    const target = await getTarget(userId)
+    await auth.api.requestPasswordReset({ body: { email: target.email, redirectTo: "/reset-password" } })
+    await logAdminAction(admin, "user.send_password_reset", userId)
+    return `Reset link sent to ${target.email}.`
+  })
+}
+
+// --- Support -------------------------------------------------------------------
+
+export async function staffReply(ticketId: number, body: string, status: "waiting" | "closed") {
+  return run(async () => {
+    const admin = await assertAdmin({ support: ["reply"] })
+    const text = body.trim()
+    if (!text) throw new Error("Write a reply first.")
+    if (text.length > 5000) throw new Error("Keep it under 5,000 characters.")
+    const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId))
+    if (!ticket) throw new Error("Request not found")
+
+    await db.insert(supportMessages).values({ ticketId, authorId: admin.id, fromStaff: true, body: text })
+    await db.update(supportTickets).set({ status, lastMessageAt: new Date() }).where(eq(supportTickets.id, ticketId))
+    await logAdminAction(admin, "support.reply", ticket.userId, { ticketId, status })
+
+    const target = await getTarget(ticket.userId)
+    const link = `${process.env.BETTER_AUTH_URL ?? ""}/support/${ticketId}`
+    try {
+      await sendEmail({
+        to: target.email,
+        subject: `Re: ${ticket.subject}`,
+        text: `TradeLoop support replied to your request "${ticket.subject}":
+
+${text}
+
+Reply here: ${link}`,
+      })
+      return "Reply sent."
+    } catch (err) {
+      return `Reply saved — the user will see it in the app, but the email didn't go out: ${err instanceof Error ? err.message : err}`
+    }
+  })
+}
+
+export async function setTicketStatus(ticketId: number, status: "open" | "waiting" | "closed") {
+  return run(async () => {
+    const admin = await assertAdmin({ support: ["reply"] })
+    const [ticket] = await db.update(supportTickets).set({ status }).where(eq(supportTickets.id, ticketId)).returning({ userId: supportTickets.userId })
+    if (!ticket) throw new Error("Request not found")
+    await logAdminAction(admin, "support.status", ticket.userId, { ticketId, status })
   })
 }

@@ -300,7 +300,8 @@ export async function getUserProfile(userId: string) {
     banned: boolean | null
     banReason: string | null
     banExpires: Date | null
-  }>(`select id, name, email, "emailVerified", image, "createdAt", role, banned, "banReason", "banExpires" from "user" where id = $1`, [userId])
+    twoFactorEnabled: boolean | null
+  }>(`select id, name, email, "emailVerified", image, "createdAt", role, banned, "banReason", "banExpires", "twoFactorEnabled" from "user" where id = $1`, [userId])
   if (!userRow) return null
 
   const [providers, sessions, subs, counts, rithmic, mt, audit] = await Promise.all([
@@ -444,5 +445,119 @@ export async function listTeam() {
 export async function listAnnouncements() {
   return q<{ id: number; message: string; level: string; active: boolean; endsAt: Date | null; createdBy: string; createdAt: Date }>(
     `select id, message, level, active, "endsAt", "createdBy", "createdAt" from announcements order by "createdAt" desc limit 50`
+  )
+}
+
+// --- Security ----------------------------------------------------------------------
+
+export async function getSecurityOverview() {
+  const [counts] = await q(`
+    select
+      count(*) filter (where type = 'sign_in_failed') as failed,
+      count(*) filter (where type = 'sign_in_blocked') as blocked,
+      count(*) filter (where type = 'two_factor_failed') as two_factor_failed,
+      count(*) filter (where type = 'sign_in') as sign_ins,
+      count(*) filter (where type = 'sign_in' and (details->>'newIp')::boolean) as new_ip,
+      count(*) filter (where type in ('password_reset_requested', 'password_reset')) as resets
+    from security_events where "createdAt" > now() - interval '24 hours'
+  `)
+  const [adoption] = await q(`select count(*) filter (where "twoFactorEnabled") as enabled, count(*) as total from "user"`)
+  // Five or more failures from one IP, or against one email, in a day.
+  const suspiciousIps = await q<{ ip: string; failures: string; emails: string; last: Date }>(`
+    select "ipAddress" as ip, count(*) as failures, count(distinct email) as emails, max("createdAt") as last
+    from security_events
+    where type in ('sign_in_failed', 'two_factor_failed') and "createdAt" > now() - interval '24 hours' and "ipAddress" is not null
+    group by "ipAddress" having count(*) >= 5 order by count(*) desc limit 20
+  `)
+  const targetedEmails = await q<{ email: string; userId: string | null; failures: string; ips: string; last: Date }>(`
+    select email, max("userId") as "userId", count(*) as failures, count(distinct "ipAddress") as ips, max("createdAt") as last
+    from security_events
+    where type = 'sign_in_failed' and "createdAt" > now() - interval '24 hours' and email is not null
+    group by email having count(*) >= 5 order by count(*) desc limit 20
+  `)
+  return {
+    failed24h: n(counts.failed),
+    blocked24h: n(counts.blocked),
+    twoFactorFailed24h: n(counts.two_factor_failed),
+    signIns24h: n(counts.sign_ins),
+    newIp24h: n(counts.new_ip),
+    resets24h: n(counts.resets),
+    twoFactorUsers: n(adoption.enabled),
+    totalUsers: n(adoption.total),
+    suspiciousIps,
+    targetedEmails,
+  }
+}
+
+export type SecurityEventRow = { id: number; type: string; userId: string | null; email: string | null; ipAddress: string | null; userAgent: string | null; details: Record<string, unknown> | null; createdAt: Date }
+
+export async function listSecurityEvents(filters: { type?: string; q?: string; userId?: string; page?: number; limit?: number }) {
+  const params: unknown[] = []
+  const where: string[] = []
+  if (filters.type) {
+    params.push(filters.type)
+    where.push(`type = $${params.length}`)
+  }
+  if (filters.q) {
+    params.push(`%${filters.q}%`)
+    where.push(`(email ilike $${params.length} or "ipAddress" ilike $${params.length})`)
+  }
+  if (filters.userId) {
+    params.push(filters.userId)
+    where.push(`"userId" = $${params.length}`)
+  }
+  const limit = filters.limit ?? PAGE_SIZE
+  const page = Math.max(1, filters.page ?? 1)
+  const sql = `select id, type, "userId", email, "ipAddress", "userAgent", details, "createdAt" from security_events ${where.length ? `where ${where.join(" and ")}` : ""}`
+  const [rows, [{ count }]] = await Promise.all([
+    q<SecurityEventRow>(`${sql} order by "createdAt" desc limit ${limit} offset ${(page - 1) * limit}`, params),
+    q<{ count: string }>(`select count(*) from (${sql}) t`, params),
+  ])
+  return { rows, total: n(count), page }
+}
+
+// --- Support -------------------------------------------------------------------------
+
+export async function listTickets(status: string | undefined) {
+  const params: unknown[] = []
+  let where = ""
+  if (status === "open" || status === "waiting" || status === "closed") {
+    params.push(status)
+    where = `where t.status = $1`
+  }
+  return q<{ id: number; subject: string; status: string; lastMessageAt: Date; createdAt: Date; userId: string; email: string | null; name: string | null; messages: string; lastFromStaff: boolean | null }>(
+    `select t.id, t.subject, t.status, t."lastMessageAt", t."createdAt", t."userId", u.email, u.name,
+       (select count(*) from support_messages m where m."ticketId" = t.id) as messages,
+       (select m."fromStaff" from support_messages m where m."ticketId" = t.id order by m."createdAt" desc limit 1) as "lastFromStaff"
+     from support_tickets t left join "user" u on u.id = t."userId"
+     ${where}
+     order by (t.status = 'open') desc, t."lastMessageAt" desc limit 200`,
+    params
+  )
+}
+
+export async function getTicket(id: number) {
+  const [ticket] = await q<{ id: number; subject: string; status: string; createdAt: Date; userId: string; email: string | null; name: string | null }>(
+    `select t.id, t.subject, t.status, t."createdAt", t."userId", u.email, u.name from support_tickets t left join "user" u on u.id = t."userId" where t.id = $1`,
+    [id]
+  )
+  if (!ticket) return null
+  const messages = await q<{ id: number; body: string; fromStaff: boolean; createdAt: Date; authorEmail: string | null; authorName: string | null }>(
+    `select m.id, m.body, m."fromStaff", m."createdAt", a.email as "authorEmail", a.name as "authorName"
+     from support_messages m left join "user" a on a.id = m."authorId" where m."ticketId" = $1 order by m."createdAt"`,
+    [id]
+  )
+  return { ticket, messages }
+}
+
+export async function openTicketCount() {
+  const [row] = await q(`select count(*) from support_tickets where status = 'open'`)
+  return n(row.count)
+}
+
+export async function listUserTickets(userId: string) {
+  return q<{ id: number; subject: string; status: string; lastMessageAt: Date }>(
+    `select id, subject, status, "lastMessageAt" from support_tickets where "userId" = $1 order by "lastMessageAt" desc limit 20`,
+    [userId]
   )
 }

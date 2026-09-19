@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
-import { Ban, Gift, LogIn, LogOut, ShieldCheck } from "lucide-react"
+import { Ban, Gift, KeyRound, LogIn, LogOut, ShieldCheck, ShieldOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { grantPlan, impersonateUser, revokeUserSessions, suspendUser, unsuspendUser, type ActionResult } from "@/app/actions/admin"
+import { grantPlan, impersonateUser, resetTwoFactor, revokeUserSessions, sendPasswordResetEmail, suspendUser, unsuspendUser, type ActionResult } from "@/app/actions/admin"
 
 type Panel = "suspend" | "grant" | null
 
@@ -14,13 +14,17 @@ export function UserActions({
   userLabel,
   banned,
   isSelf,
+  twoFactorEnabled,
+  hasPassword,
   can,
 }: {
   userId: string
   userLabel: string
   banned: boolean
   isSelf: boolean
-  can: { impersonate: boolean; ban: boolean; revoke: boolean; grant: boolean }
+  twoFactorEnabled: boolean
+  hasPassword: boolean
+  can: { impersonate: boolean; ban: boolean; revoke: boolean; grant: boolean; security: boolean }
 }) {
   const [pending, startTransition] = useTransition()
   const [panel, setPanel] = useState<Panel>(null)
@@ -69,6 +73,29 @@ export function UserActions({
             }}
           >
             <LogOut className="size-4" /> Sign out everywhere
+          </Button>
+        )}
+        {can.security && hasPassword && (
+          <Button
+            variant="outline"
+            disabled={pending}
+            onClick={() => {
+              if (confirm(`Email ${userLabel} a link to choose a new password?`)) perform(() => sendPasswordResetEmail(userId), "Reset link sent.")
+            }}
+          >
+            <KeyRound className="size-4" /> Send password reset
+          </Button>
+        )}
+        {can.security && twoFactorEnabled && (
+          <Button
+            variant="outline"
+            disabled={pending}
+            onClick={() => {
+              if (confirm(`Remove two-step verification from ${userLabel}? Only do this after confirming it's really them — e.g. they lost their phone.`))
+                perform(() => resetTwoFactor(userId), "2FA removed.")
+            }}
+          >
+            <ShieldOff className="size-4" /> Reset 2FA
           </Button>
         )}
         {can.grant && (

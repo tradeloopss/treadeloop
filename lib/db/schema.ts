@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, serial, numeric, integer, jsonb, uniqueIndex } from "drizzle-orm/pg-core"
+import { pgTable, text, timestamp, boolean, serial, numeric, integer, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core"
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -17,7 +17,25 @@ export const user = pgTable("user", {
   banned: boolean("banned").default(false),
   banReason: text("banReason"),
   banExpires: timestamp("banExpires"),
+  // Better Auth two-factor plugin (authenticator-app codes + backup codes).
+  twoFactorEnabled: boolean("twoFactorEnabled").default(false),
 })
+
+export const twoFactor = pgTable(
+  "twoFactor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backupCodes").notNull(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: boolean("verified").default(true),
+    failedVerificationCount: integer("failedVerificationCount").default(0),
+    lockedUntil: timestamp("lockedUntil"),
+  },
+  (t) => [index("twoFactor_secret_idx").on(t.secret), index("twoFactor_userId_idx").on(t.userId)]
+)
 
 export const session = pgTable("session", {
   id: text("id").primaryKey(),
@@ -376,3 +394,45 @@ export const announcements = pgTable("announcements", {
   createdBy: text("createdBy").notNull(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
+
+// Sign-ins, failed attempts, password and 2FA changes — written by the auth
+// hook in lib/security.ts, read by the admin Security page.
+export const securityEvents = pgTable(
+  "security_events",
+  {
+    id: serial("id").primaryKey(),
+    type: text("type").notNull(), // sign_in | sign_in_failed | sign_in_blocked | two_factor_failed | ...
+    userId: text("userId"),
+    email: text("email"),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    details: jsonb("details"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("security_events_created_idx").on(t.createdAt), index("security_events_user_idx").on(t.userId)]
+)
+
+// In-app support desk: a user opens a ticket, staff reply from /admin/support.
+export const supportTickets = pgTable("support_tickets", {
+  id: serial("id").primaryKey(),
+  userId: text("userId").notNull(),
+  subject: text("subject").notNull(),
+  status: text("status").notNull().default("open"), // open (needs staff) | waiting (on the user) | closed
+  lastMessageAt: timestamp("lastMessageAt").notNull().defaultNow(),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+export const supportMessages = pgTable(
+  "support_messages",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticketId")
+      .notNull()
+      .references(() => supportTickets.id, { onDelete: "cascade" }),
+    authorId: text("authorId").notNull(),
+    fromStaff: boolean("fromStaff").notNull().default(false),
+    body: text("body").notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("support_messages_ticket_idx").on(t.ticketId)]
+)

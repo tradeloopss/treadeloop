@@ -9,6 +9,7 @@ import { AccountManager, type AccountCard } from "@/components/account-manager"
 import { ChangePasswordForm } from "@/components/change-password-form"
 import { DangerZone } from "@/components/danger-zone"
 import { SubscriptionPanel, type SubscriptionInfo } from "@/components/subscription-panel"
+import { TwoFactorPanel } from "@/components/two-factor-panel"
 import { User, UserRound, Settings, Lock, CreditCard, Wallet, TriangleAlert } from "lucide-react"
 
 type Tab = "accounts" | "security" | "subscription" | "danger"
@@ -18,11 +19,15 @@ export function SettingsShell({
   subscription,
   isOwner,
   isPro,
+  twoFactorEnabled,
+  hasPassword,
 }: {
   accounts: AccountCard[]
   subscription: SubscriptionInfo | null
   isOwner: boolean
   isPro: boolean
+  twoFactorEnabled: boolean
+  hasPassword: boolean
 }) {
   const [tab, setTab] = useState<Tab>("accounts")
 
@@ -57,7 +62,12 @@ export function SettingsShell({
 
       <div className="min-w-0 flex-1">
         {tab === "accounts" && <AccountManager accounts={accounts} isPro={isPro || isOwner} />}
-        {tab === "security" && <ChangePasswordForm />}
+        {tab === "security" && (
+          <>
+            {hasPassword && <ChangePasswordForm />}
+            <TwoFactorPanel enabled={twoFactorEnabled} hasPassword={hasPassword} />
+          </>
+        )}
         {tab === "subscription" && <SubscriptionPanel subscription={subscription} isOwner={isOwner} />}
         {tab === "danger" && <DangerZone />}
       </div>

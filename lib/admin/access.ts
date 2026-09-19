@@ -15,6 +15,8 @@ export const statement = {
   announcements: ["manage"],
   audit: ["view"],
   team: ["manage"],
+  security: ["view", "manage"],
+  support: ["view", "reply"],
 } as const
 
 export const ac = createAccessControl(statement)
@@ -31,6 +33,8 @@ export const roles = {
     announcements: ["manage"],
     audit: ["view"],
     team: ["manage"],
+    security: ["view", "manage"],
+    support: ["view", "reply"],
   }),
   support: ac.newRole({
     user: ["list", "get", "ban", "impersonate"],
@@ -38,6 +42,9 @@ export const roles = {
     billing: ["view"],
     brokers: ["view", "sync"],
     analytics: ["view"],
+    // "manage" = reset a user's 2FA and send password-reset emails.
+    security: ["view", "manage"],
+    support: ["view", "reply"],
   }),
   billing: ac.newRole({
     user: ["list", "get"],
