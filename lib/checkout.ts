@@ -62,6 +62,7 @@ export async function createCheckout(
       userId: user.id,
       email: user.email,
       plan,
+      billing,
       status: PENDING_STATUS,
       whopPlanId: config.plan.id,
     })

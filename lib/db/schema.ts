@@ -11,6 +11,12 @@ export const user = pgTable("user", {
   image: text("image"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  // Better Auth admin plugin (lib/admin/access.ts has the roles). A banned
+  // user can't sign in; the admin panel calls that "Suspended".
+  role: text("role"),
+  banned: boolean("banned").default(false),
+  banReason: text("banReason"),
+  banExpires: timestamp("banExpires"),
 })
 
 export const session = pgTable("session", {
@@ -24,6 +30,8 @@ export const session = pgTable("session", {
   userId: text("userId")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+  // Set on sessions an admin opened with "Log in as user" (admin plugin).
+  impersonatedBy: text("impersonatedBy"),
 })
 
 export const account = pgTable("account", {
@@ -335,6 +343,36 @@ export const subscriptions = pgTable("subscriptions", {
   whopMembershipId: text("whopMembershipId").unique(),
   whopPlanId: text("whopPlanId"),
   currentPeriodEnd: timestamp("currentPeriodEnd"),
+  // monthly | annual — from the checkout; null on rows from before it was
+  // recorded. Revenue estimates treat null as monthly.
+  billing: text("billing"),
+  // whop | admin. An admin grant is access given from the admin panel with
+  // no payment behind it; it lapses at currentPeriodEnd.
+  source: text("source").notNull().default("whop"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
+// Every action taken from the admin panel, written by lib/admin/audit.ts.
+// Append-only: nothing in the app updates or deletes these rows.
+export const adminAuditLog = pgTable("admin_audit_log", {
+  id: serial("id").primaryKey(),
+  actorId: text("actorId").notNull(),
+  actorEmail: text("actorEmail").notNull(),
+  action: text("action").notNull(), // e.g. user.suspend, user.impersonate, plan.grant
+  targetUserId: text("targetUserId"),
+  details: jsonb("details"),
+  ipAddress: text("ipAddress"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+// App-wide banners shown at the top of every signed-in page while active.
+export const announcements = pgTable("announcements", {
+  id: serial("id").primaryKey(),
+  message: text("message").notNull(),
+  level: text("level").notNull().default("info"), // info | warning
+  active: boolean("active").notNull().default(true),
+  endsAt: timestamp("endsAt"),
+  createdBy: text("createdBy").notNull(),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
 })

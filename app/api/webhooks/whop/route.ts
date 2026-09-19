@@ -11,6 +11,11 @@ function tierFromMetadata(metadata: Record<string, unknown> | null | undefined):
   return value === "essential" || value === "pro" ? value : "unknown"
 }
 
+function billingFromMetadata(metadata: Record<string, unknown> | null | undefined): "monthly" | "annual" | null {
+  const value = metadata?.billing
+  return value === "monthly" || value === "annual" ? value : null
+}
+
 // Whop's own SDK ships no typed model for a delivered webhook's wrapper
 // shape (verified directly in its source — Fern generates event *names*,
 // not payload models). This reads defensively across the plausible wrapper
@@ -53,6 +58,7 @@ async function handlePaymentSucceeded(payment: Record<string, any>) {
   // didn't go through that flow.
   const metaTier = tierFromMetadata(payment.metadata)
   const tier = metaTier !== "unknown" ? metaTier : tierFromPlanId(planId)
+  const billing = billingFromMetadata(payment.metadata)
 
   const existing = await findSubscriptionRow(membershipId, planId)
   if (existing) {
@@ -63,6 +69,7 @@ async function handlePaymentSucceeded(payment: Record<string, any>) {
         email: email ?? existing.email,
         whopMembershipId: membershipId,
         plan: tier === "unknown" ? existing.plan : tier,
+        billing: billing ?? existing.billing,
         whopPlanId: planId ?? existing.whopPlanId,
         status: "active",
         updatedAt: new Date(),
@@ -73,6 +80,7 @@ async function handlePaymentSucceeded(payment: Record<string, any>) {
       userId,
       email: email ?? "",
       plan: tier === "unknown" ? "essential" : tier,
+      billing,
       whopPlanId: planId,
       whopMembershipId: membershipId,
       status: "active",
@@ -98,6 +106,7 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
   const planId: string | null = membership.plan_id ?? membership.plan?.id ?? null
   const metaTier = tierFromMetadata(membership.metadata)
   const tier = metaTier !== "unknown" ? metaTier : tierFromPlanId(planId)
+  const billing = billingFromMetadata(membership.metadata)
   const userId: string | undefined = membership.metadata?.app_user_id
 
   const existing = await findSubscriptionRow(membershipId, planId)
@@ -108,6 +117,7 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
         userId: userId ?? existing.userId,
         whopMembershipId: membershipId,
         plan: tier === "unknown" ? existing.plan : tier,
+        billing: billing ?? existing.billing,
         status,
         currentPeriodEnd,
         updatedAt: new Date(),
@@ -118,6 +128,7 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
       userId: userId ?? null,
       email: "", // Membership carries no email — payment.succeeded backfills it once/if a real charge lands
       plan: tier === "unknown" ? "essential" : tier,
+      billing,
       whopPlanId: planId,
       whopMembershipId: membershipId,
       status,

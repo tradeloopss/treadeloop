@@ -13,10 +13,27 @@ const OWNER_EMAILS = (process.env.OWNER_EMAILS ?? "")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean)
 
+export function isOwnerEmail(email: string): boolean {
+  return OWNER_EMAILS.includes(email.toLowerCase())
+}
+
+export function ownerEmails(): string[] {
+  return OWNER_EMAILS
+}
+
 export async function isOwner(userId: string): Promise<boolean> {
   if (OWNER_EMAILS.length === 0) return false
   const [row] = await db.select({ email: user.email }).from(user).where(eq(user.id, userId))
-  return row != null && OWNER_EMAILS.includes(row.email.toLowerCase())
+  return row != null && isOwnerEmail(row.email)
+}
+
+// Whether a subscriptions row grants access right now. Admin grants lapse at
+// currentPeriodEnd; Whop rows are kept current by the webhook instead, so
+// their period end isn't enforced here.
+export function rowGrantsAccess(row: { status: string; source: string; currentPeriodEnd: Date | null }): boolean {
+  if (!ACTIVE_STATUSES.includes(row.status)) return false
+  if (row.source === "admin" && row.currentPeriodEnd && row.currentPeriodEnd.getTime() < Date.now()) return false
+  return true
 }
 
 // No matching subscription at all (the common case before Whop is fully
@@ -25,7 +42,7 @@ export async function isOwner(userId: string): Promise<boolean> {
 export async function getUserPlan(userId: string): Promise<"pro" | "essential" | null> {
   if (await isOwner(userId)) return "pro"
   const rows = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId)).orderBy(desc(subscriptions.updatedAt))
-  const active = rows.filter((r) => ACTIVE_STATUSES.includes(r.status))
+  const active = rows.filter(rowGrantsAccess)
   if (active.some((r) => r.plan === "pro")) return "pro"
   if (active.length > 0) return "essential"
   return null

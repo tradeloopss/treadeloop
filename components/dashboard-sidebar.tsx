@@ -50,7 +50,7 @@ const links = [
 
 const COLLAPSED_KEY = "sidebarCollapsed"
 
-export function DashboardSidebar({ userName, userImage }: { userName: string; userImage?: string | null }) {
+export function DashboardSidebar({ userName, userImage, isAdmin = false }: { userName: string; userImage?: string | null; isAdmin?: boolean }) {
   const pathname = usePathname()
   const router = useRouter()
   const { resolvedTheme, setTheme } = useTheme()
@@ -257,6 +257,12 @@ export function DashboardSidebar({ userName, userImage }: { userName: string; us
                 <Plug className="size-4" />
                 Settings
               </DropdownMenuItem>
+              {isAdmin && (
+                <DropdownMenuItem render={<Link href="/admin" />}>
+                  <ShieldCheck className="size-4" />
+                  Admin panel
+                </DropdownMenuItem>
+              )}
 
               <DropdownMenuSeparator />
 

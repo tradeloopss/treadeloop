@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth"
 import { nextCookies } from "better-auth/next-js"
+import { admin } from "better-auth/plugins"
 import { pool } from "@/lib/db"
+import { ac, roles, ADMIN_ROLES } from "@/lib/admin/access"
 
 /** Whether Google OAuth credentials are configured on this deployment. */
 export const googleAuthEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
@@ -91,5 +93,17 @@ export const auth = betterAuth({
         },
       }
     : {}),
-  plugins: [nextCookies()],
+  plugins: [
+    admin({
+      ac,
+      roles,
+      adminRoles: [...ADMIN_ROLES],
+      // "Log in as user" sessions are short on purpose; every one is also
+      // recorded in the admin audit log.
+      impersonationSessionDuration: 30 * 60,
+      bannedUserMessage: "This account has been suspended. Contact support@tradeloop.pro.",
+    }),
+    // Must stay last so it sees the cookies every other plugin sets.
+    nextCookies(),
+  ],
 })
