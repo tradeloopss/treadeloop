@@ -56,7 +56,7 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">
               <thead>
-                <tr className="text-left text-xs text-muted-foreground">
+                <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Broker</th>
                   <th className="pb-2 font-medium">User</th>
                   <th className="pb-2 font-medium">Status</th>
@@ -68,17 +68,17 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
               <tbody className="divide-y">
                 {[...problems, ...health.connections.filter((c) => c.health === "healthy")].map((c) => (
                   <tr key={`${c.broker}${c.id}`}>
-                    <td className="py-2.5 pr-3">
+                    <td className="py-2.5 pe-3">
                       <span className="font-medium">{c.broker === "rithmic" ? "Rithmic" : "MetaTrader"}</span>
                       <span className="block text-xs text-muted-foreground">{c.label}</span>
                     </td>
-                    <td className="py-2.5 pr-3">
+                    <td className="py-2.5 pe-3">
                       <Link href={`/admin/users/${c.userId}`} className="hover:text-primary">{c.email ?? c.userId}</Link>
                     </td>
-                    <td className="py-2.5 pr-3"><SyncStatus status={c.health} /></td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{fmtAgo(c.lastSyncedAt)}{c.lastSyncCount ? ` · ${c.lastSyncCount} trades` : ""}</td>
-                    <td className="max-w-[280px] truncate py-2.5 pr-3 text-xs text-muted-foreground" title={c.lastSyncError ?? undefined}>{c.lastSyncError ?? "—"}</td>
-                    <td className="py-2.5 text-right">{canSync && c.broker === "rithmic" && <ForceSyncButton connectionId={c.id} />}</td>
+                    <td className="py-2.5 pe-3"><SyncStatus status={c.health} /></td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{fmtAgo(c.lastSyncedAt)}{c.lastSyncCount ? ` · ${c.lastSyncCount} trades` : ""}</td>
+                    <td className="max-w-[280px] truncate py-2.5 pe-3 text-xs text-muted-foreground" title={c.lastSyncError ?? undefined}>{c.lastSyncError ?? "—"}</td>
+                    <td className="py-2.5 text-end">{canSync && c.broker === "rithmic" && <ForceSyncButton connectionId={c.id} />}</td>
                   </tr>
                 ))}
                 {health.connections.length === 0 && <EmptyRow colSpan={6}>No broker connections yet.</EmptyRow>}
@@ -106,30 +106,30 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">
               <thead>
-                <tr className="text-left text-xs text-muted-foreground">
+                <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">When</th>
                   <th className="pb-2 font-medium">Broker</th>
                   <th className="pb-2 font-medium">User</th>
                   <th className="pb-2 font-medium">Trigger</th>
                   <th className="pb-2 font-medium">Result</th>
-                  <th className="pb-2 text-right font-medium">Took</th>
+                  <th className="pb-2 text-end font-medium">Took</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {runs.map((r) => (
                   <tr key={r.id}>
-                    <td className="whitespace-nowrap py-2 pr-3 text-muted-foreground">{fmtAgo(r.createdAt)}</td>
-                    <td className="py-2 pr-3">
+                    <td className="whitespace-nowrap py-2 pe-3 text-muted-foreground">{fmtAgo(r.createdAt)}</td>
+                    <td className="py-2 pe-3">
                       {r.broker === "rithmic" ? "Rithmic" : "MetaTrader"} <span className="text-xs text-muted-foreground">#{r.connectionId}</span>
                     </td>
-                    <td className="max-w-[200px] truncate py-2 pr-3">
+                    <td className="max-w-[200px] truncate py-2 pe-3">
                       <Link href={`/admin/users/${r.userId}`} className="hover:text-primary">{r.email ?? r.userId}</Link>
                     </td>
-                    <td className="py-2 pr-3 text-muted-foreground">{TRIGGER_LABELS[r.trigger] ?? r.trigger}</td>
-                    <td className="max-w-[320px] py-2 pr-3">
+                    <td className="py-2 pe-3 text-muted-foreground">{TRIGGER_LABELS[r.trigger] ?? r.trigger}</td>
+                    <td className="max-w-[320px] py-2 pe-3">
                       {r.status === "ok" ? (
                         <span>
-                          <StatePill state="active">OK</StatePill> <span className="ml-1 text-xs text-muted-foreground">{r.imported ?? 0} new</span>
+                          <StatePill state="active">OK</StatePill> <span className="ms-1 text-xs text-muted-foreground">{r.imported ?? 0} new</span>
                         </span>
                       ) : (
                         <span className="flex items-center gap-2">
@@ -138,7 +138,7 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
                         </span>
                       )}
                     </td>
-                    <td className="py-2 text-right tabular-nums text-muted-foreground">
+                    <td className="py-2 text-end tabular-nums text-muted-foreground">
                       {r.durationMs == null ? "—" : r.durationMs < 1000 ? `${r.durationMs} ms` : `${(r.durationMs / 1000).toFixed(1)} s`}
                     </td>
                   </tr>

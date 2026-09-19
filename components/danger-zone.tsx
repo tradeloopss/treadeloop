@@ -18,9 +18,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 export function DangerZone() {
   const router = useRouter()
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [password, setPassword] = useState("")
   const [deleting, setDeleting] = useState(false)
@@ -30,11 +32,11 @@ export function DangerZone() {
     setDeleting(true)
     try {
       const { error } = await authClient.deleteUser({ password })
-      if (error) throw new Error(error.message ?? "Could not delete account")
-      toast.success("Account deleted")
+      if (error) throw new Error(error.message ?? t("Could not delete account"))
+      toast.success(t("Account deleted"))
       router.push("/sign-in")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete account")
+      toast.error(err instanceof Error ? t(err.message) : t("Could not delete account"))
     } finally {
       setDeleting(false)
     }
@@ -42,23 +44,22 @@ export function DangerZone() {
 
   return (
     <Card className="max-w-lg border-destructive/30 p-5">
-      <h2 className="font-medium text-destructive">Danger zone</h2>
+      <h2 className="font-medium text-destructive">{t("Danger zone")}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Permanently delete your account, trades, journal, and every setting. This can't be undone.
+        {t("Permanently delete your account, trades, journal, and every setting. This can't be undone.")}
       </p>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger render={<Button variant="destructive" className="mt-3">Delete account</Button>} />
+        <DialogTrigger render={<Button variant="destructive" className="mt-3">{t("Delete account")}</Button>} />
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogTitle>{t("Delete your account?")}</DialogTitle>
             <DialogDescription>
-              This permanently deletes everything — trades, journal entries, playbooks, connected accounts. Confirm
-              with your password.
+              {t("This permanently deletes everything — trades, journal entries, playbooks, connected accounts. Confirm with your password.")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onDelete} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="delete-password">Password</Label>
+              <Label htmlFor="delete-password">{t("Password")}</Label>
               <Input
                 id="delete-password"
                 type="password"
@@ -69,7 +70,7 @@ export function DangerZone() {
             </div>
             <DialogFooter>
               <Button type="submit" variant="destructive" disabled={deleting} className="w-full">
-                {deleting ? "Deleting…" : "Permanently delete my account"}
+                {deleting ? t("Deleting…") : t("Permanently delete my account")}
               </Button>
             </DialogFooter>
           </form>

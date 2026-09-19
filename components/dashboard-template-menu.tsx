@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog"
 import { ChevronDown, ChevronUp, Check, GripVertical, LayoutGrid, Move, Pencil, Plus, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 type Draft = {
   id: number | null
@@ -58,6 +59,7 @@ export function DashboardTemplateMenu({
   active: DashboardTemplate
 }) {
   const router = useRouter()
+  const t = useT()
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -89,7 +91,7 @@ export function DashboardTemplateMenu({
       router.refresh()
       return true
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Something went wrong")
+      toast.error(error instanceof Error ? t(error.message) : t("Something went wrong"))
       return false
     } finally {
       setBusy(false)
@@ -102,8 +104,8 @@ export function DashboardTemplateMenu({
       () =>
         draft.id
           ? updateTemplate(draft.id, draft.name, draft.stats, draft.panels)
-          : createTemplate(draft.name || "My template", draft.stats, draft.panels),
-      draft.id ? "Template saved" : "Template created",
+          : createTemplate(draft.name || t("My template"), draft.stats, draft.panels),
+      draft.id ? t("Template saved") : t("Template created"),
     )
     if (ok) setDraft(null)
   }
@@ -115,7 +117,7 @@ export function DashboardTemplateMenu({
           render={
             <Button variant="outline">
               <LayoutGrid className="size-4" />
-              Template
+              {t("Template")}
               <ChevronDown className="size-4 opacity-60" />
             </Button>
           }
@@ -124,7 +126,7 @@ export function DashboardTemplateMenu({
           {/* GroupLabel is only valid inside a Group, so the label and the rows
               it names live in one. */}
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Dashboard templates</DropdownMenuLabel>
+            <DropdownMenuLabel>{t("Dashboard templates")}</DropdownMenuLabel>
 
             {/* The built-in layout is a selectable option, so a trader who saves
                 templates can always get back to it. Its pencil opens the editor
@@ -136,22 +138,22 @@ export function DashboardTemplateMenu({
                 disabled={busy}
                 onClick={() => {
                   if (active.id !== DEFAULT_TEMPLATE.id) {
-                    void run(() => selectDefaultTemplate(), "Switched to the default layout")
+                    void run(() => selectDefaultTemplate(), t("Switched to the default layout"))
                   }
                 }}
                 className={cn(
-                  "flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent",
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm hover:bg-accent",
                   active.id === DEFAULT_TEMPLATE.id && "font-medium"
                 )}
               >
                 <Check className={cn("size-4 shrink-0", active.id === DEFAULT_TEMPLATE.id ? "opacity-100" : "opacity-0")} />
-                <span className="truncate">{DEFAULT_TEMPLATE.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">Built-in</span>
+                <span className="truncate">{t(DEFAULT_TEMPLATE.name)}</span>
+                <span className="ms-auto shrink-0 text-xs text-muted-foreground">{t("Built-in")}</span>
               </button>
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Create a template from the default layout"
+                aria-label={t("Create a template from the default layout")}
                 onClick={() => openEditor(DEFAULT_TEMPLATE)}
               >
                 <Pencil className="size-3.5" />
@@ -165,10 +167,10 @@ export function DashboardTemplateMenu({
                   disabled={busy}
                   onClick={() => {
                     if (!template.isActive)
-                      void run(() => activateTemplate(template.id), `Switched to ${template.name}`)
+                      void run(() => activateTemplate(template.id), t("Switched to {name}", { name: template.name }))
                   }}
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent",
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm hover:bg-accent",
                     template.isActive && "font-medium",
                   )}
                 >
@@ -178,7 +180,7 @@ export function DashboardTemplateMenu({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={`Edit ${template.name}`}
+                  aria-label={t("Edit {name}", { name: template.name })}
                   onClick={() => openEditor(template)}
                 >
                   <Pencil className="size-3.5" />
@@ -186,9 +188,9 @@ export function DashboardTemplateMenu({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={`Delete ${template.name}`}
+                  aria-label={t("Delete {name}", { name: template.name })}
                   disabled={busy}
-                  onClick={() => void run(() => deleteTemplate(template.id), `Deleted ${template.name}`)}
+                  onClick={() => void run(() => deleteTemplate(template.id), t("Deleted {name}", { name: template.name }))}
                 >
                   <Trash2 className="size-3.5 text-[var(--loss)]" />
                 </Button>
@@ -202,15 +204,15 @@ export function DashboardTemplateMenu({
               having to share client state. */}
           <DropdownMenuItem render={<Link href="/dashboard?edit=1" />}>
             <Move className="size-4" />
-            Edit layout on the dashboard
+            {t("Edit layout on the dashboard")}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => openEditor(active)}>
             <Pencil className="size-4" />
-            Edit in a list
+            {t("Edit in a list")}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => openEditor(null)}>
             <Plus className="size-4" />
-            Create New Template
+            {t("Create New Template")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -218,26 +220,26 @@ export function DashboardTemplateMenu({
       <Dialog open={draft != null} onOpenChange={(open) => !open && setDraft(null)}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{draft?.id ? "Edit template" : "Create new template"}</DialogTitle>
-            <DialogDescription>Add, remove or rearrange widgets to fit your preferences, then save.</DialogDescription>
+            <DialogTitle>{draft?.id ? t("Edit template") : t("Create new template")}</DialogTitle>
+            <DialogDescription>{t("Add, remove or rearrange widgets to fit your preferences, then save.")}</DialogDescription>
           </DialogHeader>
 
           {draft && (
             <div className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="template-name">Template name</Label>
+                <Label htmlFor="template-name">{t("Template name")}</Label>
                 <Input
                   id="template-name"
                   value={draft.name}
-                  placeholder="e.g. Risk review"
+                  placeholder={t("e.g. Risk review")}
                   maxLength={60}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
               </div>
 
               <WidgetSection
-                title="Top row"
-                hint={`Key metrics — up to ${MAX_STAT_WIDGETS} widgets`}
+                title={t("Top row")}
+                hint={t("Key metrics — up to {max} widgets", { max: MAX_STAT_WIDGETS })}
                 catalogue={STAT_WIDGETS}
                 selected={draft.stats}
                 max={MAX_STAT_WIDGETS}
@@ -245,8 +247,8 @@ export function DashboardTemplateMenu({
               />
 
               <WidgetSection
-                title="Lower section"
-                hint="Charts and detailed insights — no limit"
+                title={t("Lower section")}
+                hint={t("Charts and detailed insights — no limit")}
                 catalogue={PANEL_WIDGETS}
                 selected={draft.panels}
                 onChange={(panels) => setDraft({ ...draft, panels })}
@@ -256,10 +258,10 @@ export function DashboardTemplateMenu({
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDraft(null)} disabled={busy}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button onClick={onSave} disabled={busy}>
-              {busy ? "Saving…" : "Save"}
+              {busy ? t("Saving…") : t("Save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -283,6 +285,7 @@ function WidgetSection({
   max?: number
   onChange: (ids: string[]) => void
 }) {
+  const t = useT()
   const [dragging, setDragging] = useState<string | null>(null)
   const available = catalogue.filter((w) => !selected.includes(w.id))
   const full = max != null && selected.length >= max
@@ -310,13 +313,13 @@ function WidgetSection({
         <h3 className="text-sm font-medium">{title}</h3>
         <p className="text-xs text-muted-foreground">
           {hint}
-          {max != null && ` · ${selected.length}/${max} used`}
+          {max != null && ` · ${t("{used}/{max} used", { used: selected.length, max })}`}
         </p>
       </div>
 
       {selected.length === 0 ? (
         <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-          No widgets in this section yet — add one below.
+          {t("No widgets in this section yet — add one below.")}
         </p>
       ) : (
         <ul className="space-y-1.5">
@@ -338,15 +341,15 @@ function WidgetSection({
               >
                 <GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{widget.label}</p>
-                  <p className="truncate text-xs text-muted-foreground">{widget.description}</p>
+                  <p className="truncate text-sm font-medium">{t(widget.label)}</p>
+                  <p className="truncate text-xs text-muted-foreground">{t(widget.description)}</p>
                 </div>
                 {/* Drag is the quick path; the arrows keep reordering possible
                     with a keyboard or on touch, where HTML5 drag doesn't fire. */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Move up"
+                  aria-label={t("Move up")}
                   disabled={i === 0}
                   onClick={() => move(id, -1)}
                 >
@@ -355,7 +358,7 @@ function WidgetSection({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Move down"
+                  aria-label={t("Move down")}
                   disabled={i === selected.length - 1}
                   onClick={() => move(id, 1)}
                 >
@@ -364,7 +367,7 @@ function WidgetSection({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={`Remove ${widget.label}`}
+                  aria-label={t("Remove {name}", { name: t(widget.label) })}
                   onClick={() => onChange(selected.filter((w) => w !== id))}
                 >
                   <X className="size-3.5" />
@@ -383,11 +386,11 @@ function WidgetSection({
               variant="outline"
               size="sm"
               disabled={full}
-              title={full ? `The top row holds at most ${max} widgets` : widget.description}
+              title={full ? t("The top row holds at most {max} widgets", { max: max ?? 0 }) : t(widget.description)}
               onClick={() => onChange([...selected, widget.id])}
             >
               <Plus className="size-3.5" />
-              {widget.label}
+              {t(widget.label)}
             </Button>
           ))}
         </div>

@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card"
 import { TicketReplyForm } from "@/components/support-forms"
 import { TicketStatus } from "@/components/ticket-status"
 import { TicketThread } from "@/components/ticket-thread"
+import { getT } from "@/lib/i18n/server"
 
 export default async function SupportTicketPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -20,12 +21,13 @@ export default async function SupportTicketPage({ params }: { params: Promise<{ 
     .from(supportTickets)
     .where(and(eq(supportTickets.id, id), eq(supportTickets.userId, session.user.id)))
   if (!ticket) notFound()
+  const t = await getT()
   const messages = await db.select().from(supportMessages).where(eq(supportMessages.ticketId, id)).orderBy(asc(supportMessages.createdAt))
 
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">
       <Link href="/support" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> All requests
+        <ArrowLeft className="size-4" /> {t("All requests")}
       </Link>
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">{ticket.subject}</h1>
@@ -33,7 +35,7 @@ export default async function SupportTicketPage({ params }: { params: Promise<{ 
       </div>
       <TicketThread
         viewer="user"
-        messages={messages.map((m) => ({ ...m, authorLabel: m.fromStaff ? "TradeLoop support" : "You" }))}
+        messages={messages.map((m) => ({ ...m, authorLabel: m.fromStaff ? t("TradeLoop support") : t("You") }))}
       />
       <Card className="mt-6 gap-0 p-4">
         <TicketReplyForm ticketId={ticket.id} closed={ticket.status === "closed"} />

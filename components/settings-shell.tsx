@@ -11,6 +11,7 @@ import { DangerZone } from "@/components/danger-zone"
 import { SubscriptionPanel, type SubscriptionInfo } from "@/components/subscription-panel"
 import { TwoFactorPanel } from "@/components/two-factor-panel"
 import { User, UserRound, Settings, Lock, CreditCard, Wallet, TriangleAlert } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 type Tab = "accounts" | "security" | "subscription" | "danger"
 
@@ -29,6 +30,7 @@ export function SettingsShell({
   twoFactorEnabled: boolean
   hasPassword: boolean
 }) {
+  const t = useT()
   const [tab, setTab] = useState<Tab>("accounts")
 
   return (
@@ -36,26 +38,26 @@ export function SettingsShell({
       <Card className="w-full shrink-0 gap-5 p-4 lg:w-64">
         <div>
           <div className="flex items-center gap-1.5 px-2 pb-2 text-xs font-semibold tracking-wide text-primary uppercase">
-            <UserRound className="size-3.5" /> User
+            <UserRound className="size-3.5" /> {t("User")}
           </div>
-          <div className="ml-3.5 flex flex-col gap-0.5 border-l pl-3">
+          <div className="ms-3.5 flex flex-col gap-0.5 border-s ps-3">
             <Link
               href="/profile"
               className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
             >
-              <User className="size-4" /> Profile
+              <User className="size-4" /> {t("Profile")}
             </Link>
-            <NavButton icon={Lock} label="Security" active={tab === "security"} onClick={() => setTab("security")} />
-            <NavButton icon={CreditCard} label="Subscription" active={tab === "subscription"} onClick={() => setTab("subscription")} />
+            <NavButton icon={Lock} label={t("Security")} active={tab === "security"} onClick={() => setTab("security")} />
+            <NavButton icon={CreditCard} label={t("Subscription")} active={tab === "subscription"} onClick={() => setTab("subscription")} />
           </div>
         </div>
         <div>
           <div className="flex items-center gap-1.5 px-2 pb-2 text-xs font-semibold tracking-wide text-primary uppercase">
-            <Settings className="size-3.5" /> General
+            <Settings className="size-3.5" /> {t("General")}
           </div>
-          <div className="ml-3.5 flex flex-col gap-0.5 border-l pl-3">
-            <NavButton icon={Wallet} label="Accounts" active={tab === "accounts"} onClick={() => setTab("accounts")} />
-            <NavButton icon={TriangleAlert} label="Danger zone" active={tab === "danger"} onClick={() => setTab("danger")} />
+          <div className="ms-3.5 flex flex-col gap-0.5 border-s ps-3">
+            <NavButton icon={Wallet} label={t("Accounts")} active={tab === "accounts"} onClick={() => setTab("accounts")} />
+            <NavButton icon={TriangleAlert} label={t("Danger zone")} active={tab === "danger"} onClick={() => setTab("danger")} />
           </div>
         </div>
       </Card>
@@ -91,7 +93,7 @@ function NavButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium whitespace-nowrap transition-colors",
+        "flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm font-medium whitespace-nowrap transition-colors",
         active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >

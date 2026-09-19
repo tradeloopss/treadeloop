@@ -3,12 +3,12 @@ export type PnlPeriod = "daily" | "weekly"
 // A weekly certificate covers the ISO week (Monday–Sunday) containing the
 // anchor date, so "this week" means the same seven days for everyone rather
 // than a rolling seven days that shifts with the hour it was generated.
-export function resolvePnlPeriod(period: PnlPeriod, date: string): { start: string; end: string; label: string } {
+export function resolvePnlPeriod(period: PnlPeriod, date: string, dateLocale = "en-US"): { start: string; end: string; label: string } {
   if (period === "daily") {
     return {
       start: date,
       end: date,
-      label: new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", {
+      label: new Date(`${date}T12:00:00Z`).toLocaleDateString(dateLocale, {
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -26,6 +26,6 @@ export function resolvePnlPeriod(period: PnlPeriod, date: string): { start: stri
   sunday.setUTCDate(monday.getUTCDate() + 6)
 
   const iso = (d: Date) => d.toISOString().slice(0, 10)
-  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+  const fmt = (d: Date) => d.toLocaleDateString(dateLocale, { month: "short", day: "numeric", timeZone: "UTC" })
   return { start: iso(monday), end: iso(sunday), label: `${fmt(monday)} – ${fmt(sunday)}, ${sunday.getUTCFullYear()}` }
 }

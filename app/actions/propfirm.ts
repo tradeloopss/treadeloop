@@ -21,6 +21,9 @@ export interface PropFirmAccount {
   name: string
   broker: string | null
   startingBalance: number
+  // True when the size is our guess from the broker's balance rather than
+  // something the user entered — the UI asks them to confirm it.
+  startingBalanceInferred: boolean
   currency: string
   // The balance and liquidation floor as the broker last reported them —
   // null for accounts that aren't linked to a live source.
@@ -126,6 +129,7 @@ export async function getPropFirmAccounts(): Promise<PropFirmAccount[]> {
       name: account.name,
       broker: account.broker,
       startingBalance: Number(account.startingBalance),
+      startingBalanceInferred: account.startingBalanceInferred,
       currency: account.currency,
       brokerBalance: brokerLinked ? Number(account.currentBalance) : null,
       balanceUpdatedAt: brokerLinked ? account.balanceUpdatedAt!.toISOString() : null,
@@ -235,7 +239,7 @@ function parseRuleFields(formData: FormData, accountSize: number): RuleValues {
 export async function savePropFirmRules(accountId: number, formData: FormData) {
   const userId = await getUserId()
   const [account] = await db
-    .select({ id: tradingAccounts.id, startingBalance: tradingAccounts.startingBalance })
+    .select({ id: tradingAccounts.id, startingBalance: tradingAccounts.startingBalance, startingBalanceInferred: tradingAccounts.startingBalanceInferred })
     .from(tradingAccounts)
     .where(and(eq(tradingAccounts.id, accountId), eq(tradingAccounts.userId, userId)))
   if (!account) throw new Error("Account not found")
@@ -250,8 +254,8 @@ export async function savePropFirmRules(accountId: number, formData: FormData) {
   // broker sync before its balance was known has none.
   const sizeRaw = formData.get("startingBalance")
   const startingBalance = sizeRaw != null && String(sizeRaw).trim() !== "" ? Number(sizeRaw) : Number(account.startingBalance)
-  if (startingBalance > 0 && startingBalance !== Number(account.startingBalance)) {
-    await db.update(tradingAccounts).set({ startingBalance: String(startingBalance) }).where(eq(tradingAccounts.id, accountId))
+  if (startingBalance > 0 && (startingBalance !== Number(account.startingBalance) || account.startingBalanceInferred)) {
+    await db.update(tradingAccounts).set({ startingBalance: String(startingBalance), startingBalanceInferred: false }).where(eq(tradingAccounts.id, accountId))
   }
 
   const columns = ruleColumns(parseRuleFields(formData, startingBalance))

@@ -36,6 +36,8 @@ import {
   Banknote,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
+import { LanguageSwitcher } from "@/components/language-switcher"
+import { useT } from "@/components/locale-provider"
 
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -53,6 +55,7 @@ const COLLAPSED_KEY = "sidebarCollapsed"
 export function DashboardSidebar({ userName, userImage, isAdmin = false }: { userName: string; userImage?: string | null; isAdmin?: boolean }) {
   const pathname = usePathname()
   const router = useRouter()
+  const t = useT()
   const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
@@ -95,7 +98,7 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
           <BrandMark className="size-7" />
           <span className="font-semibold tracking-tight">TradeLoop</span>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open menu">
+        <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label={t("Open menu")}>
           <Menu className="size-5" />
         </Button>
       </header>
@@ -110,8 +113,8 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-svh w-72 max-w-[85vw] shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground transition-transform duration-200 md:static md:z-auto md:max-w-none md:translate-x-0",
-          open ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 start-0 z-50 flex h-svh w-72 max-w-[85vw] shrink-0 flex-col border-e bg-sidebar text-sidebar-foreground transition-transform duration-200 md:static md:z-auto md:max-w-none md:translate-x-0",
+          open ? "translate-x-0" : "-translate-x-full rtl:translate-x-full",
           mounted && collapsed ? "md:w-[72px]" : "md:w-60",
         )}
       >
@@ -125,7 +128,7 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
             size="icon"
             className="md:hidden"
             onClick={() => setOpen(false)}
-            aria-label="Close menu"
+            aria-label={t("Close menu")}
           >
             <X className="size-5" />
           </Button>
@@ -143,11 +146,11 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                   )}
                 >
                   <CirclePlus className="size-4 shrink-0" />
-                  <span className={cn(collapsed && "md:hidden")}>Add Trade</span>
+                  <span className={cn(collapsed && "md:hidden")}>{t("Add Trade")}</span>
                 </Link>
               }
             />
-            {collapsed && <TooltipContent side="right">Add Trade</TooltipContent>}
+            {collapsed && <TooltipContent side="inline-end">{t("Add Trade")}</TooltipContent>}
           </Tooltip>
         </div>
 
@@ -170,11 +173,11 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                       )}
                     >
                       <Icon className="size-4 shrink-0" />
-                      <span className={cn(collapsed && "md:hidden")}>{link.label}</span>
+                      <span className={cn(collapsed && "md:hidden")}>{t(link.label)}</span>
                     </Link>
                   }
                 />
-                {collapsed && <TooltipContent side="right">{link.label}</TooltipContent>}
+                {collapsed && <TooltipContent side="inline-end">{t(link.label)}</TooltipContent>}
               </Tooltip>
             )
           })}
@@ -188,10 +191,10 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
               "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
               collapsed && "justify-center",
             )}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
           >
             {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
-            {!collapsed && "Collapse"}
+            {!collapsed && t("Collapse")}
           </button>
         </div>
 
@@ -202,7 +205,7 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                 <button
                   type="button"
                   className={cn(
-                    "flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-sidebar-accent/60",
+                    "flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-2 text-start hover:bg-sidebar-accent/60",
                     collapsed && "md:justify-center md:px-0",
                   )}
                 >
@@ -220,12 +223,12 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
             />
             <DropdownMenuContent side="top" align="start" className="w-64">
               <div className="flex items-center justify-between px-1.5 py-1">
-                <span className="text-sm">Theme</span>
+                <span className="text-sm">{t("Theme")}</span>
                 <div className="flex items-center gap-0.5 rounded-full bg-muted p-0.5">
                   <button
                     type="button"
                     onClick={() => setTheme("dark")}
-                    aria-label="Dark mode"
+                    aria-label={t("Dark mode")}
                     className={cn(
                       "flex size-6 items-center justify-center rounded-full transition-colors",
                       mounted && resolvedTheme === "dark" ? "bg-background shadow-sm" : "text-muted-foreground",
@@ -236,7 +239,7 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                   <button
                     type="button"
                     onClick={() => setTheme("light")}
-                    aria-label="Light mode"
+                    aria-label={t("Light mode")}
                     className={cn(
                       "flex size-6 items-center justify-center rounded-full transition-colors",
                       mounted && resolvedTheme === "light" ? "bg-background shadow-sm" : "text-muted-foreground",
@@ -247,20 +250,25 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                 </div>
               </div>
 
+              <div className="flex items-center justify-between px-1.5 py-1">
+                <span className="text-sm">{t("Language")}</span>
+                <LanguageSwitcher className="-me-2" />
+              </div>
+
               <DropdownMenuSeparator />
 
               <DropdownMenuItem render={<Link href="/support" />}>
                 <HelpCircle className="size-4" />
-                Help &amp; support
+                {t("Help & support")}
               </DropdownMenuItem>
               <DropdownMenuItem render={<Link href="/settings" />}>
                 <Plug className="size-4" />
-                Settings
+                {t("Settings")}
               </DropdownMenuItem>
               {isAdmin && (
                 <DropdownMenuItem render={<Link href="/admin" />}>
                   <ShieldCheck className="size-4" />
-                  Admin panel
+                  {t("Admin panel")}
                 </DropdownMenuItem>
               )}
 
@@ -268,7 +276,7 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
 
               <DropdownMenuItem variant="destructive" onClick={handleSignOut}>
                 <LogOut className="size-4" />
-                Logout
+                {t("Logout")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

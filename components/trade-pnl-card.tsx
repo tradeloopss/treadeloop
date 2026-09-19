@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { Copy, Download, Printer, Share2, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export interface PnlCardTrade {
   symbol: string
@@ -55,6 +56,8 @@ export function TradePnlCard({
   traderImage?: string | null
   shareUrl?: string | null
 }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const isWin = trade.pnl >= 0
   const notional = trade.entryPrice * trade.quantity
   const pnlPct = notional > 0 ? (trade.pnl / notional) * 100 : null
@@ -68,7 +71,7 @@ export function TradePnlCard({
       style={{ background: "linear-gradient(160deg, #0c1210 0%, #050505 60%)" }}
     >
       <ChevronGlow tone={tone} />
-      <div className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full blur-3xl" style={{ background: tone, opacity: 0.16 }} />
+      <div className="pointer-events-none absolute -end-16 -top-16 size-56 rounded-full blur-3xl" style={{ background: tone, opacity: 0.16 }} />
 
       <div className="relative flex items-center gap-2">
         <div className="flex size-7 items-center justify-center rounded-md" style={{ background: tone }}>
@@ -96,9 +99,9 @@ export function TradePnlCard({
             isWin ? "bg-[var(--gain)]/15 text-[var(--gain)]" : "bg-[var(--loss)]/15 text-[var(--loss)]"
           )}
         >
-          <SideIcon className="size-3" /> {trade.side === "long" ? "Long" : "Short"}
+          <SideIcon className="size-3" /> {trade.side === "long" ? t("Long") : t("Short")}
         </span>
-        <span className="flex items-center gap-1.5 rounded-full bg-white/10 py-1 pr-2.5 pl-1 text-[11px] font-bold text-white/90">
+        <span className="flex items-center gap-1.5 rounded-full bg-white/10 py-1 pe-2.5 ps-1 text-[11px] font-bold text-white/90">
           <span
             className="flex size-4 items-center justify-center rounded-full text-[8px] font-black text-white"
             style={{ background: chipColor(trade.symbol) }}
@@ -108,7 +111,7 @@ export function TradePnlCard({
           {trade.symbol}
         </span>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90">
-          {MARKET_LABELS[trade.market] ?? trade.market}
+          {t(MARKET_LABELS[trade.market] ?? trade.market)}
         </span>
         {trade.rMultiple != null && (
           <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90">
@@ -119,7 +122,7 @@ export function TradePnlCard({
       </div>
 
       <div className="relative mt-5">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-white/40">Trade P&amp;L</p>
+        <p className="text-[11px] font-medium uppercase tracking-wide text-white/40">{t("Trade P&L")}</p>
         <div className="mt-1 flex items-baseline gap-2">
           <span className="text-4xl font-extrabold tabular-nums" style={{ color: tone }}>
             {isWin ? "+" : ""}
@@ -137,22 +140,22 @@ export function TradePnlCard({
 
       <div className="relative mt-5 grid grid-cols-3 gap-2 border-t border-white/10 pt-4 text-xs">
         <div>
-          <p className="text-white/40">Entry Price</p>
+          <p className="text-white/40">{t("Entry Price")}</p>
           <p className="mt-1 font-semibold tabular-nums">{trade.entryPrice}</p>
         </div>
         <div>
-          <p className="text-white/40">Exit Price</p>
-          <p className="mt-1 font-semibold tabular-nums">{trade.status === "open" ? "Open" : (trade.exitPrice ?? "—")}</p>
+          <p className="text-white/40">{t("Exit Price")}</p>
+          <p className="mt-1 font-semibold tabular-nums">{trade.status === "open" ? t("Open") : (trade.exitPrice ?? "—")}</p>
         </div>
         <div>
-          <p className="text-white/40">Fees</p>
+          <p className="text-white/40">{t("Fees")}</p>
           <p className="mt-1 font-semibold tabular-nums text-[var(--gain)]">{formatCurrency(trade.fees)}</p>
         </div>
       </div>
 
       <div className="relative mt-5 flex items-end justify-between">
         <p className="text-[10px] text-white/35">
-          {new Date(trade.entryTime).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          {new Date(trade.entryTime).toLocaleDateString(dateLocale, { month: "short", day: "numeric", year: "numeric" })}
         </p>
         {shareUrl && (
           <div className="rounded-lg bg-white p-1.5">
@@ -182,6 +185,7 @@ export function TradePnlShareDialog({
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const t = useT()
   const cardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -189,7 +193,7 @@ export function TradePnlShareDialog({
     setLoading(true)
     shareTrade(tradeId)
       .then(setToken)
-      .catch(() => toast.error("Could not create a share link"))
+      .catch(() => toast.error(t("Could not create a share link")))
       .finally(() => setLoading(false))
     // Only fetch once per time the dialog opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,8 +204,8 @@ export function TradePnlShareDialog({
   function onCopyLink() {
     if (!shareUrl) return
     navigator.clipboard.writeText(shareUrl).then(
-      () => toast.success("Link copied"),
-      () => toast.error("Could not copy link")
+      () => toast.success(t("Link copied")),
+      () => toast.error(t("Could not copy link"))
     )
   }
 
@@ -215,7 +219,7 @@ export function TradePnlShareDialog({
       link.href = dataUrl
       link.click()
     } catch {
-      toast.error("Could not generate image")
+      toast.error(t("Could not generate image"))
     } finally {
       setDownloading(false)
     }
@@ -229,7 +233,7 @@ export function TradePnlShareDialog({
     if (!shareUrl) return
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${trade.symbol} trade`, url: shareUrl })
+        await navigator.share({ title: t("{symbol} trade", { symbol: trade.symbol }), url: shareUrl })
       } catch {
         // user cancelled — nothing to do
       }
@@ -242,8 +246,8 @@ export function TradePnlShareDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Share this trade</DialogTitle>
-          <DialogDescription>Anyone with the link (or who scans the QR code) can view this card — no account needed.</DialogDescription>
+          <DialogTitle>{t("Share this trade")}</DialogTitle>
+          <DialogDescription>{t("Anyone with the link (or who scans the QR code) can view this card — no account needed.")}</DialogDescription>
         </DialogHeader>
 
         <div className="flex justify-center py-2">
@@ -254,22 +258,22 @@ export function TradePnlShareDialog({
 
         {loading && (
           <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Generating link…
+            <Loader2 className="size-4 animate-spin" /> {t("Generating link…")}
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-2">
           <Button type="button" variant="outline" onClick={onCopyLink} disabled={!shareUrl}>
-            <Copy className="size-4" /> Copy link
+            <Copy className="size-4" /> {t("Copy link")}
           </Button>
           <Button type="button" variant="outline" onClick={onShare} disabled={!shareUrl}>
-            <Share2 className="size-4" /> Share
+            <Share2 className="size-4" /> {t("Share")}
           </Button>
           <Button type="button" variant="outline" onClick={onDownload} disabled={downloading}>
-            <Download className="size-4" /> {downloading ? "Saving…" : "Download PNG"}
+            <Download className="size-4" /> {downloading ? t("Saving…") : t("Download PNG")}
           </Button>
           <Button type="button" variant="outline" onClick={onPrint}>
-            <Printer className="size-4" /> Print
+            <Printer className="size-4" /> {t("Print")}
           </Button>
         </div>
       </DialogContent>

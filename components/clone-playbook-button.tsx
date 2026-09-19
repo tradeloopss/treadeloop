@@ -7,9 +7,11 @@ import { clonePlaybook } from "@/app/actions/playbooks"
 import { Button } from "@/components/ui/button"
 import { Copy } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 export function ClonePlaybookButton({ token, isSignedIn }: { token: string; isSignedIn: boolean }) {
   const router = useRouter()
+  const t = useT()
   const [pending, startTransition] = useTransition()
 
   if (!isSignedIn) {
@@ -18,7 +20,7 @@ export function ClonePlaybookButton({ token, isSignedIn }: { token: string; isSi
         nativeButton={false}
         render={
           <Link href={`/sign-in?next=/p/${token}`}>
-            <Copy className="size-4" /> Sign in to save a copy
+            <Copy className="size-4" /> {t("Sign in to save a copy")}
           </Link>
         }
       />
@@ -29,17 +31,17 @@ export function ClonePlaybookButton({ token, isSignedIn }: { token: string; isSi
     startTransition(async () => {
       try {
         await clonePlaybook(token)
-        toast.success("Added to your playbooks")
+        toast.success(t("Added to your playbooks"))
         router.push("/playbooks")
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save this playbook")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not save this playbook"))
       }
     })
   }
 
   return (
     <Button onClick={onClone} disabled={pending}>
-      <Copy className="size-4" /> {pending ? "Saving…" : "Save a copy to my playbooks"}
+      <Copy className="size-4" /> {pending ? t("Saving…") : t("Save a copy to my playbooks")}
     </Button>
   )
 }

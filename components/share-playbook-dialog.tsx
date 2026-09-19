@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { X, Link2, Copy, Users } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 export interface SharedPerson {
   userId: string
@@ -39,6 +40,7 @@ export function SharePlaybookDialog({
   shareToken: string | null
   sharedWith: SharedPerson[]
 }) {
+  const t = useT()
   const [pending, startTransition] = useTransition()
   const [email, setEmail] = useState("")
   // Local overrides so the dialog feels immediate without waiting on revalidatePath.
@@ -54,14 +56,14 @@ export function SharePlaybookDialog({
         if (token) {
           await unsharePlaybook(playbookId)
           setTokenOverride(null)
-          toast.success("Link sharing turned off")
+          toast.success(t("Link sharing turned off"))
         } else {
           const newToken = await sharePlaybook(playbookId)
           setTokenOverride(newToken)
-          toast.success("Link created")
+          toast.success(t("Link created"))
         }
       } catch {
-        toast.error("Could not update link sharing")
+        toast.error(t("Could not update link sharing"))
       }
     })
   }
@@ -69,8 +71,8 @@ export function SharePlaybookDialog({
   function onCopyLink() {
     if (!token) return
     navigator.clipboard.writeText(`${window.location.origin}/p/${token}`).then(
-      () => toast.success("Link copied"),
-      () => toast.error("Could not copy — copy it manually"),
+      () => toast.success(t("Link copied")),
+      () => toast.error(t("Could not copy — copy it manually")),
     )
   }
 
@@ -83,9 +85,9 @@ export function SharePlaybookDialog({
         const person = await shareWithUser(playbookId, trimmed)
         setPeopleOverride([...people, { userId: person.id, name: person.name, email: person.email, image: person.image }])
         setEmail("")
-        toast.success(`Shared with ${person.name}`)
+        toast.success(t("Shared with {name}", { name: person.name }))
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not share")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not share"))
       }
     })
   }
@@ -96,7 +98,7 @@ export function SharePlaybookDialog({
         await removePlaybookShare(playbookId, userId)
         setPeopleOverride(people.filter((p) => p.userId !== userId))
       } catch {
-        toast.error("Could not remove")
+        toast.error(t("Could not remove"))
       }
     })
   }
@@ -105,14 +107,14 @@ export function SharePlaybookDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Share "{playbookName}"</DialogTitle>
-          <DialogDescription>Share the strategy — never your trades or P&L.</DialogDescription>
+          <DialogTitle>{t("Share “{name}”", { name: playbookName })}</DialogTitle>
+          <DialogDescription>{t("Share the strategy — never your trades or P&L.")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
             <Label className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Users className="size-3.5" /> Share with a TradeLoop user
+              <Users className="size-3.5" /> {t("Share with a TradeLoop user")}
             </Label>
             <form onSubmit={onShareWithPerson} className="flex gap-2">
               <Input
@@ -123,7 +125,7 @@ export function SharePlaybookDialog({
                 className="flex-1"
               />
               <Button type="submit" disabled={pending || !email.trim()}>
-                Share
+                {t("Share")}
               </Button>
             </form>
             {people.length > 0 && (
@@ -144,7 +146,7 @@ export function SharePlaybookDialog({
                       className="size-7 shrink-0 text-muted-foreground"
                       onClick={() => onRemovePerson(p.userId)}
                       disabled={pending}
-                      aria-label={`Stop sharing with ${p.name}`}
+                      aria-label={t("Stop sharing with {name}", { name: p.name })}
                     >
                       <X className="size-3.5" />
                     </Button>
@@ -156,14 +158,14 @@ export function SharePlaybookDialog({
 
           <div className="border-t pt-4">
             <Label className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Link2 className="size-3.5" /> Public link
+              <Link2 className="size-3.5" /> {t("Public link")}
             </Label>
             <div className="flex gap-2">
               <Button variant="outline" onClick={onToggleLink} disabled={pending} className="flex-1">
-                {token ? "Turn off link" : "Create link"}
+                {token ? t("Turn off link") : t("Create link")}
               </Button>
               {token && (
-                <Button variant="outline" size="icon" onClick={onCopyLink} aria-label="Copy link">
+                <Button variant="outline" size="icon" onClick={onCopyLink} aria-label={t("Copy link")}>
                   <Copy className="size-4" />
                 </Button>
               )}

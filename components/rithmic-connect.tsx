@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 import { Plus, RefreshCw, Unplug, Wifi } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 // Matches lib/rithmic-client.ts's PRODUCTION_RITHMIC_GATEWAY / TEST_RITHMIC_GATEWAY
 // — duplicated here since that module pulls in server-only deps (ws,
@@ -38,6 +39,7 @@ const TEST_GATEWAY = "wss://rituz00100.rithmic.com:443"
 const CUSTOM = "__custom__"
 
 export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; initialFirmHint?: string }) {
+  const t = useT()
   const [systems, setSystems] = useState<string[]>([])
   const [loadingSystems, setLoadingSystems] = useState(true)
   const [systemChoice, setSystemChoice] = useState("")
@@ -55,7 +57,7 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
           if (match) setSystemChoice(match)
         }
       })
-      .catch(() => toast.error("Could not load the list of prop firms from Rithmic"))
+      .catch(() => toast.error(t("Could not load the list of prop firms from Rithmic")))
       .finally(() => setLoadingSystems(false))
     // Only run once on mount — initialFirmHint is a one-time seed, not a live binding.
   }, [])
@@ -73,10 +75,10 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
     startTransition(async () => {
       try {
         await connectRithmic(formData)
-        toast.success("Rithmic connected")
+        toast.success(t("Rithmic connected"))
         onDone()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not connect")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not connect"))
       }
     })
   }
@@ -84,25 +86,25 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
   return (
     <form onSubmit={onConnect} className="space-y-3">
       <div className="space-y-1.5">
-        <Label>Prop firm / broker</Label>
+        <Label>{t("Prop firm / broker")}</Label>
         <Select value={systemChoice} onValueChange={(v) => v && setSystemChoice(v)}>
           <SelectTrigger className="w-full">
-            <SelectValue placeholder={loadingSystems ? "Loading…" : "Select your prop firm"} />
+            <SelectValue placeholder={loadingSystems ? t("Loading…") : t("Select your prop firm")} />
           </SelectTrigger>
           <SelectContent>
             {systems.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
-            <SelectItem value={CUSTOM}>Other (custom gateway)…</SelectItem>
+            <SelectItem value={CUSTOM}>{t("Other (custom gateway)…")}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">Not listed? Pick "Other" and enter your gateway directly.</p>
+        <p className="text-xs text-muted-foreground">{t("Not listed? Pick “Other” and enter your gateway directly.")}</p>
       </div>
 
       {isCustom && (
         <>
           <div className="space-y-1.5">
-            <Label htmlFor="rithmic-gateway">Gateway address</Label>
+            <Label htmlFor="rithmic-gateway">{t("Gateway address")}</Label>
             <Input
               id="rithmic-gateway"
               value={customGateway}
@@ -110,32 +112,32 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
               required
               autoComplete="off"
             />
-            <p className="text-xs text-muted-foreground">From your prop firm's connection_params.txt.</p>
+            <p className="text-xs text-muted-foreground">{t("From your prop firm's connection_params.txt.")}</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="rithmic-system-custom">System name</Label>
+            <Label htmlFor="rithmic-system-custom">{t("System name")}</Label>
             <Input
               id="rithmic-system-custom"
               value={customSystemName}
               onChange={(e) => setCustomSystemName(e.target.value)}
               required
               autoComplete="off"
-              placeholder="e.g. Rithmic Test"
+              placeholder={t("e.g. Rithmic Test")}
             />
           </div>
         </>
       )}
 
       <div className="space-y-1.5">
-        <Label htmlFor="rithmic-login">Username</Label>
+        <Label htmlFor="rithmic-login">{t("Username")}</Label>
         <Input id="rithmic-login" name="login" required autoComplete="off" />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="rithmic-password">Password</Label>
+        <Label htmlFor="rithmic-password">{t("Password")}</Label>
         <Input id="rithmic-password" name="password" type="password" required autoComplete="off" />
       </div>
       <Button type="submit" disabled={pending || !canSubmit} className="w-full">
-        {pending ? "Connecting…" : "Connect"}
+        {pending ? t("Connecting…") : t("Connect")}
       </Button>
     </form>
   )
@@ -154,6 +156,8 @@ export type RithmicConnection = {
 }
 
 function ConnectionRow({ connection }: { connection: RithmicConnection }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const [pending, startTransition] = useTransition()
   const [syncing, startSync] = useTransition()
 
@@ -161,9 +165,9 @@ function ConnectionRow({ connection }: { connection: RithmicConnection }) {
     startSync(async () => {
       try {
         const result = await syncRithmic(connection.id)
-        toast.success(result.imported > 0 ? `Imported ${result.imported} trade${result.imported === 1 ? "" : "s"}` : "Already up to date")
+        toast.success(result.imported > 0 ? (result.imported === 1 ? t("Imported 1 trade") : t("Imported {n} trades", { n: result.imported })) : t("Already up to date"))
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Sync failed")
+        toast.error(err instanceof Error ? t(err.message) : t("Sync failed"))
       }
     })
   }
@@ -172,9 +176,9 @@ function ConnectionRow({ connection }: { connection: RithmicConnection }) {
     startTransition(async () => {
       try {
         await disconnectRithmic(connection.id)
-        toast.success("Disconnected")
+        toast.success(t("Disconnected"))
       } catch {
-        toast.error("Could not disconnect")
+        toast.error(t("Could not disconnect"))
       }
     })
   }
@@ -193,9 +197,9 @@ function ConnectionRow({ connection }: { connection: RithmicConnection }) {
         {connection.lastSyncedAt ? (
           <>
             <p>
-              Last synced {new Date(connection.lastSyncedAt).toLocaleString()}
+              {t("Last synced {time}", { time: new Date(connection.lastSyncedAt).toLocaleString(dateLocale) })}
               {connection.lastSyncStatus === "ok" && connection.lastSyncCount != null && (
-                <> — imported {connection.lastSyncCount} trade{connection.lastSyncCount === 1 ? "" : "s"}</>
+                <> — {connection.lastSyncCount === 1 ? t("imported 1 trade") : t("imported {n} trades", { n: connection.lastSyncCount })}</>
               )}
             </p>
             {connection.lastSyncStatus === "error" && (
@@ -203,17 +207,17 @@ function ConnectionRow({ connection }: { connection: RithmicConnection }) {
             )}
           </>
         ) : (
-          <p className="text-muted-foreground">Not synced yet — click "Sync now" to pull your trade history.</p>
+          <p className="text-muted-foreground">{t("Not synced yet — click “Sync now” to pull your trade history.")}</p>
         )}
       </div>
 
       <div className="flex gap-2">
         <Button onClick={onSync} disabled={syncing} className="flex-1">
           <RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />
-          {syncing ? "Syncing…" : "Sync now"}
+          {syncing ? t("Syncing…") : t("Sync now")}
         </Button>
         <Button onClick={onDisconnect} disabled={pending} variant="outline">
-          <Unplug className="size-4" /> Disconnect
+          <Unplug className="size-4" /> {t("Disconnect")}
         </Button>
       </div>
     </div>
@@ -221,24 +225,25 @@ function ConnectionRow({ connection }: { connection: RithmicConnection }) {
 }
 
 export function RithmicConnect({ connections }: { connections: RithmicConnection[] }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   return (
     <Card className="max-w-2xl space-y-4 p-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-medium">Rithmic (live)</h2>
+          <h2 className="font-medium">{t("Rithmic (live)")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Connects directly to your Rithmic account — every account under that login syncs automatically.
+            {t("Connects directly to your Rithmic account — every account under that login syncs automatically.")}
           </p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> Connect</Button>} />
+          <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> {t("Connect")}</Button>} />
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Connect Rithmic</DialogTitle>
+              <DialogTitle>{t("Connect Rithmic")}</DialogTitle>
               <DialogDescription>
-                Use your Rithmic trading login. Every account found under it is added and synced.
+                {t("Use your Rithmic trading login. Every account found under it is added and synced.")}
               </DialogDescription>
             </DialogHeader>
             <ConnectForm onDone={() => setOpen(false)} />
@@ -249,7 +254,7 @@ export function RithmicConnect({ connections }: { connections: RithmicConnection
       {connections.length === 0 ? (
         <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
           <Wifi className="size-6 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">No Rithmic accounts connected yet.</p>
+          <p className="text-sm text-muted-foreground">{t("No Rithmic accounts connected yet.")}</p>
         </div>
       ) : (
         <div className="space-y-3">

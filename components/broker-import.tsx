@@ -15,8 +15,10 @@ import {
 } from "@/components/ui/select"
 import { toast } from "sonner"
 import { Upload, FileSpreadsheet } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 export function BrokerImport({ accounts }: { accounts: { id: number; name: string }[] }) {
+  const t = useT()
   const [pending, startTransition] = useTransition()
   const [fileName, setFileName] = useState<string | null>(null)
   const [accountId, setAccountId] = useState<string>("auto")
@@ -34,17 +36,17 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
       try {
         const result = await importTradeCsv(formData)
         if (result.imported > 0) {
-          toast.success(`Imported ${result.imported} trade${result.imported === 1 ? "" : "s"} from ${result.source}`)
+          toast.success(result.imported === 1 ? t("Imported 1 trade from {source}", { source: result.source }) : t("Imported {n} trades from {source}", { n: result.imported, source: result.source }))
         } else {
-          toast.success("No new trades — already up to date")
+          toast.success(t("No new trades — already up to date"))
         }
         if (result.skippedRows > 0) {
-          toast.message(`Skipped ${result.skippedRows} unreadable row${result.skippedRows === 1 ? "" : "s"}`)
+          toast.message(result.skippedRows === 1 ? t("Skipped 1 unreadable row") : t("Skipped {n} unreadable rows", { n: result.skippedRows }))
         }
         setFileName(null)
         if (inputRef.current) inputRef.current.value = ""
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Import failed")
+        toast.error(err instanceof Error ? t(err.message) : t("Import failed"))
       }
     })
   }
@@ -52,33 +54,30 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
   return (
     <Card className="max-w-2xl space-y-4 p-5">
       <div>
-        <h2 className="font-medium">Import trades</h2>
+        <h2 className="font-medium">{t("Import trades")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Works with any of these exports — no login or API key needed.
+          {t("Works with any of these exports — no login or API key needed.")}
         </p>
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           <li>
-            <span className="font-medium text-foreground">Tradovate:</span> Reports → Orders → pick a date range →
-            Download CSV
+            <span className="font-medium text-foreground">Tradovate:</span> {t("Reports → Orders → pick a date range → Download CSV")}
           </li>
           <li>
-            <span className="font-medium text-foreground">NinjaTrader:</span> Control Center → Trade Performance →
-            Trades tab → right-click → Export
+            <span className="font-medium text-foreground">NinjaTrader:</span> {t("Control Center → Trade Performance → Trades tab → right-click → Export")}
           </li>
           <li>
-            <span className="font-medium text-foreground">MetaTrader 4/5:</span> Terminal → Account History → right-click
-            → Save as Report (HTML)
+            <span className="font-medium text-foreground">MetaTrader 4/5:</span> {t("Terminal → Account History → right-click → Save as Report (HTML)")}
           </li>
         </ul>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-3">
         <div className="space-y-1.5">
-          <Label>Import into</Label>
+          <Label>{t("Import into")}</Label>
           <Select value={accountId} onValueChange={(v) => v && setAccountId(v)}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">Split automatically by account (recommended)</SelectItem>
+              <SelectItem value="auto">{t("Split automatically by account (recommended)")}</SelectItem>
               {accounts.map((a) => (
                 <SelectItem key={a.id} value={String(a.id)}>
                   {a.name}
@@ -88,8 +87,8 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
           </Select>
           <p className="text-xs text-muted-foreground">
             {accountId === "auto"
-              ? "One file with trades from several accounts works fine — each account in the file's Account column gets matched to (or creates) its own account here automatically."
-              : "Every trade in this file will be filed under this one account, regardless of what its Account column says."}
+              ? t("One file with trades from several accounts works fine — each account in the file's Account column gets matched to (or creates) its own account here automatically.")
+              : t("Every trade in this file will be filed under this one account, regardless of what its Account column says.")}
           </p>
         </div>
         <label
@@ -104,7 +103,7 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
           ) : (
             <>
               <Upload className="size-6" />
-              <span>Click to choose a file</span>
+              <span>{t("Click to choose a file")}</span>
             </>
           )}
         </label>
@@ -119,13 +118,12 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
           className="sr-only"
         />
         <Button type="submit" disabled={pending || !fileName} className="w-full">
-          {pending ? "Importing…" : "Import trades"}
+          {pending ? t("Importing…") : t("Import trades")}
         </Button>
       </form>
 
       <p className="text-xs text-muted-foreground">
-        Re-uploading the same (or a wider) date range is safe — already-imported trades are skipped automatically.
-        Trades still open at export time won't appear until they're closed and re-exported.
+        {t("Re-uploading the same (or a wider) date range is safe — already-imported trades are skipped automatically. Trades still open at export time won't appear until they're closed and re-exported.")}
       </p>
     </Card>
   )

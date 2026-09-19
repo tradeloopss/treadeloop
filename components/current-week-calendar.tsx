@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { NotebookPen } from "lucide-react"
+import { getLocale, getT } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -36,7 +38,10 @@ function currentWeekDates(today: Date): string[] {
   return Array.from({ length: 7 }, (_, i) => new Date(start + i * 86_400_000).toISOString().slice(0, 10))
 }
 
-export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
+export async function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
+  const t = await getT()
+  const dateLocale = intlLocale(await getLocale())
+  const weekdays = WEEKDAYS.map((w) => t(w))
   const today = new Date()
   const dates = currentWeekDates(today)
   const todayKey = today.toISOString().slice(0, 10)
@@ -50,14 +55,14 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
   const end = new Date(dates[6] + "T00:00:00Z")
   const rangeLabel =
     start.getUTCMonth() === end.getUTCMonth()
-      ? `${start.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} – ${end.toLocaleDateString("en-US", { day: "numeric", timeZone: "UTC" })}`
-      : `${start.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`
+      ? `${start.toLocaleDateString(dateLocale, { month: "short", day: "numeric", timeZone: "UTC" })} – ${end.toLocaleDateString(dateLocale, { day: "numeric", timeZone: "UTC" })}`
+      : `${start.toLocaleDateString(dateLocale, { month: "short", day: "numeric", timeZone: "UTC" })} – ${end.toLocaleDateString(dateLocale, { month: "short", day: "numeric", timeZone: "UTC" })}`
 
   return (
     <Card className="flex h-full flex-col p-4 sm:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-medium text-muted-foreground">This Week</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{t("This Week")}</h2>
           <p className="text-xs text-muted-foreground">{rangeLabel}</p>
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -75,13 +80,13 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
             {formatCompact(weekNet)}
           </Badge>
           <Badge variant="outline">
-            {tradingDays} day{tradingDays === 1 ? "" : "s"}
+            {tradingDays === 1 ? t("1 day") : t("{n} days", { n: tradingDays })}
           </Badge>
         </div>
       </div>
 
       <div className="grid grid-cols-7 gap-1.5">
-        {WEEKDAYS.map((w) => (
+        {weekdays.map((w) => (
           <div key={w} className="pb-1 text-center text-xs font-medium text-muted-foreground">
             {w}
           </div>
@@ -127,7 +132,7 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
                 )}
               </div>
               {has && colors && (
-                <div className="min-w-0 text-right">
+                <div className="min-w-0 text-end">
                   <p
                     className="whitespace-nowrap text-[10px] font-semibold leading-tight tabular-nums sm:text-xs"
                     style={{ color: colors.text }}
@@ -136,7 +141,7 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
                     {formatCompact(Math.round(cell.pnl))}
                   </p>
                   <p className="text-[10px] leading-tight" style={{ color: colors.text, opacity: 0.7 }}>
-                    {cell.trades} trade{cell.trades === 1 ? "" : "s"}
+                    {cell.trades === 1 ? t("1 trade") : t("{n} trades", { n: cell.trades })}
                   </p>
                   <p className="whitespace-nowrap text-[10px] leading-tight font-medium" style={{ color: colors.sub }}>
                     {winRate.toFixed(0)}%
@@ -149,7 +154,7 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
       </div>
 
       <div className="mt-4 border-t pt-3">
-        <p className="mb-2 text-xs font-medium text-muted-foreground">Daily P&L</p>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">{t("Daily P&L")}</p>
         <div className="grid grid-cols-7 gap-1.5">
           {weekCells.map((cell, i) => {
             const has = cell.trades > 0
@@ -158,7 +163,7 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
             const color = !has ? undefined : win ? CELL_GAIN_LINE : loss ? CELL_LOSS_LINE : CELL_NEUTRAL_TEXT
             return (
               <div key={cell.date} className="text-center">
-                <p className="text-[10px] text-muted-foreground">{WEEKDAYS[i]}</p>
+                <p className="text-[10px] text-muted-foreground">{weekdays[i]}</p>
                 <p
                   className={cn("whitespace-nowrap text-xs font-semibold tabular-nums", !has && "text-muted-foreground")}
                   style={color ? { color } : undefined}
@@ -172,7 +177,7 @@ export function CurrentWeekCalendar({ byDay }: { byDay: Map<string, DayPnl> }) {
       </div>
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Week net{" "}
+        {t("Week net")}{" "}
         <span className="font-medium" style={{ color: weekNet >= 0 ? CELL_GAIN_LINE : CELL_LOSS_LINE }}>
           {weekNet >= 0 ? "+" : ""}
           {formatCurrency(weekNet)}

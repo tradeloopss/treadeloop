@@ -25,10 +25,10 @@ export interface PayoutSummary {
 // the 16th–end of month, rather than a rolling 14 days from an arbitrary
 // anchor date, so the window is the same for everyone and lines up with the
 // firm's own payout cycle.
-export function resolvePeriod(period: PayoutPeriod, now: Date = new Date()): { start: Date; end: Date; label: string } {
+export function resolvePeriod(period: PayoutPeriod, now: Date = new Date(), dateLocale = "en-US"): { start: Date; end: Date; label: string } {
   const year = now.getUTCFullYear()
   const month = now.getUTCMonth()
-  const monthName = new Date(Date.UTC(year, month, 1)).toLocaleDateString("en-US", {
+  const monthName = new Date(Date.UTC(year, month, 1)).toLocaleDateString(dateLocale, {
     month: "long",
     year: "numeric",
     timeZone: "UTC",
@@ -47,6 +47,6 @@ export function resolvePeriod(period: PayoutPeriod, now: Date = new Date()): { s
   const end = firstHalf
     ? new Date(Date.UTC(year, month, 15, 23, 59, 59))
     : new Date(Date.UTC(year, month + 1, 0, 23, 59, 59))
-  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+  const fmt = (d: Date) => d.toLocaleDateString(dateLocale, { month: "short", day: "numeric", timeZone: "UTC" })
   return { start, end, label: `${fmt(start)} – ${fmt(end)}, ${year}` }
 }

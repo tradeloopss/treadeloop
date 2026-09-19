@@ -1,4 +1,5 @@
 import { formatCurrency } from "@/lib/calc"
+import type { TFunction } from "@/lib/i18n"
 
 export type Finding = {
   type: "strength" | "weakness" | "neutral"
@@ -23,8 +24,10 @@ const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "
 // month). Deterministic and API-free by design — every finding cites a real
 // number computed from the trades themselves, so it stays trustworthy even
 // without an AI layer on top. Needs a minimum sample size per comparison to
-// avoid drawing conclusions from 1-2 trades.
-export function generateFindings(trades: InsightTrade[]): Finding[] {
+// avoid drawing conclusions from 1-2 trades. Every sentence goes through
+// `t` so the findings come out in the reader's language; the default is
+// the English they're written in.
+export function generateFindings(trades: InsightTrade[], t: TFunction = (key, vars) => fill(key, vars)): Finding[] {
   const closed = trades.filter((t) => t.status === "closed")
   if (closed.length < 3) return []
 
@@ -46,15 +49,15 @@ export function generateFindings(trades: InsightTrade[]): Finding[] {
     if (best.pnl > 0) {
       findings.push({
         type: "strength",
-        title: `${best.symbol} is working`,
-        detail: `+${formatCurrency(best.pnl)} across ${best.count} trades — your best symbol this period.`,
+        title: t("{symbol} is working", { symbol: best.symbol }),
+        detail: t("+{pnl} across {n} trades — your best symbol this period.", { pnl: formatCurrency(best.pnl), n: best.count }),
       })
     }
     if (worst.pnl < 0 && worst.symbol !== best.symbol) {
       findings.push({
         type: "weakness",
-        title: `${worst.symbol} is bleeding money`,
-        detail: `${formatCurrency(worst.pnl)} across ${worst.count} trades — worth asking whether this setup is actually working for you.`,
+        title: t("{symbol} is bleeding money", { symbol: worst.symbol }),
+        detail: t("{pnl} across {n} trades — worth asking whether this setup is actually working for you.", { pnl: formatCurrency(worst.pnl), n: worst.count }),
       })
     }
   }
@@ -75,15 +78,15 @@ export function generateFindings(trades: InsightTrade[]): Finding[] {
     if (worstDay.pnl < 0 && worstDay.day !== bestDay.day) {
       findings.push({
         type: "weakness",
-        title: `${WEEKDAY_NAMES[worstDay.day]}s are costly`,
-        detail: `${formatCurrency(worstDay.pnl)} net across ${worstDay.count} trades on ${WEEKDAY_NAMES[worstDay.day]}s this period.`,
+        title: t("{day}s are costly", { day: t(WEEKDAY_NAMES[worstDay.day]) }),
+        detail: t("{pnl} net across {n} trades on {day}s this period.", { pnl: formatCurrency(worstDay.pnl), n: worstDay.count, day: t(WEEKDAY_NAMES[worstDay.day]) }),
       })
     }
     if (bestDay.pnl > 0 && bestDay.day !== worstDay.day) {
       findings.push({
         type: "strength",
-        title: `${WEEKDAY_NAMES[bestDay.day]}s are strong`,
-        detail: `+${formatCurrency(bestDay.pnl)} net across ${bestDay.count} trades — your best day of the week.`,
+        title: t("{day}s are strong", { day: t(WEEKDAY_NAMES[bestDay.day]) }),
+        detail: t("+{pnl} net across {n} trades — your best day of the week.", { pnl: formatCurrency(bestDay.pnl), n: bestDay.count }),
       })
     }
   }
@@ -101,8 +104,13 @@ export function generateFindings(trades: InsightTrade[]): Finding[] {
       const weakerRate = strongerSide === "long" ? shortRate : longRate
       findings.push({
         type: "weakness",
-        title: `${weakerSide === "long" ? "Longs" : "Shorts"} are your weak side`,
-        detail: `${strongerSide === "long" ? "Long" : "Short"} win rate is ${(strongerRate * 100).toFixed(0)}% vs ${(weakerRate * 100).toFixed(0)}% on ${weakerSide}s.`,
+        title: weakerSide === "long" ? t("Longs are your weak side") : t("Shorts are your weak side"),
+        detail: t("{side} win rate is {strong}% vs {weak}% on {weakSide}.", {
+          side: strongerSide === "long" ? t("Long") : t("Short"),
+          strong: (strongerRate * 100).toFixed(0),
+          weak: (weakerRate * 100).toFixed(0),
+          weakSide: weakerSide === "long" ? t("longs") : t("shorts"),
+        }),
       })
     }
   }
@@ -125,8 +133,10 @@ export function generateFindings(trades: InsightTrade[]): Finding[] {
     if (worstMistake.pnl < 0) {
       findings.push({
         type: "weakness",
-        title: `"${worstMistake.mistake}" is your costliest habit`,
-        detail: `Flagged on ${worstMistake.count} trade${worstMistake.count === 1 ? "" : "s"}, netting ${formatCurrency(worstMistake.pnl)}.`,
+        title: t("\"{mistake}\" is your costliest habit", { mistake: worstMistake.mistake }),
+        detail: worstMistake.count === 1
+          ? t("Flagged on 1 trade, netting {pnl}.", { pnl: formatCurrency(worstMistake.pnl) })
+          : t("Flagged on {n} trades, netting {pnl}.", { n: worstMistake.count, pnl: formatCurrency(worstMistake.pnl) }),
       })
     }
   }
@@ -148,8 +158,8 @@ export function generateFindings(trades: InsightTrade[]): Finding[] {
     if (baselineRate - afterLossRate >= 0.15) {
       findings.push({
         type: "weakness",
-        title: "Possible revenge trading",
-        detail: `Win rate drops to ${(afterLossRate * 100).toFixed(0)}% on trades taken the same day right after a loss, vs ${(baselineRate * 100).toFixed(0)}% otherwise.`,
+        title: t("Possible revenge trading"),
+        detail: t("Win rate drops to {after}% on trades taken the same day right after a loss, vs {baseline}% otherwise.", { after: (afterLossRate * 100).toFixed(0), baseline: (baselineRate * 100).toFixed(0) }),
       })
     }
   }
@@ -164,17 +174,23 @@ export function generateFindings(trades: InsightTrade[]): Finding[] {
     if (highRate - lowRate >= 0.2) {
       findings.push({
         type: "strength",
-        title: "Your self-grading is well-calibrated",
-        detail: `Trades you rated 4-5★ won ${(highRate * 100).toFixed(0)}% of the time vs ${(lowRate * 100).toFixed(0)}% for 1-2★ — trust your gut on execution quality.`,
+        title: t("Your self-grading is well-calibrated"),
+        detail: t("Trades you rated 4-5★ won {high}% of the time vs {low}% for 1-2★ — trust your gut on execution quality.", { high: (highRate * 100).toFixed(0), low: (lowRate * 100).toFixed(0) }),
       })
     } else if (highRate - lowRate < 0.1) {
       findings.push({
         type: "neutral",
-        title: "Self-ratings aren't tracking results yet",
-        detail: `Trades you rated 4-5★ won ${(highRate * 100).toFixed(0)}% of the time vs ${(lowRate * 100).toFixed(0)}% for 1-2★ — your execution grading may need recalibrating.`,
+        title: t("Self-ratings aren't tracking results yet"),
+        detail: t("Trades you rated 4-5★ won {high}% of the time vs {low}% for 1-2★ — your execution grading may need recalibrating.", { high: (highRate * 100).toFixed(0), low: (lowRate * 100).toFixed(0) }),
       })
     }
   }
 
   return findings
+}
+
+// The English text with its placeholders filled — what t() does when there
+// is no dictionary.
+function fill(key: string, vars?: Record<string, string | number>): string {
+  return vars ? key.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match)) : key
 }

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ChevronLeft, ChevronRight, NotebookPen } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export type { DayPnl }
 
@@ -34,6 +35,8 @@ const CELL_NEUTRAL_BORDER = "var(--cal-neutral-border)"
 const CELL_NEUTRAL_TEXT = "var(--cal-neutral-text)"
 
 export function PnlCalendar({ days }: { days: DayPnl[] }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const map = useMemo(() => new Map(days.map((d) => [d.date, d])), [days])
 
   const initial = days.length ? new Date(days[0].date + "T00:00:00") : new Date()
@@ -73,13 +76,13 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor(new Date(year, month - 1, 1))} aria-label="Previous month">
+            <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor(new Date(year, month - 1, 1))} aria-label={t("Previous month")}>
               <ChevronLeft className="size-4" />
             </Button>
             <h2 className="shrink-0 whitespace-nowrap text-center text-base font-semibold sm:text-lg">
-              {cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+              {cursor.toLocaleDateString(dateLocale, { month: "long", year: "numeric" })}
             </h2>
-            <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor(new Date(year, month + 1, 1))} aria-label="Next month">
+            <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor(new Date(year, month + 1, 1))} aria-label={t("Next month")}>
               <ChevronRight className="size-4" />
             </Button>
           </div>
@@ -89,10 +92,10 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
             className={cn("h-8 shrink-0", isCurrentMonth && "bg-accent")}
             onClick={() => setCursor(new Date(now.getFullYear(), now.getMonth(), 1))}
           >
-            This month
+            {t("This month")}
           </Button>
-          <div className="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">
-            <span className="text-muted-foreground">Monthly stats:</span>
+          <div className="flex flex-wrap items-center gap-2 text-sm sm:ms-auto">
+            <span className="text-muted-foreground">{t("Monthly stats:")}</span>
             <Badge
               className={cn("border-transparent", monthNet === 0 && "bg-muted text-muted-foreground")}
               style={
@@ -107,18 +110,18 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
               {formatCompact(monthNet)}
             </Badge>
             <Badge variant="outline">
-              {tradingDays} day{tradingDays === 1 ? "" : "s"}
+              {tradingDays === 1 ? t("1 day") : t("{n} days", { n: tradingDays })}
             </Badge>
           </div>
         </div>
         <p className="mt-1 mb-4 text-xs text-muted-foreground">
-          {greenDays} green · {redDays} red
+          {t("{green} green · {red} red", { green: greenDays, red: redDays })}
         </p>
 
         <div className="grid grid-cols-7 gap-1.5">
           {WEEKDAYS.map((w) => (
             <div key={w} className="pb-1 text-center text-xs font-medium text-muted-foreground">
-              {w}
+              {t(w)}
             </div>
           ))}
           {cells.map((cell, i) => {
@@ -159,7 +162,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
                   )}
                 </div>
                 {has && colors && (
-                  <div className="min-w-0 text-right">
+                  <div className="min-w-0 text-end">
                     <p
                       className="whitespace-nowrap text-[10px] font-semibold leading-tight tabular-nums sm:text-xs"
                       style={{ color: colors.text }}
@@ -168,7 +171,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
                       {formatCompact(Math.round(cell.pnl))}
                     </p>
                     <p className="text-[10px] leading-tight" style={{ color: colors.text, opacity: 0.7 }}>
-                      {cell.trades} trade{cell.trades === 1 ? "" : "s"}
+                      {cell.trades === 1 ? t("1 trade") : t("{n} trades", { n: cell.trades })}
                     </p>
                     <p className="whitespace-nowrap text-[10px] leading-tight font-medium" style={{ color: colors.sub }}>
                       {winRate.toFixed(0)}%
@@ -184,7 +187,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
       <div className="space-y-2">
         {weeks.map((w, i) => (
           <Card key={i} className="p-3">
-            <p className="text-xs font-medium text-muted-foreground">Week {i + 1}</p>
+            <p className="text-xs font-medium text-muted-foreground">{t("Week {n}", { n: i + 1 })}</p>
             <p
               className={cn("mt-0.5 text-lg font-semibold tabular-nums", w.tradingDays === 0 && "text-muted-foreground")}
               style={w.tradingDays === 0 ? undefined : { color: w.net >= 0 ? CELL_GAIN_LINE : CELL_LOSS_LINE }}
@@ -192,7 +195,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
               {w.tradingDays === 0 ? formatCurrency(0) : `${w.net >= 0 ? "+" : ""}${formatCurrency(w.net)}`}
             </p>
             <p className="text-xs text-muted-foreground">
-              {w.tradingDays} day{w.tradingDays === 1 ? "" : "s"}
+              {w.tradingDays === 1 ? t("1 day") : t("{n} days", { n: w.tradingDays })}
             </p>
           </Card>
         ))}

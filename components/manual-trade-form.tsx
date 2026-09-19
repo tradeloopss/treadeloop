@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select"
 import { Plus, Trash2, ChevronDown, Info } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 const TYPES: { value: Market; label: string }[] = [
   { value: "stocks", label: "Stock" },
@@ -107,6 +108,7 @@ export function ManualTradeForm({
   playbooks: { id: number; name: string }[]
   onSaved?: () => void
 }) {
+  const t = useT()
   const [market, setMarket] = useState<Market>("futures")
   const [symbol, setSymbol] = useState("")
   const [multiplier, setMultiplier] = useState("1")
@@ -141,11 +143,11 @@ export function ManualTradeForm({
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!symbol.trim()) {
-      toast.error("Enter a symbol")
+      toast.error(t("Enter a symbol"))
       return
     }
     if (!aggregate) {
-      toast.error("Add at least one execution with a quantity and price")
+      toast.error(t("Add at least one execution with a quantity and price"))
       return
     }
 
@@ -166,7 +168,7 @@ export function ManualTradeForm({
     setPending(true)
     createTrade(formData)
       .then(() => {
-        toast.success("Trade logged")
+        toast.success(t("Trade logged"))
         setSymbol("")
         setExpirationDate("")
         setRows([newRow()])
@@ -174,7 +176,7 @@ export function ManualTradeForm({
         e.currentTarget.reset()
         onSaved?.()
       })
-      .catch(() => toast.error("Could not save trade"))
+      .catch((err) => toast.error(err instanceof Error ? t(err.message) : t("Could not save trade")))
       .finally(() => setPending(false))
   }
 
@@ -182,16 +184,15 @@ export function ManualTradeForm({
     <form onSubmit={onSubmit} className="space-y-5">
       <p className="flex items-start gap-1.5 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        Prop firm and live-synced accounts aren&apos;t listed here — their trades have to come from the firm itself. Use
-        Rithmic auto-sync, or a file upload for Tradovate and other platforms, so your journal always matches their record.
+        {t("Prop firm and live-synced accounts aren't listed here — their trades have to come from the firm itself. Use Rithmic auto-sync, or a file upload for Tradovate and other platforms, so your journal always matches their record.")}
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2">
         {accounts.length > 0 && (
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Account</Label>
+            <Label className="text-xs text-muted-foreground">{t("Account")}</Label>
             <Select name="accountId" items={Object.fromEntries(accounts.map((acc) => [String(acc.id), acc.name]))}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Optional" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder={t("Optional")} /></SelectTrigger>
               <SelectContent>
                 {accounts.map((acc) => (
                   <SelectItem key={acc.id} value={String(acc.id)}>{acc.name}</SelectItem>
@@ -201,12 +202,12 @@ export function ManualTradeForm({
           </div>
         )}
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs text-muted-foreground">Type</Label>
+          <Label className="text-xs text-muted-foreground">{t("Type")}</Label>
           <Select value={market} onValueChange={(v) => v && setMarket(v as Market)}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {TYPES.map((t) => (
-                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+              {TYPES.map((type) => (
+                <SelectItem key={type.value} value={type.value}>{t(type.label)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -215,7 +216,7 @@ export function ManualTradeForm({
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <Label htmlFor="symbol" className="text-xs text-muted-foreground">Symbol</Label>
+          <Label htmlFor="symbol" className="text-xs text-muted-foreground">{t("Symbol")}</Label>
           <Input
             id="symbol"
             value={symbol}
@@ -227,7 +228,7 @@ export function ManualTradeForm({
         </div>
         {futures && (
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="contractMultiplier" className="text-xs text-muted-foreground">Multiplier</Label>
+            <Label htmlFor="contractMultiplier" className="text-xs text-muted-foreground">{t("Multiplier")}</Label>
             <Input id="contractMultiplier" value={multiplier} onChange={(e) => setMultiplier(e.target.value)} type="number" step="any" />
           </div>
         )}
@@ -235,10 +236,10 @@ export function ManualTradeForm({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Executions</Label>
+          <Label className="text-xs text-muted-foreground">{t("Executions")}</Label>
           {aggregate && (
             <Badge variant="outline" className={cn("text-[10px] uppercase", aggregate.status === "open" ? "text-primary" : "text-muted-foreground")}>
-              {aggregate.status}
+              {aggregate.status === "open" ? t("open") : t("closed")}
             </Badge>
           )}
         </div>
@@ -258,19 +259,19 @@ export function ManualTradeForm({
                   onClick={() => updateRow(row.id, { side: "buy" })}
                   className={cn("px-2.5 py-2", row.side === "buy" ? "bg-[var(--gain)]/15 text-[var(--gain)]" : "text-muted-foreground hover:bg-accent/40")}
                 >
-                  Buy
+                  {t("Buy")}
                 </button>
                 <button
                   type="button"
                   onClick={() => updateRow(row.id, { side: "sell" })}
-                  className={cn("border-l px-2.5 py-2", row.side === "sell" ? "bg-[var(--loss)]/15 text-[var(--loss)]" : "text-muted-foreground hover:bg-accent/40")}
+                  className={cn("border-s px-2.5 py-2", row.side === "sell" ? "bg-[var(--loss)]/15 text-[var(--loss)]" : "text-muted-foreground hover:bg-accent/40")}
                 >
-                  Sell
+                  {t("Sell")}
                 </button>
               </div>
-              <Input type="number" step="any" value={row.quantity} onChange={(e) => updateRow(row.id, { quantity: e.target.value })} placeholder="Qty" className="h-9 w-16" />
-              <Input type="number" step="any" value={row.price} onChange={(e) => updateRow(row.id, { price: e.target.value })} placeholder="Price" required className="h-9 w-24" />
-              <Input type="number" step="any" value={row.fees} onChange={(e) => updateRow(row.id, { fees: e.target.value })} placeholder="Fees" className="h-9 w-20" />
+              <Input type="number" step="any" value={row.quantity} onChange={(e) => updateRow(row.id, { quantity: e.target.value })} placeholder={t("Qty")} className="h-9 w-16" />
+              <Input type="number" step="any" value={row.price} onChange={(e) => updateRow(row.id, { price: e.target.value })} placeholder={t("Price")} required className="h-9 w-24" />
+              <Input type="number" step="any" value={row.fees} onChange={(e) => updateRow(row.id, { fees: e.target.value })} placeholder={t("Fees")} className="h-9 w-20" />
               <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeRow(row.id)} disabled={rows.length === 1}>
                 <Trash2 className="size-4" />
               </Button>
@@ -278,7 +279,7 @@ export function ManualTradeForm({
           ))}
         </div>
         <button type="button" onClick={addRow} className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
-          <Plus className="size-3.5" /> Add execution
+          <Plus className="size-3.5" /> {t("Add execution")}
         </button>
       </div>
 
@@ -288,27 +289,27 @@ export function ManualTradeForm({
         className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
         <ChevronDown className={cn("size-3.5 transition-transform", showMore && "rotate-180")} />
-        {showMore ? "Hide" : "Add"} stop loss, tags & notes
+        {showMore ? t("Hide stop loss, tags & notes") : t("Add stop loss, tags & notes")}
       </button>
 
       {showMore && (
         <div className="space-y-4 border-t pt-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="stopLoss" className="text-xs text-muted-foreground">Stop loss</Label>
-              <Input id="stopLoss" name="stopLoss" type="number" step="any" placeholder="For R-multiple" />
+              <Label htmlFor="stopLoss" className="text-xs text-muted-foreground">{t("Stop loss")}</Label>
+              <Input id="stopLoss" name="stopLoss" type="number" step="any" placeholder={t("For R-multiple")} />
             </div>
             {futures && (
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="expirationDate" className="text-xs text-muted-foreground">Expiration date</Label>
+                <Label htmlFor="expirationDate" className="text-xs text-muted-foreground">{t("Expiration date")}</Label>
                 <Input id="expirationDate" type="date" value={expirationDate} onChange={(e) => setExpirationDate(e.target.value)} />
               </div>
             )}
             {playbooks.length > 0 && (
               <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">Playbook</Label>
+                <Label className="text-xs text-muted-foreground">{t("Playbook")}</Label>
                 <Select name="playbookId" items={Object.fromEntries(playbooks.map((p) => [String(p.id), p.name]))}>
-                  <SelectTrigger className="w-full"><SelectValue placeholder="Optional" /></SelectTrigger>
+                  <SelectTrigger className="w-full"><SelectValue placeholder={t("Optional")} /></SelectTrigger>
                   <SelectContent>
                     {playbooks.map((p) => (
                       <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
@@ -318,27 +319,27 @@ export function ManualTradeForm({
               </div>
             )}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="rating" className="text-xs text-muted-foreground">Execution rating (1–5)</Label>
-              <Input id="rating" name="rating" type="number" min="1" max="5" placeholder="How well did you follow your plan?" />
+              <Label htmlFor="rating" className="text-xs text-muted-foreground">{t("Execution rating (1–5)")}</Label>
+              <Input id="rating" name="rating" type="number" min="1" max="5" placeholder={t("How well did you follow your plan?")} />
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mistakes" className="text-xs text-muted-foreground">Mistakes</Label>
-            <Input id="mistakes" name="mistakes" placeholder="chased entry, moved stop, oversized" />
+            <Label htmlFor="mistakes" className="text-xs text-muted-foreground">{t("Mistakes")}</Label>
+            <Input id="mistakes" name="mistakes" placeholder={t("chased entry, moved stop, oversized")} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tags" className="text-xs text-muted-foreground">Tags</Label>
-            <Input id="tags" name="tags" placeholder="breakout, news, reversal" />
+            <Label htmlFor="tags" className="text-xs text-muted-foreground">{t("Tags")}</Label>
+            <Input id="tags" name="tags" placeholder={t("breakout, news, reversal")} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="notes" className="text-xs text-muted-foreground">Notes</Label>
-            <Textarea id="notes" name="notes" rows={3} placeholder="What was your thesis? How did it play out?" />
+            <Label htmlFor="notes" className="text-xs text-muted-foreground">{t("Notes")}</Label>
+            <Textarea id="notes" name="notes" rows={3} placeholder={t("What was your thesis? How did it play out?")} />
           </div>
         </div>
       )}
 
       <Button type="submit" disabled={pending} className="w-full">
-        {pending ? "Saving…" : "Log trade"}
+        {pending ? t("Saving…") : t("Log trade")}
       </Button>
     </form>
   )

@@ -5,6 +5,8 @@ import Link from 'next/link'
 import Image from 'next/image'
 import './home.css'
 import { ArrowRight, BarChart3, Bot, CalendarDays, Check, ChevronDown, CircleDollarSign, GraduationCap, Menu, Pause, PlayCircle, RotateCcw, SkipBack, SlidersHorizontal, Sparkles, TrendingUp, Users, X } from 'lucide-react'
+import { useT } from '@/components/locale-provider'
+import { LanguageSwitcher } from '@/components/language-switcher'
 
 const navProducts = [
   { label: 'Automated Journal', icon: CalendarDays, description: 'Auto-sync and log every trade to analyze performance.', status: 'live' as const, preview: 'journal' as const },
@@ -19,15 +21,16 @@ const navMore = [
 ]
 
 function ProductPreview({ kind }: { kind: 'journal' | 'propfirm' }) {
+  const t = useT()
   if (kind === 'journal') {
     return <div className="mini-preview">
-      <div className="mini-stat-row"><div><small>Net P&amp;L</small><b className="green">$2,300.90</b></div><div><small>Trades</small><b>4</b></div><div><small>Win rate</small><b>75%</b></div></div>
+      <div className="mini-stat-row"><div><small>{t('Net P&L')}</small><b className="green">$2,300.90</b></div><div><small>{t('Trades')}</small><b>4</b></div><div><small>{t('Win rate')}</small><b>75%</b></div></div>
       <svg viewBox="0 0 260 60" role="img" aria-label="Sample equity curve"><path d="M0 46 C30 44 40 40 60 41 S90 30 110 33 S140 20 160 24 S190 12 210 15 S240 5 260 8" fill="none" stroke="#7b68ee" strokeWidth="3" strokeLinecap="round"/></svg>
     </div>
   }
   return <div className="mini-preview">
-    <div className="mini-stat-row"><div><small>Net total</small><b className="green">+$7,358</b></div><div><small>Total spent</small><b>$1,342</b></div><div><small>ROI</small><b className="green">548%</b></div></div>
-    <div className="mini-firm-row"><span className="mini-firm-dot" />5 prop accounts tracked</div>
+    <div className="mini-stat-row"><div><small>{t('Net total')}</small><b className="green">+$7,358</b></div><div><small>{t('Total spent')}</small><b>$1,342</b></div><div><small>{t('ROI')}</small><b className="green">548%</b></div></div>
+    <div className="mini-firm-row"><span className="mini-firm-dot" />{t('5 prop accounts tracked')}</div>
   </div>
 }
 
@@ -295,7 +298,8 @@ const products = [
 ]
 
 function Logo() {
-  return <div className="logo" aria-label="Tradeloop home"><Image src="/logo-mark.png" alt="" width={28} height={28} className="brand-logo" /><span>TRADE<span className="logo-accent">LOOP</span></span></div>
+  const t = useT()
+  return <div className="logo" aria-label={t('Tradeloop home')}><Image src="/logo-mark.png" alt="" width={28} height={28} className="brand-logo" /><span>TRADE<span className="logo-accent">LOOP</span></span></div>
 }
 
 function DashboardMockup() {
@@ -310,6 +314,7 @@ function DashboardMockup() {
 }
 
 export default function Page() {
+  const t = useT()
   const [active, setActive] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const [productsOpen, setProductsOpen] = useState(false)
@@ -320,31 +325,31 @@ export default function Page() {
           which would open the menu just before the tap's click toggled it
           shut again, leaving it impossible to open on touch screens. */}
       <div className="nav-item" onPointerEnter={e => { if (e.pointerType === 'mouse') setProductsOpen(true) }} onPointerLeave={e => { if (e.pointerType === 'mouse') setProductsOpen(false) }}>
-        <button className={productsOpen ? 'nav-item-active' : ''} onClick={() => setProductsOpen(v => !v)}>Products <ChevronDown size={15}/></button>
+        <button className={productsOpen ? 'nav-item-active' : ''} onClick={() => setProductsOpen(v => !v)}>{t('Products')} <ChevronDown size={15}/></button>
         {productsOpen && <div className="products-menu">
           <div className="products-menu-grid">
             {navProducts.map(p => { const Icon = p.icon; return <div className="product-card" key={p.label}>
               <span className="product-card-icon"><Icon size={20}/></span>
-              <div className="product-card-title">{p.label} {p.status === 'live' ? <span className="tag-live">LIVE</span> : <span className="tag-soon">COMING SOON</span>}</div>
-              <p>{p.description}</p>
-              {p.preview ? <ProductPreview kind={p.preview}/> : <div className="mini-preview soon-preview"><span>Coming soon</span></div>}
+              <div className="product-card-title">{t(p.label)} {p.status === 'live' ? <span className="tag-live">{t('LIVE')}</span> : <span className="tag-soon">{t('COMING SOON')}</span>}</div>
+              <p>{t(p.description)}</p>
+              {p.preview ? <ProductPreview kind={p.preview}/> : <div className="mini-preview soon-preview"><span>{t('Coming soon')}</span></div>}
             </div> })}
           </div>
           <div className="products-menu-divider" />
           <div className="products-menu-side">
             {navMore.map(p => { const Icon = p.icon; return <div className="product-side-item" key={p.label}>
               <span className="product-card-icon small"><Icon size={17}/></span>
-              <div><div className="product-card-title"><span>{p.label}</span><span className="tag-soon">SOON</span></div><p>{p.description}</p></div>
+              <div><div className="product-card-title"><span>{t(p.label)}</span><span className="tag-soon">{t('SOON')}</span></div><p>{t(p.description)}</p></div>
             </div> })}
           </div>
         </div>}
       </div>
-      <Link href="/brokers">Supported Brokers</Link><Link href="/pricing">Pricing</Link><Link href="/sign-in">Log In</Link><Link href="/sign-up" className="button gradient">Get Started <ArrowRight size={16}/></Link></nav><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>{menuOpen ? <X/> : <Menu/>}</button>
+      <Link href="/brokers">{t('Supported Brokers')}</Link><Link href="/pricing">{t('Pricing')}</Link><Link href="/sign-in">{t('Log In')}</Link><LanguageSwitcher className="nav-lang" /><Link href="/sign-up" className="button gradient">{t('Get Started')} <ArrowRight size={16}/></Link></nav><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? t('Close menu') : t('Open menu')}>{menuOpen ? <X/> : <Menu/>}</button>
     </header>
-    <section className="hero"><div className="hero-inner"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-dot"/>THE SMARTER WAY TO TRADE</div><h1>Meet your<br/><span>AI trading</span><br/>partner.</h1><p>The trading journal that knows your trades, builds your game plan, and reviews every session automatically while you focus on the next one.</p><div className="hero-actions"><Link href="/sign-up" className="button btn-dark">Get Started <ArrowRight size={17}/></Link></div><div className="trusted"><div className="stars">★★★★★</div><div><strong>4.8 out of 5</strong><small>Trusted by profitable traders</small></div></div></div><DashboardMockup/></div></section>
-    <section className="proof-wrap" id="brokers"><div className="proof-cta"><h2>Find Your Edge Right Now</h2></div><div className="broker-strip"><span className="broker-label">AUTO-SYNCS WITH</span><div className="broker"><Image src="/brokers/sm/FTMO.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>FTMO</span></div><div className="broker"><Image src="/brokers/sm/topstep.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>TopStep</span></div><div className="broker"><Image src="/brokers/sm/lucid.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Lucid Trading</span></div><div className="broker"><Image src="/brokers/sm/tradeify.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Tradeify</span></div><div className="broker"><Image src="/brokers/sm/rithmic.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Rithmic</span></div><div className="broker"><Image src="/brokers/sm/alphacapital.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Alpha Capital</span></div><span className="broker-more">+ every firm on Rithmic or MT4/5</span></div></section>
-    <section className="products" id="products"><div className="section-heading"><div><div className="eyebrow">EVERYTHING IN ONE PLACE · 6 TOOLS</div><h2>Six products.<br/><em>One hub.</em></h2></div><p>Everything that makes you a better trader — and nothing that doesn&apos;t.</p></div><div className="tabs" role="tablist">{products.map((item, i) => { const Icon = item.icon; return <button key={item.label} role="tab" aria-selected={active === i} className={active === i ? 'selected' : ''} onClick={() => setActive(i)}><Icon size={17}/>{item.label}</button> })}</div><div className="product-panel"><div className="product-copy"><div className="eyebrow">{product.eyebrow}{'soon' in product && product.soon ? <span className="eyebrow-soon">COMING SOON</span> : null}</div><h3>{product.title}</h3><p>{product.description}</p><ul>{product.bullets.map(b => <li key={b}><Check size={16}/>{b}</li>)}</ul><a className="text-link" href="#start">Explore {product.label} <ArrowRight size={16}/></a></div>{product.label === 'Backtesting' ? <BacktestingPreview/> : product.label === 'Trade Replay' ? <TradeReplayPreview/> : product.label === 'AI Insights' ? <AiInsightsPreview/> : product.label === 'Spaces' ? <SpacesPreview/> : product.label === 'Prop Firm Sync' ? <PropFirmSyncPreview/> : <div className="insight-card"><div className="insight-header"><span className="mini-icon"><product.icon size={18}/></span><div><small>TRADING INSIGHT</small><strong>Know your numbers</strong></div><span className="dots">•••</span></div><div className="insight-stat"><span>Average win</span><strong>+$482.60</strong><small>↑ 18.2% vs last month</small></div><div className="bars"><i style={{height:'40%'}}/><i style={{height:'62%'}}/><i style={{height:'52%'}}/><i style={{height:'78%'}}/><i style={{height:'68%'}}/><i style={{height:'94%'}}/><i style={{height:'81%'}}/></div></div>}</div></section>
-    <section className="cta" id="start"><div className="cta-orb"/><div className="eyebrow">YOUR NEXT LEVEL STARTS HERE</div><h2>Trade with clarity.<br/><span>Grow with confidence.</span></h2><p>Join traders building better habits and better results.</p><Link href="/pricing" className="button gradient">Start your free trial <ArrowRight size={17}/></Link></section>
-    <footer><Logo/><span>© 2026 Tradeloop. Built for better trading.</span><div><Link href="/pricing">Pricing</Link><Link href="/sign-in">Log in</Link><Link href="/sign-up">Get started</Link></div></footer>
+    <section className="hero"><div className="hero-inner"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-dot"/>{t('THE SMARTER WAY TO TRADE')}</div><h1>{t('Meet your')}<br/><span>{t('AI trading')}</span><br/>{t('partner.')}</h1><p>{t('The trading journal that knows your trades, builds your game plan, and reviews every session automatically while you focus on the next one.')}</p><div className="hero-actions"><Link href="/sign-up" className="button btn-dark">{t('Get Started')} <ArrowRight size={17}/></Link></div><div className="trusted"><div className="stars">★★★★★</div><div><strong>{t('4.8 out of 5')}</strong><small>{t('Trusted by profitable traders')}</small></div></div></div><DashboardMockup/></div></section>
+    <section className="proof-wrap" id="brokers"><div className="proof-cta"><h2>{t('Find Your Edge Right Now')}</h2></div><div className="broker-strip"><span className="broker-label">{t('AUTO-SYNCS WITH')}</span><div className="broker"><Image src="/brokers/sm/FTMO.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>FTMO</span></div><div className="broker"><Image src="/brokers/sm/topstep.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>TopStep</span></div><div className="broker"><Image src="/brokers/sm/lucid.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Lucid Trading</span></div><div className="broker"><Image src="/brokers/sm/tradeify.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Tradeify</span></div><div className="broker"><Image src="/brokers/sm/rithmic.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Rithmic</span></div><div className="broker"><Image src="/brokers/sm/alphacapital.png" alt="" width={50} height={50} className="broker-icon broker-logo" unoptimized={false} /><span>Alpha Capital</span></div><span className="broker-more">{t('+ every firm on Rithmic or MT4/5')}</span></div></section>
+    <section className="products" id="products"><div className="section-heading"><div><div className="eyebrow">{t('EVERYTHING IN ONE PLACE · 6 TOOLS')}</div><h2>{t('Six products.')}<br/><em>{t('One hub.')}</em></h2></div><p>{t("Everything that makes you a better trader — and nothing that doesn't.")}</p></div><div className="tabs" role="tablist">{products.map((item, i) => { const Icon = item.icon; return <button key={item.label} role="tab" aria-selected={active === i} className={active === i ? 'selected' : ''} onClick={() => setActive(i)}><Icon size={17}/>{t(item.label)}</button> })}</div><div className="product-panel"><div className="product-copy"><div className="eyebrow">{t(product.eyebrow)}{'soon' in product && product.soon ? <span className="eyebrow-soon">{t('COMING SOON')}</span> : null}</div><h3>{t(product.title)}</h3><p>{t(product.description)}</p><ul>{product.bullets.map(b => <li key={b}><Check size={16}/>{t(b)}</li>)}</ul><a className="text-link" href="#start">{t('Explore {product}', { product: t(product.label) })} <ArrowRight size={16}/></a></div>{product.label === 'Backtesting' ? <BacktestingPreview/> : product.label === 'Trade Replay' ? <TradeReplayPreview/> : product.label === 'AI Insights' ? <AiInsightsPreview/> : product.label === 'Spaces' ? <SpacesPreview/> : product.label === 'Prop Firm Sync' ? <PropFirmSyncPreview/> : <div className="insight-card"><div className="insight-header"><span className="mini-icon"><product.icon size={18}/></span><div><small>{t('TRADING INSIGHT')}</small><strong>{t('Know your numbers')}</strong></div><span className="dots">•••</span></div><div className="insight-stat"><span>{t('Average win')}</span><strong>+$482.60</strong><small>{t('↑ 18.2% vs last month')}</small></div><div className="bars"><i style={{height:'40%'}}/><i style={{height:'62%'}}/><i style={{height:'52%'}}/><i style={{height:'78%'}}/><i style={{height:'68%'}}/><i style={{height:'94%'}}/><i style={{height:'81%'}}/></div></div>}</div></section>
+    <section className="cta" id="start"><div className="cta-orb"/><div className="eyebrow">{t('YOUR NEXT LEVEL STARTS HERE')}</div><h2>{t('Trade with clarity.')}<br/><span>{t('Grow with confidence.')}</span></h2><p>{t('Join traders building better habits and better results.')}</p><Link href="/pricing" className="button gradient">{t('Start your free trial')} <ArrowRight size={17}/></Link></section>
+    <footer><Logo/><span>{t('© 2026 Tradeloop. Built for better trading.')}</span><div><Link href="/pricing">{t('Pricing')}</Link><Link href="/sign-in">{t('Log in')}</Link><Link href="/sign-up">{t('Get started')}</Link></div></footer>
   </main>
 }

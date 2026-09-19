@@ -39,7 +39,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="flex min-h-svh flex-col bg-background md:flex-row">
-      <aside className="shrink-0 border-b bg-sidebar md:sticky md:top-0 md:h-svh md:w-60 md:border-r md:border-b-0">
+      <aside className="shrink-0 border-b bg-sidebar md:sticky md:top-0 md:h-svh md:w-60 md:border-e md:border-b-0">
         <div className="flex items-center justify-between gap-2 px-5 pt-5 md:pb-2">
           <div className="flex items-center gap-2">
             <BrandMark className="size-7" />

@@ -49,7 +49,7 @@ export function TagGroupEditor({ groups }: { groups: StarterGroup[] }) {
           <li key={g.id} className="flex items-start justify-between gap-3 py-2.5">
             <div className="min-w-0">
               <p className="text-sm font-medium">
-                <span className={`mr-2 inline-block size-2.5 rounded-full bg-${g.color}-500`} aria-hidden="true" />
+                <span className={`me-2 inline-block size-2.5 rounded-full bg-${g.color}-500`} aria-hidden="true" />
                 {g.name}
               </p>
               <p className="mt-0.5 flex flex-wrap gap-1">

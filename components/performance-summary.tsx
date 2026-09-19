@@ -3,8 +3,10 @@ import { formatCurrency } from "@/lib/calc"
 import type { PerformanceSummary } from "@/lib/performance-summary"
 import { cn } from "@/lib/utils"
 import { TrendingUp, TrendingDown, Zap, Trophy } from "lucide-react"
+import { getT } from "@/lib/i18n/server"
 
-export function PerformanceSummaryCard({ summary }: { summary: PerformanceSummary }) {
+export async function PerformanceSummaryCard({ summary }: { summary: PerformanceSummary }) {
+  const t = await getT()
   const hasData = summary.bestDay != null
 
   return (
@@ -14,40 +16,40 @@ export function PerformanceSummaryCard({ summary }: { summary: PerformanceSummar
           <div className="grid gap-4 sm:grid-cols-2">
             <Tile
               icon={<TrendingUp className="size-4 text-emerald-500" />}
-              label="Best performing day"
-              day={summary.bestDay!.day}
+              label={t("Best performing day")}
+              day={t(summary.bestDay!.day)}
             >
-              <span className="text-sm text-slate-500">{summary.bestDay!.trades} trades</span>
+              <span className="text-sm text-slate-500">{t("{n} trades", { n: summary.bestDay!.trades })}</span>
               <Pill value={summary.bestDay!.netPnl} />
             </Tile>
             <Tile
               icon={<TrendingDown className="size-4 text-rose-500" />}
-              label="Least performing day"
-              day={summary.leastDay!.day}
+              label={t("Least performing day")}
+              day={t(summary.leastDay!.day)}
             >
-              <span className="text-sm text-slate-500">{summary.leastDay!.trades} trades</span>
+              <span className="text-sm text-slate-500">{t("{n} trades", { n: summary.leastDay!.trades })}</span>
               <Pill value={summary.leastDay!.netPnl} />
             </Tile>
             <Tile
               icon={<Zap className="size-4 text-amber-500" />}
-              label="Most active day"
-              day={summary.mostActiveDay!.day}
+              label={t("Most active day")}
+              day={t(summary.mostActiveDay!.day)}
             >
-              <span className="text-sm text-slate-500">{summary.mostActiveDay!.trades} trades</span>
+              <span className="text-sm text-slate-500">{t("{n} trades", { n: summary.mostActiveDay!.trades })}</span>
             </Tile>
             <Tile
               icon={<Trophy className="size-4 text-violet-500" />}
-              label="Best win rate"
-              day={summary.bestWinRateDay!.day}
+              label={t("Best win rate")}
+              day={t(summary.bestWinRateDay!.day)}
             >
               <span className="text-sm text-slate-500">
-                {summary.bestWinRateDay!.winRate.toFixed(0)}% / {summary.bestWinRateDay!.trades} trades
+                {summary.bestWinRateDay!.winRate.toFixed(0)}% / {t("{n} trades", { n: summary.bestWinRateDay!.trades })}
               </span>
             </Tile>
           </div>
         ) : (
           <p className="py-10 text-center text-sm text-muted-foreground">
-            Log a few closed trades to see your day-of-week performance breakdown.
+            {t("Log a few closed trades to see your day-of-week performance breakdown.")}
           </p>
         )}
       </div>

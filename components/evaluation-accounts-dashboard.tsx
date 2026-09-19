@@ -12,6 +12,7 @@ import { EquityCurve, type EquityPoint } from "@/components/equity-curve"
 import { TradingScore } from "@/components/trading-score"
 import type { FundedTrade } from "@/components/funded-accounts-dashboard"
 import { DollarSign, Percent, Scale, Activity, Target, TrendingUp, ShieldAlert } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 function EmptyState({ message }: { message: string }) {
   return (
@@ -43,6 +44,9 @@ export function EvaluationAccountsDashboard({
   trades: FundedTrade[]
   currency: string
 }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
+  const startLabel = t("Start")
   const evalAccounts = useMemo(() => accounts.filter((a) => a.rules != null && a.rules.phase !== "funded"), [accounts])
   const evalIds = useMemo(() => new Set(evalAccounts.map((a) => a.id)), [evalAccounts])
   const evalTrades = useMemo(() => trades.filter((t) => t.accountId != null && evalIds.has(t.accountId)), [trades, evalIds])
@@ -67,16 +71,16 @@ export function EvaluationAccountsDashboard({
       .filter((t) => t.status === "closed")
       .sort((x, y) => new Date(x.exitTime ?? x.entryTime).getTime() - new Date(y.exitTime ?? y.entryTime).getTime())
     let running = 0
-    const points: EquityPoint[] = [{ label: "Start", equity: 0 }]
+    const points: EquityPoint[] = [{ label: startLabel, equity: 0 }]
     for (const t of closed) {
       running += Number(t.pnl)
       points.push({
-        label: new Date(t.exitTime ?? t.entryTime).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        label: new Date(t.exitTime ?? t.entryTime).toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
         equity: Number(running.toFixed(2)),
       })
     }
     return points
-  }, [evalTrades])
+  }, [evalTrades, dateLocale, startLabel])
 
   const activeCount = evalAccounts.filter((acc) => acc.evaluation?.status === "active").length
   const breachedCount = evalAccounts.filter((acc) => acc.evaluation?.status === "breached").length
@@ -85,7 +89,7 @@ export function EvaluationAccountsDashboard({
   if (evalAccounts.length === 0) {
     return (
       <Card className="flex h-40 flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm text-muted-foreground">No accounts in evaluation right now — track one from the Accounts tab.</p>
+        <p className="text-sm text-muted-foreground">{t("No accounts in evaluation right now — track one from the Accounts tab.")}</p>
       </Card>
     )
   }
@@ -94,25 +98,25 @@ export function EvaluationAccountsDashboard({
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
-          label="Evaluation balance"
+          label={t("Evaluation balance")}
           value={formatCurrency(totalBalance, currency)}
-          sub={`${activeCount} active · ${breachedCount} breached`}
+          sub={t("{active} active · {breached} breached", { active: activeCount, breached: breachedCount })}
           icon={<Target className="size-4" />}
         />
         <StatCard
-          label="Net P&L"
+          label={t("Net P&L")}
           value={formatCurrency(a.netPnl, currency)}
           tone={a.netPnl > 0 ? "gain" : a.netPnl < 0 ? "loss" : "neutral"}
-          sub={`${a.totalTrades} closed trade${a.totalTrades === 1 ? "" : "s"}`}
+          sub={a.totalTrades === 1 ? t("1 closed trade") : t("{n} closed trades", { n: a.totalTrades })}
           icon={<DollarSign className="size-4" />}
         />
-        <StatCard label="Win Rate" value={`${a.winRate.toFixed(1)}%`} sub={`${a.wins}W / ${a.losses}L`} icon={<Percent className="size-4" />} />
-        <StatCard label="Profit Factor" value={pf} sub="Gross profit ÷ gross loss" icon={<Scale className="size-4" />} />
+        <StatCard label={t("Win Rate")} value={`${a.winRate.toFixed(1)}%`} sub={t("{w}W / {l}L", { w: a.wins, l: a.losses })} icon={<Percent className="size-4" />} />
+        <StatCard label={t("Profit Factor")} value={pf} sub={t("Gross profit ÷ gross loss")} icon={<Scale className="size-4" />} />
         <StatCard
-          label="Expectancy"
+          label={t("Expectancy")}
           value={formatCurrency(a.expectancy, currency)}
           tone={a.expectancy > 0 ? "gain" : a.expectancy < 0 ? "loss" : "neutral"}
-          sub="Avg P&L per trade"
+          sub={t("Avg P&L per trade")}
           icon={<Activity className="size-4" />}
         />
       </div>
@@ -121,21 +125,21 @@ export function EvaluationAccountsDashboard({
         <Card className="p-5 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-medium text-muted-foreground">Evaluation equity curve</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">{t("Evaluation equity curve")}</h2>
               <p className="text-lg font-semibold tabular-nums">{formatCurrency(a.netPnl, currency)}</p>
             </div>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>Max DD {formatCurrency(-a.maxDrawdown, currency)}</span>
-              <span>Avg R {a.avgRMultiple.toFixed(2)}</span>
+              <span>{t("Max DD")} {formatCurrency(-a.maxDrawdown, currency)}</span>
+              <span>{t("Avg R")} {a.avgRMultiple.toFixed(2)}</span>
             </div>
           </div>
-          {equity.length > 1 ? <EquityCurve data={equity} /> : <EmptyState message="Log a closed trade on an evaluation account to see this build up." />}
+          {equity.length > 1 ? <EquityCurve data={equity} /> : <EmptyState message={t("Log a closed trade on an evaluation account to see this build up.")} />}
         </Card>
         <TradingScore overall={tradingScore.overall} axes={tradingScore.axes} />
       </div>
 
       <Card className="space-y-4 p-5">
-        <h2 className="text-sm font-medium text-muted-foreground">Accounts in evaluation</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">{t("Accounts in evaluation")}</h2>
         <div className="space-y-4">
           {evalAccounts.map((acc) => {
             const evaluation = acc.evaluation
@@ -145,7 +149,7 @@ export function EvaluationAccountsDashboard({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium">{acc.name}</p>
-                    <p className="text-xs text-muted-foreground">{acc.firmName ?? "Firm not set"} · {acc.planType ?? "Plan not set"}</p>
+                    <p className="text-xs text-muted-foreground">{acc.firmName ?? t("Firm not set")} · {acc.planType ? t(acc.planType) : t("Plan not set")}</p>
                   </div>
                   <Badge
                     variant="outline"
@@ -154,7 +158,7 @@ export function EvaluationAccountsDashboard({
                       isBreached ? "border-[var(--loss)]/30 text-[var(--loss)]" : "border-primary/30 text-primary"
                     )}
                   >
-                    {isBreached && <ShieldAlert className="size-3.5" />} {evaluation?.status ?? "active"}
+                    {isBreached && <ShieldAlert className="size-3.5" />} {t(evaluation?.status ?? "active")}
                   </Badge>
                 </div>
                 {evaluation && (
@@ -162,7 +166,7 @@ export function EvaluationAccountsDashboard({
                     {evaluation.profitTargetAmount != null && (
                       <div>
                         <div className="mb-1 flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground">Profit target</span>
+                          <span className="text-muted-foreground">{t("Profit target")}</span>
                           <span className="font-medium tabular-nums">
                             {formatCurrency(evaluation.netProfit, acc.currency)} / {formatCurrency(evaluation.profitTargetAmount, acc.currency)}
                           </span>
@@ -172,7 +176,7 @@ export function EvaluationAccountsDashboard({
                     )}
                     <div>
                       <div className="mb-1 flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Drawdown used</span>
+                        <span className="text-muted-foreground">{t("Drawdown used")}</span>
                         <span className="font-medium tabular-nums">
                           {formatCurrency(evaluation.currentDrawdownAmount, acc.currency)} / {formatCurrency(evaluation.drawdownLimitAmount, acc.currency)}
                         </span>

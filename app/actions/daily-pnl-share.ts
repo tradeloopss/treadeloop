@@ -9,6 +9,8 @@ import { randomBytes } from "node:crypto"
 import { computeAccountPnlInRange } from "@/lib/daily-account-pnl"
 import { resolvePnlPeriod, type PnlPeriod } from "@/lib/pnl-period"
 import { isPro } from "@/lib/subscription"
+import { getLocale } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -92,7 +94,7 @@ export async function getSharedDailyPnl(token: string): Promise<SharedDailyPnl |
   if (!trader) return null
   const traderIsPro = await isPro(share.userId)
   const period: PnlPeriod = share.period === "weekly" ? "weekly" : "daily"
-  const { start, end, label } = resolvePnlPeriod(period, share.date)
+  const { start, end, label } = resolvePnlPeriod(period, share.date, intlLocale(await getLocale()))
 
   if (share.accountId != null) {
     const [account] = await db

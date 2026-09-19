@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react"
 import { AlertTriangle, Info, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useT } from "@/components/locale-provider"
 
 const DISMISSED_KEY = "dismissedAnnouncements"
 
 // Live announcements from the admin panel. Dismissing one hides it on this
 // browser only (it's a convenience, not state anyone else needs).
 export function AnnouncementBanners({ items }: { items: { id: number; message: string; level: string }[] }) {
+  const t = useT()
   const [dismissed, setDismissed] = useState<number[] | null>(null)
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export function AnnouncementBanners({ items }: { items: { id: number; message: s
           >
             <Icon className={cn("mt-0.5 size-4 shrink-0", warning ? "text-[var(--chart-4)]" : "text-primary")} aria-hidden="true" />
             <p className="flex-1">{a.message}</p>
-            <button type="button" onClick={() => dismiss(a.id)} className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Dismiss announcement">
+            <button type="button" onClick={() => dismiss(a.id)} className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label={t("Dismiss announcement")}>
               <X className="size-4" />
             </button>
           </div>

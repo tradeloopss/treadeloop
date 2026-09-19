@@ -23,6 +23,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Loader2, ZoomOut } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export interface ChartTrade {
   symbol: string
@@ -114,6 +115,8 @@ export function TradeChartDialog({
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [domain, setDomain] = useState<[number, number] | null>(null)
 
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startX: number; startDomain: [number, number] } | null>(null)
 
@@ -138,7 +141,7 @@ export function TradeChartDialog({
         if (!cancelled) setData(result)
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load chart")
+        if (!cancelled) setError(err instanceof Error ? t(err.message) : t("Could not load chart"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -241,29 +244,29 @@ export function TradeChartDialog({
         <DialogHeader>
           <DialogTitle>{trade.symbol}</DialogTitle>
           <DialogDescription>
-            {trade.side === "long" ? "Long" : "Short"} · entered {new Date(trade.entryTime).toLocaleString()}
-            {trade.exitTime && <> · exited {new Date(trade.exitTime).toLocaleString()}</>}
+            {trade.side === "long" ? t("Long") : t("Short")} · {t("entered {time}", { time: new Date(trade.entryTime).toLocaleString(dateLocale) })}
+            {trade.exitTime && <> · {t("exited {time}", { time: new Date(trade.exitTime).toLocaleString(dateLocale) })}</>}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span className="size-2 rounded-full bg-[var(--primary)]" /> Entry {trade.entryPrice}
+              <span className="size-2 rounded-full bg-[var(--primary)]" /> {t("Entry")} {trade.entryPrice}
             </span>
             {trade.exitPrice != null && (
               <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full" style={{ background: exitColor }} /> Exit {trade.exitPrice}
+                <span className="size-2 rounded-full" style={{ background: exitColor }} /> {t("Exit")} {trade.exitPrice}
               </span>
             )}
             {trade.stopLoss != null && (
               <span className="flex items-center gap-1.5">
-                <span className="h-0.5 w-3 bg-[var(--loss)]" /> Stop loss {trade.stopLoss}
+                <span className="h-0.5 w-3 bg-[var(--loss)]" /> {t("Stop loss")} {trade.stopLoss}
               </span>
             )}
             {trade.takeProfit != null && (
               <span className="flex items-center gap-1.5">
-                <span className="h-0.5 w-3 bg-[var(--gain)]" /> Take profit {trade.takeProfit}
+                <span className="h-0.5 w-3 bg-[var(--gain)]" /> {t("Take profit")} {trade.takeProfit}
               </span>
             )}
           </div>
@@ -275,7 +278,7 @@ export function TradeChartDialog({
                 onClick={() => setDomain(fullDomain)}
                 className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
               >
-                <ZoomOut className="size-3.5" /> Reset zoom
+                <ZoomOut className="size-3.5" /> {t("Reset zoom")}
               </button>
             )}
             <div className="flex items-center gap-1 rounded-lg border p-1">
@@ -412,7 +415,7 @@ export function TradeChartDialog({
                     fill="var(--primary)"
                     stroke="var(--popover)"
                     strokeWidth={2}
-                    label={{ value: "Entry", position: "top", fontSize: 11, fill: "var(--muted-foreground)" }}
+                    label={{ value: t("Entry"), position: "top", fontSize: 11, fill: "var(--muted-foreground)" }}
                   />
                   {exitSec != null && trade.exitPrice != null && (
                     <>
@@ -425,7 +428,7 @@ export function TradeChartDialog({
                         fill={exitColor}
                         stroke="var(--popover)"
                         strokeWidth={2}
-                        label={{ value: "Exit", position: "top", fontSize: 11, fill: "var(--muted-foreground)" }}
+                        label={{ value: t("Exit"), position: "top", fontSize: 11, fill: "var(--muted-foreground)" }}
                       />
                     </>
                   )}
@@ -433,7 +436,7 @@ export function TradeChartDialog({
               </ResponsiveContainer>
             </div>
             <p className="text-center text-xs text-muted-foreground">
-              Scroll to zoom, drag to pan — just like a real trading platform.
+              {t("Scroll to zoom, drag to pan — just like a real trading platform.")}
             </p>
           </>
         )}

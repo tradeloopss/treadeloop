@@ -5,6 +5,7 @@ import { headers } from "next/headers"
 import { ArrowLeft } from "lucide-react"
 import { auth } from "@/lib/auth"
 import { BrandMark } from "@/components/brand-mark"
+import { getT } from "@/lib/i18n/server"
 
 // Support lives outside the (app) group on purpose: that layout puts a
 // paywall over everything for users without a plan, and those are often the
@@ -12,6 +13,7 @@ import { BrandMark } from "@/components/brand-mark"
 export default async function SupportLayout({ children }: { children: React.ReactNode }) {
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session?.user) redirect("/sign-in?next=/support")
+  const t = await getT()
 
   return (
     <div className="min-h-svh bg-background">
@@ -21,7 +23,7 @@ export default async function SupportLayout({ children }: { children: React.Reac
           <span className="font-semibold tracking-tight">TradeLoop</span>
         </Link>
         <Link href="/dashboard" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-4" /> Back to app
+          <ArrowLeft className="size-4" /> {t("Back to app")}
         </Link>
       </header>
       {children}

@@ -103,7 +103,7 @@ export function BarList({ items, total, unit = "users" }: { items: { label: stri
             </div>
             <div className="h-3 w-full">
               <div
-                className="h-full rounded-r-[4px] bg-primary"
+                className="h-full rounded-e-[4px] bg-primary"
                 style={{ width: `${(item.value / max) * 100}%`, minWidth: item.value > 0 ? 3 : 0 }}
               />
             </div>

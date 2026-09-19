@@ -11,6 +11,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Wallet } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 export function AccountCustomizer({
   accounts,
@@ -20,6 +21,7 @@ export function AccountCustomizer({
   activeAccountIds: number[] | null
 }) {
   const router = useRouter()
+  const t = useT()
   const [pending, startTransition] = useTransition()
   const [open, setOpen] = useState(false)
   // Local draft so checking boxes doesn't hit the server on every click —
@@ -32,10 +34,10 @@ export function AccountCustomizer({
 
   const allSelected = draft == null
   const label = allSelected
-    ? "All accounts"
+    ? t("All accounts")
     : draft.length === 1
-      ? (accounts.find((a) => a.id === draft[0])?.name ?? "1 account")
-      : `${draft.length} accounts`
+      ? (accounts.find((a) => a.id === draft[0])?.name ?? t("1 account"))
+      : t("{n} accounts", { n: draft.length })
 
   function toggleAll() {
     setDraft(null)
@@ -73,10 +75,10 @@ export function AccountCustomizer({
       <PopoverContent align="start" className="w-64 p-1">
         <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
           <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
-          All accounts
+          {t("All accounts")}
         </label>
         <div className="my-1 border-t" />
-        <p className="px-2 py-1 text-xs font-medium text-muted-foreground">My accounts</p>
+        <p className="px-2 py-1 text-xs font-medium text-muted-foreground">{t("My accounts")}</p>
         {accounts.map((a) => {
           const checked = allSelected || (draft?.includes(a.id) ?? false)
           return (

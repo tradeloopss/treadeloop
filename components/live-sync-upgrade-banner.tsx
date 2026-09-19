@@ -1,9 +1,13 @@
+"use client"
+
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Link2, Lock } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 export function LiveSyncUpgradeBanner({ title, description }: { title: string; description: string }) {
+  const t = useT()
   return (
     <Card className="flex flex-col items-start gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-4">
@@ -25,7 +29,7 @@ export function LiveSyncUpgradeBanner({ title, description }: { title: string; d
         nativeButton={false}
         render={
           <Link href="/pricing">
-            <Lock className="size-4" /> Upgrade to Pro
+            <Lock className="size-4" /> {t("Upgrade to Pro")}
           </Link>
         }
       />

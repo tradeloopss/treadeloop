@@ -4,11 +4,14 @@ import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Lightbulb, TriangleAlert } from "lucide-react"
+import { getLocale, getT } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
-export function BiggestLossAnalysis({ result }: { result: LossAnalysisResult }) {
+export async function BiggestLossAnalysis({ result }: { result: LossAnalysisResult }) {
+  const t = await getT()
   const { trade, tips } = result
   const pnl = Number(trade.pnl)
-  const date = new Date(trade.exitTime ?? trade.entryTime).toLocaleDateString("en-US", {
+  const date = new Date(trade.exitTime ?? trade.entryTime).toLocaleDateString(intlLocale(await getLocale()), {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -19,7 +22,7 @@ export function BiggestLossAnalysis({ result }: { result: LossAnalysisResult }) 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-[var(--loss)]/8 px-5 py-3">
         <div className="flex items-center gap-2">
           <TriangleAlert className="size-4 text-[var(--loss)]" />
-          <h2 className="font-medium">Biggest loss — how to fix it</h2>
+          <h2 className="font-medium">{t("Biggest loss — how to fix it")}</h2>
         </div>
         <span className="text-lg font-semibold tabular-nums text-[var(--loss)]">{formatCurrency(pnl)}</span>
       </div>
@@ -34,7 +37,7 @@ export function BiggestLossAnalysis({ result }: { result: LossAnalysisResult }) 
               trade.side === "long" ? "border-[var(--gain)]/30 text-[var(--gain)]" : "border-[var(--loss)]/30 text-[var(--loss)]",
             )}
           >
-            {trade.side}
+            {trade.side === "long" ? t("Long") : t("Short")}
           </Badge>
           <span className="text-muted-foreground">{date}</span>
           {trade.rMultiple != null && (

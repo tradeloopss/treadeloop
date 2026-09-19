@@ -34,9 +34,15 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { DollarSign, Percent, Scale, Activity, TrendingUp, ArrowRight, Wallet } from "lucide-react"
 import { recordRequestTiming } from "@/lib/telemetry"
+import { getLocale, getT } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
 export default async function DashboardPage() {
   const startedAt = Date.now()
+  const t = await getT()
+  // The recent-trades loop names each trade `t`; the translator is `tr` there.
+  const tr = t
+  const dateLocale = intlLocale(await getLocale())
   const session = await auth.api.getSession({ headers: await headers() })
   const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template] = await Promise.all([
     getTrades(),
@@ -141,11 +147,11 @@ export default async function DashboardPage() {
         new Date(x.exitTime ?? x.entryTime).getTime() - new Date(y.exitTime ?? y.entryTime).getTime(),
     )
   let running = 0
-  const equity: EquityPoint[] = [{ label: "Start", equity: 0 }]
+  const equity: EquityPoint[] = [{ label: t("Start"), equity: 0 }]
   for (const t of closed) {
     running += Number(t.pnl)
     equity.push({
-      label: new Date(t.exitTime ?? t.entryTime).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      label: new Date(t.exitTime ?? t.entryTime).toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
       equity: Number(running.toFixed(2)),
     })
   }
@@ -163,7 +169,7 @@ export default async function DashboardPage() {
     .map(([day, pnl]) => {
       dailyRunning += pnl
       return {
-        label: new Date(day).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        label: new Date(day).toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
         cumulative: Number(dailyRunning.toFixed(2)),
       }
     })
@@ -200,46 +206,46 @@ export default async function DashboardPage() {
     selectedAccounts.length === 1
       ? selectedAccounts[0].name
       : accounts.length > 0
-        ? `${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"} combined`
-        : "No account set up yet"
+        ? t("{n} accounts combined", { n: selectedAccounts.length })
+        : t("No account set up yet")
 
   // Every widget the registry knows about, built once and then rendered in
   // whatever order the active template asks for.
   const statWidgets: Record<string, React.ReactNode> = {
-    balance: <StatCard label="Account Balance" value={formatCurrency(balance, balanceCurrency)} sub={balanceSub} icon={<Wallet className="size-4" />} />,
+    balance: <StatCard label={t("Account Balance")} value={formatCurrency(balance, balanceCurrency)} sub={balanceSub} icon={<Wallet className="size-4" />} />,
     netPnl: (
       <StatCard
-        label="Net P&L"
+        label={t("Net P&L")}
         value={formatCurrency(a.netPnl)}
         tone={a.netPnl > 0 ? "gain" : a.netPnl < 0 ? "loss" : "neutral"}
-        sub={`${a.totalTrades} closed trade${a.totalTrades === 1 ? "" : "s"}`}
+        sub={a.totalTrades === 1 ? t("1 closed trade") : t("{n} closed trades", { n: a.totalTrades })}
         icon={<DollarSign className="size-4" />}
       />
     ),
-    winRate: <StatCard label="Win Rate" value={`${a.winRate.toFixed(1)}%`} sub={`${a.wins}W / ${a.losses}L`} icon={<Percent className="size-4" />} />,
-    profitFactor: <StatCard label="Profit Factor" value={pf} sub="Gross profit ÷ gross loss" icon={<Scale className="size-4" />} />,
+    winRate: <StatCard label={t("Win Rate")} value={`${a.winRate.toFixed(1)}%`} sub={t("{w}W / {l}L", { w: a.wins, l: a.losses })} icon={<Percent className="size-4" />} />,
+    profitFactor: <StatCard label={t("Profit Factor")} value={pf} sub={t("Gross profit ÷ gross loss")} icon={<Scale className="size-4" />} />,
     expectancy: (
       <StatCard
-        label="Expectancy"
+        label={t("Expectancy")}
         value={formatCurrency(a.expectancy)}
         tone={a.expectancy > 0 ? "gain" : a.expectancy < 0 ? "loss" : "neutral"}
-        sub="Avg P&L per trade"
+        sub={t("Avg P&L per trade")}
         icon={<Activity className="size-4" />}
       />
     ),
-    totalTrades: <StatCard label="Total Trades" value={a.totalTrades} sub="Closed trades" icon={<Activity className="size-4" />} />,
-    avgWin: <StatCard label="Average Win" value={formatCurrency(a.avgWin)} tone="gain" sub="Per winning trade" icon={<TrendingUp className="size-4" />} />,
-    avgLoss: <StatCard label="Average Loss" value={formatCurrency(a.avgLoss)} tone="loss" sub="Per losing trade" icon={<TrendingUp className="size-4" />} />,
-    largestWin: <StatCard label="Largest Win" value={formatCurrency(a.largestWin)} tone="gain" sub="Best closed trade" icon={<TrendingUp className="size-4" />} />,
-    largestLoss: <StatCard label="Largest Loss" value={formatCurrency(a.largestLoss)} tone="loss" sub="Worst closed trade" icon={<TrendingUp className="size-4" />} />,
-    avgR: <StatCard label="Average R" value={a.avgRMultiple.toFixed(2)} sub="Mean R-multiple" icon={<Scale className="size-4" />} />,
-    maxDrawdown: <StatCard label="Max Drawdown" value={formatCurrency(-a.maxDrawdown)} tone={a.maxDrawdown > 0 ? "loss" : "neutral"} sub="Peak to trough" icon={<Activity className="size-4" />} />,
+    totalTrades: <StatCard label={t("Total Trades")} value={a.totalTrades} sub={t("Closed trades")} icon={<Activity className="size-4" />} />,
+    avgWin: <StatCard label={t("Average Win")} value={formatCurrency(a.avgWin)} tone="gain" sub={t("Per winning trade")} icon={<TrendingUp className="size-4" />} />,
+    avgLoss: <StatCard label={t("Average Loss")} value={formatCurrency(a.avgLoss)} tone="loss" sub={t("Per losing trade")} icon={<TrendingUp className="size-4" />} />,
+    largestWin: <StatCard label={t("Largest Win")} value={formatCurrency(a.largestWin)} tone="gain" sub={t("Best closed trade")} icon={<TrendingUp className="size-4" />} />,
+    largestLoss: <StatCard label={t("Largest Loss")} value={formatCurrency(a.largestLoss)} tone="loss" sub={t("Worst closed trade")} icon={<TrendingUp className="size-4" />} />,
+    avgR: <StatCard label={t("Average R")} value={a.avgRMultiple.toFixed(2)} sub={t("Mean R-multiple")} icon={<Scale className="size-4" />} />,
+    maxDrawdown: <StatCard label={t("Max Drawdown")} value={formatCurrency(-a.maxDrawdown)} tone={a.maxDrawdown > 0 ? "loss" : "neutral"} sub={t("Peak to trough")} icon={<Activity className="size-4" />} />,
     currentStreak: (
       <StatCard
-        label="Current Streak"
+        label={t("Current Streak")}
         value={a.currentStreak > 0 ? `${a.currentStreak}W` : a.currentStreak < 0 ? `${Math.abs(a.currentStreak)}L` : "—"}
         tone={a.currentStreak > 0 ? "gain" : a.currentStreak < 0 ? "loss" : "neutral"}
-        sub="Consecutive results"
+        sub={t("Consecutive results")}
         icon={<Activity className="size-4" />}
       />
     ),
@@ -254,24 +260,24 @@ export default async function DashboardPage() {
       <Card className="h-full p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium text-muted-foreground">Equity Curve</h2>
+            <h2 className="text-sm font-medium text-muted-foreground">{t("Equity Curve")}</h2>
             <p className="text-lg font-semibold tabular-nums">{formatCurrency(a.netPnl)}</p>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span>Max DD {formatCurrency(-a.maxDrawdown)}</span>
-            <span>Avg R {a.avgRMultiple.toFixed(2)}</span>
+            <span>{t("Max DD")} {formatCurrency(-a.maxDrawdown)}</span>
+            <span>{t("Avg R")} {a.avgRMultiple.toFixed(2)}</span>
           </div>
         </div>
-        {equity.length > 1 ? <EquityCurve data={equity} /> : <EmptyState message="Log your first closed trade to see your equity curve." />}
+        {equity.length > 1 ? <EquityCurve data={equity} /> : <EmptyState message={t("Log your first closed trade to see your equity curve.")} />}
       </Card>
     ),
     performanceSummary: <PerformanceSummaryCard summary={performanceSummary} />,
     recentTrades: (
       <Card className="h-full p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Recent Trades</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{t("Recent Trades")}</h2>
           <Link href="/trades" className="text-xs font-medium text-primary hover:underline">
-            View all
+            {t("View all")}
           </Link>
         </div>
         {recent.length ? (
@@ -287,12 +293,12 @@ export default async function DashboardPage() {
                         t.side === "long" ? "bg-[var(--gain)]/12 text-[var(--gain)]" : "bg-[var(--loss)]/12 text-[var(--loss)]",
                       )}
                     >
-                      {t.side}
+                      {t.side === "long" ? tr("Long") : tr("Short")}
                     </span>
                     <div>
                       <p className="text-sm font-medium">{t.symbol}</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(t.entryTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {t.market}
+                        {new Date(t.entryTime).toLocaleDateString(dateLocale, { month: "short", day: "numeric" })} · {t.market}
                       </p>
                     </div>
                   </div>
@@ -302,36 +308,36 @@ export default async function DashboardPage() {
                       t.status === "open" ? "text-muted-foreground" : pnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]",
                     )}
                   >
-                    {t.status === "open" ? "Open" : `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}`}
+                    {t.status === "open" ? tr("Open") : `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}`}
                   </span>
                 </div>
               )
             })}
           </div>
         ) : (
-          <EmptyState message="No trades yet." />
+          <EmptyState message={t("No trades yet.")} />
         )}
       </Card>
     ),
     streaks: (
       <Card className="h-full p-5">
-        <h2 className="mb-4 text-sm font-medium text-muted-foreground">Streaks & Extremes</h2>
+        <h2 className="mb-4 text-sm font-medium text-muted-foreground">{t("Streaks & Extremes")}</h2>
         <dl className="space-y-3 text-sm">
-          <Row label="Current streak">
+          <Row label={t("Current streak")}>
             <span className={cn("font-semibold tabular-nums", a.currentStreak > 0 ? "text-[var(--gain)]" : a.currentStreak < 0 ? "text-[var(--loss)]" : "")}>
               {a.currentStreak > 0 ? `${a.currentStreak}W` : a.currentStreak < 0 ? `${Math.abs(a.currentStreak)}L` : "—"}
             </span>
           </Row>
-          <Row label="Largest win">
+          <Row label={t("Largest win")}>
             <span className="font-semibold tabular-nums text-[var(--gain)]">{formatCurrency(a.largestWin)}</span>
           </Row>
-          <Row label="Largest loss">
+          <Row label={t("Largest loss")}>
             <span className="font-semibold tabular-nums text-[var(--loss)]">{formatCurrency(a.largestLoss)}</span>
           </Row>
-          <Row label="Avg win">
+          <Row label={t("Avg win")}>
             <span className="font-semibold tabular-nums text-[var(--gain)]">{formatCurrency(a.avgWin)}</span>
           </Row>
-          <Row label="Avg loss">
+          <Row label={t("Avg loss")}>
             <span className="font-semibold tabular-nums text-[var(--loss)]">{formatCurrency(a.avgLoss)}</span>
           </Row>
         </dl>
@@ -344,8 +350,8 @@ export default async function DashboardPage() {
     <div>
       <AutoSyncBanner events={syncEvents} />
       <PageHeader
-        title="Dashboard"
-        description="Your trading performance at a glance"
+        title={t("Dashboard")}
+        description={t("Your trading performance at a glance")}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <AccountCustomizer
@@ -369,7 +375,7 @@ export default async function DashboardPage() {
                 accountCount: accounts.length,
               }}
               date={today}
-              traderName={session?.user.name ?? "Trader"}
+              traderName={session?.user.name ?? t("Trader")}
               traderImage={session?.user.image}
               isPro={pro}
             />
@@ -377,7 +383,7 @@ export default async function DashboardPage() {
               nativeButton={false}
               render={
                 <Link href="/trades">
-                  Log a trade <ArrowRight className="size-4" />
+                  {t("Log a trade")} <ArrowRight className="size-4" />
                 </Link>
               }
             />

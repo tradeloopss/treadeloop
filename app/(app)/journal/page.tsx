@@ -6,9 +6,11 @@ import { PageHeader } from "@/components/page-header"
 import { JournalList, type JournalTrade, type JournalDayEntry } from "@/components/journal-list"
 import { StatCard } from "@/components/stat-card"
 import { recordRequestTiming } from "@/lib/telemetry"
+import { getT } from "@/lib/i18n/server"
 
 export default async function JournalPage() {
   const startedAt = Date.now()
+  const t = await getT()
   const [rows, entries, accounts, activeAccountIds] = await Promise.all([
     getTrades(),
     getJournalEntries(),
@@ -43,17 +45,17 @@ export default async function JournalPage() {
   return (
     <div>
       <PageHeader
-        title="Journal"
-        description="Automated daily summaries generated from your trades, plus your own reflections"
+        title={t("Journal")}
+        description={t("Automated daily summaries generated from your trades, plus your own reflections")}
       />
       <div className="space-y-5 p-4 sm:p-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <StatCard label="Total Trades" value={rows.length} />
-          <StatCard label="Wins" value={wins} tone="gain" />
-          <StatCard label="Losses" value={losses} tone="loss" />
-          <StatCard label="Breakevens" value={breakevens} />
+          <StatCard label={t("Total Trades")} value={rows.length} />
+          <StatCard label={t("Wins")} value={wins} tone="gain" />
+          <StatCard label={t("Losses")} value={losses} tone="loss" />
+          <StatCard label={t("Breakevens")} value={breakevens} />
           <StatCard
-            label="Total P&L"
+            label={t("Total P&L")}
             value={`${totalPnl >= 0 ? "+" : ""}${formatCurrency(totalPnl)}`}
             tone={totalPnl > 0 ? "gain" : totalPnl < 0 ? "loss" : "neutral"}
           />

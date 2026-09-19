@@ -2,6 +2,7 @@
 
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { formatCompact, formatCurrency } from "@/lib/calc"
+import { useT } from "@/components/locale-provider"
 
 export interface EquityPoint {
   label: string
@@ -9,6 +10,7 @@ export interface EquityPoint {
 }
 
 export function EquityCurve({ data }: { data: EquityPoint[] }) {
+  const t = useT()
   const positive = data.length === 0 || data[data.length - 1].equity >= 0
   const stroke = positive ? "var(--gain)" : "var(--loss)"
 
@@ -45,7 +47,7 @@ export function EquityCurve({ data }: { data: EquityPoint[] }) {
               fontSize: 12,
               color: "var(--popover-foreground)",
             }}
-            formatter={(value: number) => [formatCurrency(value), "Equity"]}
+            formatter={(value: number) => [formatCurrency(value), t("Equity")]}
           />
           <Area type="monotone" dataKey="equity" stroke={stroke} strokeWidth={2} fill="url(#equityFill)" />
         </AreaChart>

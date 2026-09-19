@@ -6,10 +6,13 @@ import { analyze } from "@/lib/calc"
 import { PageHeader } from "@/components/page-header"
 import { ProfileForm } from "@/components/profile-form"
 import { Card } from "@/components/ui/card"
+import { getLocale, getT } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
 export default async function ProfilePage() {
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session?.user) redirect("/sign-in")
+  const t = await getT()
 
   const rows = await getTrades()
   const a = analyze(
@@ -21,26 +24,26 @@ export default async function ProfilePage() {
       status: t.status,
     })),
   )
-  const memberSince = new Date(session.user.createdAt).toLocaleDateString("en-US", {
+  const memberSince = new Date(session.user.createdAt).toLocaleDateString(intlLocale(await getLocale()), {
     month: "long",
     year: "numeric",
   })
 
   return (
     <div>
-      <PageHeader title="Profile" description="Your account details and trading stats" />
+      <PageHeader title={t("Profile")} description={t("Your account details and trading stats")} />
       <div className="space-y-6 p-4 sm:p-6">
         <div className="grid gap-4 sm:grid-cols-3">
           <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Member since</p>
+            <p className="text-xs text-muted-foreground">{t("Member since")}</p>
             <p className="mt-1 font-semibold">{memberSince}</p>
           </Card>
           <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Trades logged</p>
+            <p className="text-xs text-muted-foreground">{t("Trades logged")}</p>
             <p className="mt-1 font-semibold tabular-nums">{a.totalTrades}</p>
           </Card>
           <Card className="p-4">
-            <p className="text-xs text-muted-foreground">Win rate</p>
+            <p className="text-xs text-muted-foreground">{t("Win rate")}</p>
             <p className="mt-1 font-semibold tabular-nums">{a.winRate.toFixed(1)}%</p>
           </Card>
         </div>

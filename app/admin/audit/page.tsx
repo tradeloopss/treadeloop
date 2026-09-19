@@ -35,7 +35,7 @@ export default async function AdminAuditPage({ searchParams }: { searchParams: P
         <div className="mt-4 overflow-x-auto rounded-xl border bg-card">
           <table className="w-full min-w-[820px] text-sm">
             <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
+              <tr className="border-b text-start text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">When</th>
                 <th className="px-3 py-3 font-medium">Admin</th>
                 <th className="px-3 py-3 font-medium">Action</th>

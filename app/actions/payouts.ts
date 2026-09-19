@@ -8,6 +8,8 @@ import { headers } from "next/headers"
 import { randomBytes } from "node:crypto"
 import { isPro } from "@/lib/subscription"
 import { resolvePeriod, type PayoutLine, type PayoutPeriod, type PayoutSummary } from "@/lib/payout-period"
+import { getLocale } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -20,7 +22,7 @@ async function getUserId() {
 // month or the right half-month, so a stored period start rebuilds the exact
 // same window later.
 async function buildPayoutSummary(userId: string, period: PayoutPeriod, anchor?: Date): Promise<PayoutSummary> {
-  const { start, end, label } = resolvePeriod(period, anchor)
+  const { start, end, label } = resolvePeriod(period, anchor, intlLocale(await getLocale()))
 
   const [rows, accounts, ruleRows, trader] = await Promise.all([
     db

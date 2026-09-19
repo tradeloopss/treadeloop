@@ -21,6 +21,8 @@ import { PerformanceSummaryCard } from "@/components/performance-summary"
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { DollarSign, Percent, Scale, Activity, TrendingUp, ArrowLeft, ShieldCheck, ShieldAlert, ShieldQuestion, Wallet } from "lucide-react"
+import { getLocale, getT } from "@/lib/i18n/server"
+import { intlLocale } from "@/lib/i18n"
 
 const STATUS_META = {
   active: { label: "Active", icon: ShieldQuestion, className: "border-primary/30 text-primary" },
@@ -36,6 +38,10 @@ export default async function AccountDashboardPage({
   const { id: idParam } = await params
   const id = Number(idParam)
   if (!Number.isFinite(id)) notFound()
+  const t = await getT()
+  // The recent-trades loop names each trade `t`; the translator is `tr` there.
+  const tr = t
+  const dateLocale = intlLocale(await getLocale())
 
   const [account, rows, propFirmAccounts] = await Promise.all([
     getAccount(id),
@@ -75,11 +81,11 @@ export default async function AccountDashboardPage({
     .filter((t) => t.status === "closed")
     .sort((x, y) => new Date(x.exitTime ?? x.entryTime).getTime() - new Date(y.exitTime ?? y.entryTime).getTime())
   let running = 0
-  const equity: EquityPoint[] = [{ label: "Start", equity: 0 }]
+  const equity: EquityPoint[] = [{ label: t("Start"), equity: 0 }]
   for (const t of closed) {
     running += Number(t.pnl)
     equity.push({
-      label: new Date(t.exitTime ?? t.entryTime).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      label: new Date(t.exitTime ?? t.entryTime).toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
       equity: Number(running.toFixed(2)),
     })
   }
@@ -95,7 +101,7 @@ export default async function AccountDashboardPage({
     .map(([day, pnl]) => {
       dailyRunning += pnl
       return {
-        label: new Date(day).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        label: new Date(day).toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
         cumulative: Number(dailyRunning.toFixed(2)),
       }
     })
@@ -108,31 +114,31 @@ export default async function AccountDashboardPage({
     <div>
       <PageHeader
         title={account.name}
-        description={`${account.broker ?? "Manual account"} · ${account.currency}`}
+        description={`${account.broker ?? t("Manual account")} · ${account.currency}`}
         action={
           <Link href="/trades" className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" /> All accounts
+            <ArrowLeft className="size-4" /> {t("All accounts")}
           </Link>
         }
       />
 
       <div className="space-y-6 p-4 sm:p-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <StatCard label="Balance" value={formatCurrency(balance, account.currency)} sub={account.name} icon={<Wallet className="size-4" />} />
+          <StatCard label={t("Balance")} value={formatCurrency(balance, account.currency)} sub={account.name} icon={<Wallet className="size-4" />} />
           <StatCard
-            label="Net P&L"
+            label={t("Net P&L")}
             value={formatCurrency(a.netPnl, account.currency)}
             tone={a.netPnl > 0 ? "gain" : a.netPnl < 0 ? "loss" : "neutral"}
-            sub={`${a.totalTrades} closed trade${a.totalTrades === 1 ? "" : "s"}`}
+            sub={a.totalTrades === 1 ? t("1 closed trade") : t("{n} closed trades", { n: a.totalTrades })}
             icon={<DollarSign className="size-4" />}
           />
-          <StatCard label="Win Rate" value={`${a.winRate.toFixed(1)}%`} sub={`${a.wins}W / ${a.losses}L`} icon={<Percent className="size-4" />} />
-          <StatCard label="Profit Factor" value={pf} sub="Gross profit ÷ gross loss" icon={<Scale className="size-4" />} />
+          <StatCard label={t("Win Rate")} value={`${a.winRate.toFixed(1)}%`} sub={t("{w}W / {l}L", { w: a.wins, l: a.losses })} icon={<Percent className="size-4" />} />
+          <StatCard label={t("Profit Factor")} value={pf} sub={t("Gross profit ÷ gross loss")} icon={<Scale className="size-4" />} />
           <StatCard
-            label="Expectancy"
+            label={t("Expectancy")}
             value={formatCurrency(a.expectancy, account.currency)}
             tone={a.expectancy > 0 ? "gain" : a.expectancy < 0 ? "loss" : "neutral"}
-            sub="Avg P&L per trade"
+            sub={t("Avg P&L per trade")}
             icon={<Activity className="size-4" />}
           />
         </div>
@@ -141,40 +147,40 @@ export default async function AccountDashboardPage({
           <Card className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm font-medium text-muted-foreground">Prop firm status</h2>
-                <Badge variant="outline" className="uppercase">{propFirm.rules.phase}</Badge>
+                <h2 className="text-sm font-medium text-muted-foreground">{t("Prop firm status")}</h2>
+                <Badge variant="outline" className="uppercase">{t(propFirm.rules.phase)}</Badge>
                 {(() => {
                   const meta = STATUS_META[propFirm.evaluation.status]
                   const Icon = meta.icon
                   return (
                     <Badge variant="outline" className={cn("uppercase", meta.className)}>
-                      <Icon className="size-3.5" /> {meta.label}
+                      <Icon className="size-3.5" /> {t(meta.label)}
                     </Badge>
                   )
                 })()}
               </div>
               <Link href="/propfirm" className="text-xs font-medium text-primary hover:underline">
-                Manage rules & payouts
+                {t("Manage rules & payouts")}
               </Link>
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-3 text-sm">
               {propFirm.evaluation.profitTargetAmount != null && (
                 <div>
-                  <p className="text-muted-foreground">Profit target progress</p>
+                  <p className="text-muted-foreground">{t("Profit target progress")}</p>
                   <p className="mt-1 font-semibold tabular-nums text-[var(--gain)]">
                     {formatCurrency(propFirm.evaluation.netProfit, account.currency)} / {formatCurrency(propFirm.evaluation.profitTargetAmount, account.currency)}
                   </p>
                 </div>
               )}
               <div>
-                <p className="text-muted-foreground">Drawdown remaining</p>
+                <p className="text-muted-foreground">{t("Drawdown remaining")}</p>
                 <p className="mt-1 font-semibold tabular-nums text-[var(--loss)]">
                   {formatCurrency(propFirm.evaluation.drawdownRemainingAmount, account.currency)}
                 </p>
               </div>
               {propFirm.evaluation.dailyLossLimitAmount != null && (
                 <div>
-                  <p className="text-muted-foreground">Worst day / daily limit</p>
+                  <p className="text-muted-foreground">{t("Worst day / daily limit")}</p>
                   <p className="mt-1 font-semibold tabular-nums text-[var(--loss)]">
                     {formatCurrency(propFirm.evaluation.worstDayLossAmount, account.currency)} / {formatCurrency(propFirm.evaluation.dailyLossLimitAmount, account.currency)}
                   </p>
@@ -201,15 +207,15 @@ export default async function AccountDashboardPage({
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-medium text-muted-foreground">Equity Curve</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">{t("Equity Curve")}</h2>
               <p className="text-lg font-semibold tabular-nums">{formatCurrency(a.netPnl, account.currency)}</p>
             </div>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>Max DD {formatCurrency(-a.maxDrawdown, account.currency)}</span>
-              <span>Avg R {a.avgRMultiple.toFixed(2)}</span>
+              <span>{t("Max DD")} {formatCurrency(-a.maxDrawdown, account.currency)}</span>
+              <span>{t("Avg R")} {a.avgRMultiple.toFixed(2)}</span>
             </div>
           </div>
-          {equity.length > 1 ? <EquityCurve data={equity} /> : <EmptyState message="Log this account's first closed trade to see its equity curve." />}
+          {equity.length > 1 ? <EquityCurve data={equity} /> : <EmptyState message={t("Log this account's first closed trade to see its equity curve.")} />}
         </Card>
 
         <PerformanceSummaryCard summary={performanceSummary} />
@@ -217,9 +223,9 @@ export default async function AccountDashboardPage({
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="p-5 lg:col-span-2">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground">Recent Trades</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">{t("Recent Trades")}</h2>
               <Link href="/trades" className="text-xs font-medium text-primary hover:underline">
-                View all
+                {t("View all")}
               </Link>
             </div>
             {recent.length ? (
@@ -235,12 +241,12 @@ export default async function AccountDashboardPage({
                             t.side === "long" ? "bg-[var(--gain)]/12 text-[var(--gain)]" : "bg-[var(--loss)]/12 text-[var(--loss)]",
                           )}
                         >
-                          {t.side}
+                          {t.side === "long" ? tr("Long") : tr("Short")}
                         </span>
                         <div>
                           <p className="text-sm font-medium">{t.symbol}</p>
                           <p className="text-xs text-muted-foreground">
-                            {new Date(t.entryTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {t.market}
+                            {new Date(t.entryTime).toLocaleDateString(dateLocale, { month: "short", day: "numeric" })} · {t.market}
                           </p>
                         </div>
                       </div>
@@ -250,35 +256,35 @@ export default async function AccountDashboardPage({
                           t.status === "open" ? "text-muted-foreground" : pnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]",
                         )}
                       >
-                        {t.status === "open" ? "Open" : `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl, account.currency)}`}
+                        {t.status === "open" ? tr("Open") : `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl, account.currency)}`}
                       </span>
                     </div>
                   )
                 })}
               </div>
             ) : (
-              <EmptyState message="No trades logged on this account yet." />
+              <EmptyState message={t("No trades logged on this account yet.")} />
             )}
           </Card>
 
           <Card className="p-5">
-            <h2 className="mb-4 text-sm font-medium text-muted-foreground">Streaks & Extremes</h2>
+            <h2 className="mb-4 text-sm font-medium text-muted-foreground">{t("Streaks & Extremes")}</h2>
             <dl className="space-y-3 text-sm">
-              <Row label="Current streak">
+              <Row label={t("Current streak")}>
                 <span className={cn("font-semibold tabular-nums", a.currentStreak > 0 ? "text-[var(--gain)]" : a.currentStreak < 0 ? "text-[var(--loss)]" : "")}>
                   {a.currentStreak > 0 ? `${a.currentStreak}W` : a.currentStreak < 0 ? `${Math.abs(a.currentStreak)}L` : "—"}
                 </span>
               </Row>
-              <Row label="Largest win">
+              <Row label={t("Largest win")}>
                 <span className="font-semibold tabular-nums text-[var(--gain)]">{formatCurrency(a.largestWin, account.currency)}</span>
               </Row>
-              <Row label="Largest loss">
+              <Row label={t("Largest loss")}>
                 <span className="font-semibold tabular-nums text-[var(--loss)]">{formatCurrency(a.largestLoss, account.currency)}</span>
               </Row>
-              <Row label="Avg win">
+              <Row label={t("Avg win")}>
                 <span className="font-semibold tabular-nums text-[var(--gain)]">{formatCurrency(a.avgWin, account.currency)}</span>
               </Row>
-              <Row label="Avg loss">
+              <Row label={t("Avg loss")}>
                 <span className="font-semibold tabular-nums text-[var(--loss)]">{formatCurrency(a.avgLoss, account.currency)}</span>
               </Row>
             </dl>

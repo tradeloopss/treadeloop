@@ -28,7 +28,7 @@ export function AdminNav({ items }: { items: NavItem[] }) {
             <Icon className="size-4" aria-hidden="true" />
             {item.label}
             {!!item.badge && (
-              <span className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums" aria-label={`${item.badge} waiting`}>
+              <span className="ms-auto rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums" aria-label={`${item.badge} waiting`}>
                 {item.badge}
               </span>
             )}

@@ -7,8 +7,10 @@ import { supportTickets } from "@/lib/db/schema"
 import { Card } from "@/components/ui/card"
 import { NewTicketForm } from "@/components/support-forms"
 import { TicketStatus } from "@/components/ticket-status"
+import { getT } from "@/lib/i18n/server"
 
 export default async function SupportPage() {
+  const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const tickets = session
     ? await db.select().from(supportTickets).where(eq(supportTickets.userId, session.user.id)).orderBy(desc(supportTickets.lastMessageAt))
@@ -16,17 +18,17 @@ export default async function SupportPage() {
 
   return (
     <div className="mx-auto max-w-5xl p-4 sm:p-6">
-      <h1 className="text-xl font-semibold tracking-tight">Support</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Ask us anything — replies show up here and in your email.</p>
+      <h1 className="text-xl font-semibold tracking-tight">{t("Support")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("Ask us anything — replies show up here and in your email.")}</p>
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
         <Card className="gap-0 p-5">
-          <h2 className="mb-4 font-medium">New request</h2>
+          <h2 className="mb-4 font-medium">{t("New request")}</h2>
           <NewTicketForm />
         </Card>
         <Card className="gap-0 p-5">
-          <h2 className="mb-3 font-medium">Your requests</h2>
+          <h2 className="mb-3 font-medium">{t("Your requests")}</h2>
           {tickets.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No requests yet.</p>
+            <p className="text-sm text-muted-foreground">{t("No requests yet.")}</p>
           ) : (
             <ul className="divide-y">
               {tickets.map((t) => (

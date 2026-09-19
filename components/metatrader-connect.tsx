@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 import { Plus, RefreshCw, Unplug, Loader2, Wifi } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 type BrokerServer = { broker: string; server: string }
 
@@ -43,6 +44,7 @@ function ServerSearch({
   value: string
   onChange: (server: string) => void
 }) {
+  const t = useT()
   const [results, setResults] = useState<BrokerServer[]>([])
   const [open, setOpen] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -80,19 +82,19 @@ function ServerSearch({
 
   return (
     <div className="relative space-y-1.5">
-      <Label htmlFor="server">Broker server</Label>
+      <Label htmlFor="server">{t("Broker server")}</Label>
       <div className="relative">
         <Input
           id="server"
           name="server"
           value={value}
-          placeholder="e.g. Exness-MT5Real6 — search or type the exact name"
+          placeholder={t("e.g. Exness-MT5Real6 — search or type the exact name")}
           autoComplete="off"
           required
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => results.length > 0 && setOpen(true)}
         />
-        {searching && <Loader2 className="absolute right-2 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+        {searching && <Loader2 className="absolute end-2 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
       </div>
       {open && results.length > 0 && (
         <div className="absolute z-20 max-h-64 w-full overflow-y-auto rounded-md border bg-popover shadow-md">
@@ -101,7 +103,7 @@ function ServerSearch({
               key={r.server}
               type="button"
               onMouseDown={() => select(r.server)}
-              className="flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-accent"
+              className="flex w-full flex-col items-start px-3 py-2 text-start text-sm hover:bg-accent"
             >
               <span className="font-medium">{r.server}</span>
               <span className="text-xs text-muted-foreground">{r.broker}</span>
@@ -110,13 +112,14 @@ function ServerSearch({
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        Matches appear as you type — or just type the exact server name if you already know it.
+        {t("Matches appear as you type — or just type the exact server name if you already know it.")}
       </p>
     </div>
   )
 }
 
 function ConnectForm({ onDone }: { onDone: () => void }) {
+  const t = useT()
   const [platform, setPlatform] = useState<"mt4" | "mt5">("mt5")
   const [server, setServer] = useState("")
   const [pending, startTransition] = useTransition()
@@ -128,10 +131,10 @@ function ConnectForm({ onDone }: { onDone: () => void }) {
     startTransition(async () => {
       try {
         await connectMetaTrader(formData)
-        toast.success("MetaTrader connected")
+        toast.success(t("MetaTrader connected"))
         onDone()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not connect")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not connect"))
       }
     })
   }
@@ -140,11 +143,11 @@ function ConnectForm({ onDone }: { onDone: () => void }) {
     <form onSubmit={onConnect} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="login">MT login</Label>
+          <Label htmlFor="login">{t("MT login")}</Label>
           <Input id="login" name="login" required autoComplete="off" />
         </div>
         <div className="space-y-1.5">
-          <Label>Platform</Label>
+          <Label>{t("Platform")}</Label>
           <Select
             value={platform}
             onValueChange={(v) => {
@@ -162,12 +165,12 @@ function ConnectForm({ onDone }: { onDone: () => void }) {
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="investorPassword">Investor password</Label>
+        <Label htmlFor="investorPassword">{t("Investor password")}</Label>
         <Input id="investorPassword" name="investorPassword" type="password" required autoComplete="off" />
       </div>
       <ServerSearch key={platform} platform={platform} value={server} onChange={setServer} />
       <Button type="submit" disabled={pending || !server} className="w-full">
-        {pending ? "Connecting…" : "Connect"}
+        {pending ? t("Connecting…") : t("Connect")}
       </Button>
     </form>
   )
@@ -186,6 +189,8 @@ export type Connection = {
 }
 
 function ConnectionRow({ connection }: { connection: Connection }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const [pending, startTransition] = useTransition()
   const [syncing, startSync] = useTransition()
 
@@ -193,9 +198,9 @@ function ConnectionRow({ connection }: { connection: Connection }) {
     startSync(async () => {
       try {
         const result = await syncMetaTrader(connection.id)
-        toast.success(result.imported > 0 ? `Imported ${result.imported} trade${result.imported === 1 ? "" : "s"}` : "Already up to date")
+        toast.success(result.imported > 0 ? (result.imported === 1 ? t("Imported 1 trade") : t("Imported {n} trades", { n: result.imported })) : t("Already up to date"))
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Sync failed")
+        toast.error(err instanceof Error ? t(err.message) : t("Sync failed"))
       }
     })
   }
@@ -204,9 +209,9 @@ function ConnectionRow({ connection }: { connection: Connection }) {
     startTransition(async () => {
       try {
         await disconnectMetaTrader(connection.id)
-        toast.success("Disconnected")
+        toast.success(t("Disconnected"))
       } catch {
-        toast.error("Could not disconnect")
+        toast.error(t("Could not disconnect"))
       }
     })
   }
@@ -223,8 +228,7 @@ function ConnectionRow({ connection }: { connection: Connection }) {
 
       {connection.tokenExpiresAt && (
         <p className="text-xs text-muted-foreground">
-          Read-only access expires {new Date(connection.tokenExpiresAt).toLocaleDateString()} — reconnect after
-          that to keep syncing.
+          {t("Read-only access expires {date} — reconnect after that to keep syncing.", { date: new Date(connection.tokenExpiresAt).toLocaleDateString(dateLocale) })}
         </p>
       )}
 
@@ -232,9 +236,9 @@ function ConnectionRow({ connection }: { connection: Connection }) {
         {connection.lastSyncedAt ? (
           <>
             <p>
-              Last synced {new Date(connection.lastSyncedAt).toLocaleString()}
+              {t("Last synced {time}", { time: new Date(connection.lastSyncedAt).toLocaleString(dateLocale) })}
               {connection.lastSyncStatus === "ok" && connection.lastSyncCount != null && (
-                <> — imported {connection.lastSyncCount} trade{connection.lastSyncCount === 1 ? "" : "s"}</>
+                <> — {connection.lastSyncCount === 1 ? t("imported 1 trade") : t("imported {n} trades", { n: connection.lastSyncCount })}</>
               )}
             </p>
             {connection.lastSyncStatus === "error" && (
@@ -242,17 +246,17 @@ function ConnectionRow({ connection }: { connection: Connection }) {
             )}
           </>
         ) : (
-          <p className="text-muted-foreground">Not synced yet — click "Sync now" to pull your trade history.</p>
+          <p className="text-muted-foreground">{t("Not synced yet — click “Sync now” to pull your trade history.")}</p>
         )}
       </div>
 
       <div className="flex gap-2">
         <Button onClick={onSync} disabled={syncing} className="flex-1">
           <RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />
-          {syncing ? "Syncing…" : "Sync now"}
+          {syncing ? t("Syncing…") : t("Sync now")}
         </Button>
         <Button onClick={onDisconnect} disabled={pending} variant="outline">
-          <Unplug className="size-4" /> Disconnect
+          <Unplug className="size-4" /> {t("Disconnect")}
         </Button>
       </div>
     </div>
@@ -260,25 +264,25 @@ function ConnectionRow({ connection }: { connection: Connection }) {
 }
 
 export function MetaTraderConnect({ connections }: { connections: Connection[] }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   return (
     <Card className="max-w-2xl space-y-4 p-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-medium">MetaTrader (live)</h2>
+          <h2 className="font-medium">{t("MetaTrader (live)")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Connect as many accounts as you trade — each syncs independently.
+            {t("Connect as many accounts as you trade — each syncs independently.")}
           </p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> Add account</Button>} />
+          <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> {t("Add account")}</Button>} />
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Connect MetaTrader</DialogTitle>
+              <DialogTitle>{t("Connect MetaTrader")}</DialogTitle>
               <DialogDescription>
-                Use your <span className="font-medium text-foreground">investor password</span> — never your
-                trading password. Only a read-only connection scoped to this one account is stored.
+                {t("Use your")} <span className="font-medium text-foreground">{t("investor password")}</span> {t("— never your trading password. Only a read-only connection scoped to this one account is stored.")}
               </DialogDescription>
             </DialogHeader>
             <ConnectForm onDone={() => setOpen(false)} />
@@ -289,7 +293,7 @@ export function MetaTraderConnect({ connections }: { connections: Connection[] }
       {connections.length === 0 ? (
         <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
           <Wifi className="size-6 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">No MetaTrader accounts connected yet.</p>
+          <p className="text-sm text-muted-foreground">{t("No MetaTrader accounts connected yet.")}</p>
         </div>
       ) : (
         <div className="space-y-3">

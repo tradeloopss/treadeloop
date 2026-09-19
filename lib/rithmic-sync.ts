@@ -3,7 +3,7 @@
 // "Sync now") and by lib/rithmic-auto-sync.ts's background job, which runs
 // outside any request context and can't rely on a logged-in session.
 import { db } from "@/lib/db"
-import { rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
+import { propFirmTransactions, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm"
 import { decrypt } from "@/lib/crypto"
 import { fetchAccountSnapshots, fetchRithmicFillsAndRms, type RithmicAccountRms, type RithmicAccountSnapshot } from "@/lib/rithmic-client"
@@ -79,16 +79,19 @@ export async function importFillsForConnection(
 }
 
 // Writes the broker's own numbers onto the trading account: the balance as
-// Rithmic sees it, the liquidation floor if it reports one, and — the first
-// time a balance is seen for an account that was created without a size —
-// the starting balance worked back from it.
-export async function applyBrokerSnapshot(accountId: number, snapshot: RithmicAccountSnapshot, rms?: RithmicAccountRms): Promise<void> {
+// Rithmic sees it, the liquidation floor if it reports one, and — for an
+// account that was created without a size, or whose size is still our own
+// earlier guess — the starting balance worked back from it. Each refresh
+// redoes that guess (more fills on file make it better) until the user
+// types a size themselves.
+export async function applyBrokerSnapshot(
+  accountId: number,
+  snapshot: RithmicAccountSnapshot,
+  rms?: RithmicAccountRms,
+  rithmicAccount?: { accountId: string; accountName: string },
+): Promise<void> {
   const [account] = await db.select().from(tradingAccounts).where(eq(tradingAccounts.id, accountId))
   if (!account) return
-  const [{ net }] = await db
-    .select({ net: sql<string>`coalesce(sum(${trades.pnl}), 0)` })
-    .from(trades)
-    .where(and(eq(trades.accountId, accountId), eq(trades.status, "closed")))
   const balance = snapshot.accountBalance
   const patch: Partial<typeof tradingAccounts.$inferInsert> = {
     currentBalance: String(balance),
@@ -98,8 +101,22 @@ export async function applyBrokerSnapshot(accountId: number, snapshot: RithmicAc
       return floor == null ? null : String(floor)
     })(),
   }
-  if (Number(account.startingBalance) <= 0 && balance > 0) {
-    patch.startingBalance = String(inferStartingBalance(balance, Number(net)))
+  if ((Number(account.startingBalance) <= 0 || account.startingBalanceInferred) && balance > 0) {
+    const [{ net }] = await db
+      .select({ net: sql<string>`coalesce(sum(${trades.pnl}), 0)` })
+      .from(trades)
+      .where(and(eq(trades.accountId, accountId), eq(trades.status, "closed")))
+    const [{ payouts }] = await db
+      .select({ payouts: sql<string>`coalesce(sum(${propFirmTransactions.amount}), 0)` })
+      .from(propFirmTransactions)
+      .where(and(eq(propFirmTransactions.accountId, accountId), eq(propFirmTransactions.type, "payout")))
+    patch.startingBalance = String(
+      inferStartingBalance(balance, Number(net), {
+        payouts: Number(payouts),
+        accountNames: [rithmicAccount?.accountId, rithmicAccount?.accountName, account.name],
+      }),
+    )
+    patch.startingBalanceInferred = true
   }
   await db.update(tradingAccounts).set(patch).where(eq(tradingAccounts.id, accountId))
 }
@@ -114,7 +131,7 @@ export async function refreshBrokerBalance(connection: RithmicConnectionRow, pas
       { fcmId: connection.fcmId, ibId: connection.ibId, accountId: connection.rithmicAccountId },
     ])
     const snapshot = snapshots.get(connection.rithmicAccountId)
-    if (snapshot) await applyBrokerSnapshot(connection.accountId, snapshot, rms)
+    if (snapshot) await applyBrokerSnapshot(connection.accountId, snapshot, rms, { accountId: connection.rithmicAccountId, accountName: connection.accountName })
   } catch (err) {
     console.warn(`[rithmic] balance refresh failed for connection ${connection.id}:`, err instanceof Error ? err.message : err)
   }

@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog"
 import { Plus, Trash2, Wallet, MoreVertical, ExternalLink } from "lucide-react"
 import { toast } from "sonner"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 // A generic initial-avatar chip for the Broker column — not a real broker
 // logo (we don't have licensed rights to those), just a deterministic color
@@ -59,6 +60,8 @@ export interface AccountCard {
 }
 
 export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; isPro: boolean }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
 
@@ -68,10 +71,10 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
     startTransition(async () => {
       try {
         await createAccount(formData)
-        toast.success("Account added")
+        toast.success(t("Account added"))
         setOpen(false)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not add account")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not add account"))
       }
     })
   }
@@ -80,9 +83,9 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
     startTransition(async () => {
       try {
         await deleteAccount(id)
-        toast.success(`Removed ${name}`)
+        toast.success(t("Removed {name}", { name }))
       } catch {
-        toast.error("Could not remove account")
+        toast.error(t("Could not remove account"))
       }
     })
   }
@@ -92,47 +95,47 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-semibold">Accounts</h2>
+            <h2 className="text-xl font-semibold">{t("Accounts")}</h2>
             <a
               href="/add-trade"
               className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"
             >
-              Learn more <ExternalLink className="size-3.5" />
+              {t("Learn more")} <ExternalLink className="size-3.5" />
             </a>
           </div>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            {isPro ? "Unlimited active accounts included in your plan." : "You can have up to 1 active account on your plan."}
+            {isPro ? t("Unlimited active accounts included in your plan.") : t("You can have up to 1 active account on your plan.")}
           </p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger render={<Button size="lg" className="px-5 font-semibold"><Plus className="size-4" /> Add account</Button>} />
+          <DialogTrigger render={<Button size="lg" className="px-5 font-semibold"><Plus className="size-4" /> {t("Add account")}</Button>} />
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add a trading account</DialogTitle>
-              <DialogDescription>Give it a name you'll recognize when logging trades.</DialogDescription>
+              <DialogTitle>{t("Add a trading account")}</DialogTitle>
+              <DialogDescription>{t("Give it a name you'll recognize when logging trades.")}</DialogDescription>
             </DialogHeader>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="name">Name</Label>
-                <Input id="name" name="name" placeholder="Apex 50K, Main Tradovate, IBKR…" required />
+                <Label htmlFor="name">{t("Name")}</Label>
+                <Input id="name" name="name" placeholder={t("Apex 50K, Main Tradovate, IBKR…")} required />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="broker">Broker / prop firm</Label>
-                <Input id="broker" name="broker" placeholder="Tradovate, NinjaTrader, Apex, TopStep…" />
+                <Label htmlFor="broker">{t("Broker / prop firm")}</Label>
+                <Input id="broker" name="broker" placeholder={t("Tradovate, NinjaTrader, Apex, TopStep…")} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="startingBalance">Starting balance</Label>
+                  <Label htmlFor="startingBalance">{t("Starting balance")}</Label>
                   <Input id="startingBalance" name="startingBalance" type="number" step="0.01" defaultValue="0" />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="currency">Currency</Label>
+                  <Label htmlFor="currency">{t("Currency")}</Label>
                   <Input id="currency" name="currency" defaultValue="USD" maxLength={3} className="uppercase" />
                 </div>
               </div>
               <DialogFooter>
                 <Button type="submit" disabled={pending} className="w-full">
-                  {pending ? "Adding…" : "Add account"}
+                  {pending ? t("Adding…") : t("Add account")}
                 </Button>
               </DialogFooter>
             </form>
@@ -143,21 +146,21 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
       {accounts.length === 0 ? (
         <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
           <Wallet className="size-6 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">No accounts yet — add one, or import trades to create it automatically.</p>
+          <p className="text-sm text-muted-foreground">{t("No accounts yet — add one, or import trades to create it automatically.")}</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/60 hover:bg-muted/60">
-                <TableHead className="py-3">Account name</TableHead>
-                <TableHead className="py-3">Broker</TableHead>
-                <TableHead className="py-3">Type</TableHead>
-                <TableHead className="py-3">Status</TableHead>
-                <TableHead className="py-3 text-right">Balance</TableHead>
-                <TableHead className="py-3">P&amp;L method</TableHead>
-                <TableHead className="py-3">Last update</TableHead>
-                <TableHead className="py-3">Next update</TableHead>
+                <TableHead className="py-3">{t("Account name")}</TableHead>
+                <TableHead className="py-3">{t("Broker")}</TableHead>
+                <TableHead className="py-3">{t("Type")}</TableHead>
+                <TableHead className="py-3">{t("Status")}</TableHead>
+                <TableHead className="py-3 text-end">{t("Balance")}</TableHead>
+                <TableHead className="py-3">{t("P&L method")}</TableHead>
+                <TableHead className="py-3">{t("Last update")}</TableHead>
+                <TableHead className="py-3">{t("Next update")}</TableHead>
                 <TableHead className="w-10 py-3" />
               </TableRow>
             </TableHeader>
@@ -186,35 +189,35 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="py-3.5 text-muted-foreground">{a.isLiveSynced ? "Live Sync" : "File Upload"}</TableCell>
+                    <TableCell className="py-3.5 text-muted-foreground">{a.isLiveSynced ? t("Live Sync") : t("File Upload")}</TableCell>
                     <TableCell className="py-3.5">
                       {!a.isLiveSynced ? (
                         <a href="/add-trade" className="text-sm font-medium text-primary hover:underline">
-                          Add Trades
+                          {t("Add Trades")}
                         </a>
                       ) : a.lastSyncStatus === "error" ? (
-                        <span className="text-sm text-[var(--loss)]">Sync error</span>
+                        <span className="text-sm text-[var(--loss)]">{t("Sync error")}</span>
                       ) : a.lastSyncedAt ? (
-                        <span className="text-sm text-[var(--gain)]">Synced</span>
+                        <span className="text-sm text-[var(--gain)]">{t("Synced")}</span>
                       ) : (
-                        <span className="text-sm text-muted-foreground">Pending first sync</span>
+                        <span className="text-sm text-muted-foreground">{t("Pending first sync")}</span>
                       )}
                     </TableCell>
-                    <TableCell className="py-3.5 text-right font-medium tabular-nums">
+                    <TableCell className="py-3.5 text-end font-medium tabular-nums">
                       {formatCurrency(balance, a.currency)}
                     </TableCell>
-                    <TableCell className="py-3.5 text-muted-foreground">Avg Cost</TableCell>
+                    <TableCell className="py-3.5 text-muted-foreground">{t("Avg Cost")}</TableCell>
                     <TableCell className="py-3.5 whitespace-nowrap text-muted-foreground">
-                      {a.lastSyncedAt ? new Date(a.lastSyncedAt).toLocaleString() : "—"}
+                      {a.lastSyncedAt ? new Date(a.lastSyncedAt).toLocaleString(dateLocale) : "—"}
                     </TableCell>
                     <TableCell className="py-3.5 whitespace-nowrap text-muted-foreground">
-                      {a.isLiveSynced && a.lastSyncStatus !== "error" ? "~1 min" : "—"}
+                      {a.isLiveSynced && a.lastSyncStatus !== "error" ? t("~1 min") : "—"}
                     </TableCell>
                     <TableCell className="py-3.5">
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
-                            <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${a.name}`}>
+                            <Button variant="ghost" size="icon" className="size-8" aria-label={t("Actions for {name}", { name: a.name })}>
                               <MoreVertical className="size-4" />
                             </Button>
                           }
@@ -222,7 +225,7 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem variant="destructive" onClick={() => onDelete(a.id, a.name)} disabled={pending}>
                             <Trash2 className="size-4" />
-                            Delete account
+                            {t("Delete account")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

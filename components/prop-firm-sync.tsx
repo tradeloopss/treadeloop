@@ -9,6 +9,7 @@ import { MetaTraderConnect, type Connection } from "@/components/metatrader-conn
 import { RithmicConnect, type RithmicConnection } from "@/components/rithmic-connect"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
 import { Star, Search, Check } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 type Platform = "rithmic" | "metatrader" | "other"
 
@@ -33,13 +34,14 @@ function PlatformCard({
   comingSoon?: boolean
   description: string
 }) {
+  const t = useT()
   return (
     <button
       type="button"
       onClick={comingSoon ? undefined : onClick}
       disabled={comingSoon}
       className={cn(
-        "flex items-center justify-between gap-3 rounded-xl border p-4 text-left transition-colors",
+        "flex items-center justify-between gap-3 rounded-xl border p-4 text-start transition-colors",
         comingSoon ? "cursor-not-allowed opacity-60" : active ? activeClassName : "border-border hover:bg-accent/40"
       )}
     >
@@ -52,12 +54,12 @@ function PlatformCard({
             <span className="font-semibold">{name}</span>
             {recommended && (
               <span className="inline-flex items-center gap-1 rounded-full border border-current/30 px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
-                <Star className="size-2.5 fill-current" /> Recommended
+                <Star className="size-2.5 fill-current" /> {t("Recommended")}
               </span>
             )}
             {comingSoon && (
               <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                Coming soon
+                {t("Coming soon")}
               </span>
             )}
           </div>
@@ -80,17 +82,18 @@ export function PropFirmSync({
   rithmicConnections: RithmicConnection[]
   isPro: boolean
 }) {
+  const t = useT()
   const [platform, setPlatform] = useState<Platform>("rithmic")
 
   return (
     <div className="space-y-5">
       {!isPro && platform !== "other" && (
         <LiveSyncUpgradeBanner
-          title={platform === "rithmic" ? "Rithmic Connection" : "MetaTrader Connection"}
+          title={platform === "rithmic" ? t("Rithmic Connection") : t("MetaTrader Connection")}
           description={
             platform === "rithmic"
-              ? "Connect your prop firm and every trade lands in your journal automatically — no CSV needed. Rithmic sync into the journal is included with Pro."
-              : "Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro."
+              ? t("Connect your prop firm and every trade lands in your journal automatically — no CSV needed. Rithmic sync into the journal is included with Pro.")
+              : t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")
           }
         />
       )}
@@ -100,7 +103,7 @@ export function PropFirmSync({
           <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
             01
           </span>
-          <h2 className="font-semibold">Select your platform</h2>
+          <h2 className="font-semibold">{t("Select your platform")}</h2>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -112,7 +115,7 @@ export function PropFirmSync({
             activeClassName="border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             name="Rithmic"
             recommended
-            description="Live sync — auto-imports every trade"
+            description={t("Live sync — auto-imports every trade")}
           />
           <PlatformCard
             active={platform === "metatrader"}
@@ -122,7 +125,7 @@ export function PropFirmSync({
             activeClassName="border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400"
             name="MT4 / MT5"
             comingSoon
-            description="Live sync — MetaTrader 4 & 5"
+            description={t("Live sync — MetaTrader 4 & 5")}
           />
           <PlatformCard
             active={platform === "other"}
@@ -130,8 +133,8 @@ export function PropFirmSync({
             logo={<Search className="size-4.5" />}
             logoClassName="bg-muted-foreground/70"
             activeClassName="border-foreground/40 bg-accent text-foreground"
-            name="Another platform"
-            description="NinjaTrader, Tradovate & more — auto-detected"
+            name={t("Another platform")}
+            description={t("NinjaTrader, Tradovate & more — auto-detected")}
           />
         </div>
       </Card>

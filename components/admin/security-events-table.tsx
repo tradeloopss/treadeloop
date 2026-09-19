@@ -20,7 +20,7 @@ export function SecurityEventsTable({ rows, empty, showUser = true }: { rows: Se
   return (
     <table className="w-full min-w-[720px] text-sm">
       <thead>
-        <tr className="border-b text-left text-xs text-muted-foreground">
+        <tr className="border-b text-start text-xs text-muted-foreground">
           <th className="px-4 py-3 font-medium">When</th>
           <th className="px-3 py-3 font-medium">Event</th>
           {showUser && <th className="px-3 py-3 font-medium">Account</th>}

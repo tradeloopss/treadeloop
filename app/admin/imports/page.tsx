@@ -58,7 +58,7 @@ export default async function AdminImportsPage({ searchParams }: { searchParams:
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-sm">
               <thead>
-                <tr className="text-left text-xs text-muted-foreground">
+                <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">When</th>
                   <th className="pb-2 font-medium">User</th>
                   <th className="pb-2 font-medium">File</th>
@@ -69,11 +69,11 @@ export default async function AdminImportsPage({ searchParams }: { searchParams:
               <tbody className="divide-y">
                 {rows.map((r) => (
                   <tr key={r.id} className="align-top">
-                    <td className="whitespace-nowrap py-2.5 pr-3 text-muted-foreground">{fmtAgo(r.createdAt)}</td>
-                    <td className="max-w-[200px] truncate py-2.5 pr-3">
+                    <td className="whitespace-nowrap py-2.5 pe-3 text-muted-foreground">{fmtAgo(r.createdAt)}</td>
+                    <td className="max-w-[200px] truncate py-2.5 pe-3">
                       <Link href={`/admin/users/${r.userId}`} className="hover:text-primary">{r.email ?? r.userId}</Link>
                     </td>
-                    <td className="max-w-[280px] py-2.5 pr-3">
+                    <td className="max-w-[280px] py-2.5 pe-3">
                       <span className="block truncate" title={r.fileName ?? undefined}>{r.fileName ?? "—"}</span>
                       <span className="block text-xs text-muted-foreground">
                         {r.source ?? "Unrecognized format"} · {fmtBytes(r.fileSize)}
@@ -85,22 +85,22 @@ export default async function AdminImportsPage({ searchParams }: { searchParams:
                         </code>
                       )}
                     </td>
-                    <td className="py-2.5 pr-3">
+                    <td className="py-2.5 pe-3">
                       {r.status === "imported" ? (
                         <span>
                           <StatePill state="active">Imported</StatePill>
-                          <span className="ml-2 text-xs text-muted-foreground">
+                          <span className="ms-2 text-xs text-muted-foreground">
                             {r.imported} new · {r.duplicates} duplicates · {r.totalRows} rows
                           </span>
                         </span>
                       ) : (
                         <span>
                           <StatePill state={r.resolvedAt ? "inactive" : "suspended"}>{r.resolvedAt ? "Handled" : "Failed"}</StatePill>
-                          <span className="ml-2 text-xs text-[var(--loss)]">{r.error}</span>
+                          <span className="ms-2 text-xs text-[var(--loss)]">{r.error}</span>
                         </span>
                       )}
                     </td>
-                    <td className="py-2.5 text-right">
+                    <td className="py-2.5 text-end">
                       <div className="flex justify-end gap-1.5">
                         {r.hasFile && (
                           <a href={`/admin/imports/${r.id}/file`} className="inline-flex h-8 items-center gap-1 rounded-md border px-2.5 text-xs hover:bg-muted" title="Download the uploaded file">

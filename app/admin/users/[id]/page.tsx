@@ -126,7 +126,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
-                <tr className="text-left text-xs text-muted-foreground">
+                <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Connection</th>
                   <th className="pb-2 font-medium">Status</th>
                   <th className="pb-2 font-medium">Last sync</th>
@@ -137,19 +137,19 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
               <tbody className="divide-y">
                 {profile.rithmic.map((c) => (
                   <tr key={`r${c.id}`}>
-                    <td className="py-2.5 pr-3">Rithmic · {c.accountName || c.systemName}</td>
-                    <td className="py-2.5 pr-3"><SyncStatus status={syncHealth(c)} /></td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{fmtAgo(c.lastSyncedAt)}{c.lastSyncCount ? ` · ${c.lastSyncCount} trades` : ""}</td>
-                    <td className="max-w-[260px] truncate py-2.5 pr-3 text-xs text-muted-foreground" title={c.lastSyncError ?? undefined}>{c.lastSyncError ?? "—"}</td>
-                    <td className="py-2.5 text-right">{canSync && <ForceSyncButton connectionId={c.id} />}</td>
+                    <td className="py-2.5 pe-3">Rithmic · {c.accountName || c.systemName}</td>
+                    <td className="py-2.5 pe-3"><SyncStatus status={syncHealth(c)} /></td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{fmtAgo(c.lastSyncedAt)}{c.lastSyncCount ? ` · ${c.lastSyncCount} trades` : ""}</td>
+                    <td className="max-w-[260px] truncate py-2.5 pe-3 text-xs text-muted-foreground" title={c.lastSyncError ?? undefined}>{c.lastSyncError ?? "—"}</td>
+                    <td className="py-2.5 text-end">{canSync && <ForceSyncButton connectionId={c.id} />}</td>
                   </tr>
                 ))}
                 {profile.metatrader.map((c) => (
                   <tr key={`m${c.id}`}>
-                    <td className="py-2.5 pr-3">MetaTrader · {c.server} · {c.login}</td>
-                    <td className="py-2.5 pr-3"><SyncStatus status={syncHealth(c)} /></td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{fmtAgo(c.lastSyncedAt)}{c.lastSyncCount ? ` · ${c.lastSyncCount} trades` : ""}</td>
-                    <td className="max-w-[260px] truncate py-2.5 pr-3 text-xs text-muted-foreground" title={c.lastSyncError ?? undefined}>{c.lastSyncError ?? "—"}</td>
+                    <td className="py-2.5 pe-3">MetaTrader · {c.server} · {c.login}</td>
+                    <td className="py-2.5 pe-3"><SyncStatus status={syncHealth(c)} /></td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{fmtAgo(c.lastSyncedAt)}{c.lastSyncCount ? ` · ${c.lastSyncCount} trades` : ""}</td>
+                    <td className="max-w-[260px] truncate py-2.5 pe-3 text-xs text-muted-foreground" title={c.lastSyncError ?? undefined}>{c.lastSyncError ?? "—"}</td>
                     <td />
                   </tr>
                 ))}

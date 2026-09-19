@@ -79,7 +79,7 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
                 <li key={`${r.email}-${r.status}`} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                   <span>
                     {r.userId ? <Link href={`/admin/users/${r.userId}`} className="hover:text-primary">{r.email}</Link> : r.email}
-                    <span className="ml-2 text-muted-foreground capitalize">{r.plan}</span>
+                    <span className="ms-2 text-muted-foreground capitalize">{r.plan}</span>
                   </span>
                   <span className="flex items-center gap-2 text-xs text-muted-foreground">
                     {r.status === "past_due" ? "payment failed" : `trial ends ${fmtDate(r.currentPeriodEnd)}`}
@@ -110,11 +110,11 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] text-sm">
                 <thead>
-                  <tr className="text-left text-xs text-muted-foreground">
+                  <tr className="text-start text-xs text-muted-foreground">
                     <th className="pb-2 font-medium">When</th>
                     <th className="pb-2 font-medium">Customer</th>
                     <th className="pb-2 font-medium">Plan</th>
-                    <th className="pb-2 pr-3 text-right font-medium">Amount</th>
+                    <th className="pb-2 pe-3 text-end font-medium">Amount</th>
                     <th className="pb-2 font-medium">Status</th>
                     <th className="pb-2" />
                   </tr>
@@ -122,20 +122,20 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
                 <tbody className="divide-y">
                   {payments.data.map((p) => (
                     <tr key={p.id}>
-                      <td className="whitespace-nowrap py-2.5 pr-3 text-muted-foreground" title={fmtDateTime(p.createdAt)}>{fmtAgo(p.createdAt)}</td>
-                      <td className="max-w-[220px] truncate py-2.5 pr-3">{p.email ?? "—"}</td>
-                      <td className="max-w-[180px] truncate py-2.5 pr-3 text-muted-foreground">{p.planTitle ?? "—"}{p.promoCode ? ` · ${p.promoCode}` : ""}</td>
-                      <td className="py-2.5 pr-3 text-right tabular-nums">
+                      <td className="whitespace-nowrap py-2.5 pe-3 text-muted-foreground" title={fmtDateTime(p.createdAt)}>{fmtAgo(p.createdAt)}</td>
+                      <td className="max-w-[220px] truncate py-2.5 pe-3">{p.email ?? "—"}</td>
+                      <td className="max-w-[180px] truncate py-2.5 pe-3 text-muted-foreground">{p.planTitle ?? "—"}{p.promoCode ? ` · ${p.promoCode}` : ""}</td>
+                      <td className="py-2.5 pe-3 text-end tabular-nums">
                         {p.amount == null ? "—" : `${p.amount.toFixed(2)} ${p.currency.toUpperCase()}`}
                         {p.refundedAmount ? <span className="block text-xs text-muted-foreground">−{p.refundedAmount.toFixed(2)} refunded</span> : null}
                         {p.amount === 0 && p.billingReason === "subscription_create" && <span className="block text-xs text-muted-foreground">trial started</span>}
                       </td>
-                      <td className="py-2.5 pr-3">
+                      <td className="py-2.5 pe-3">
                         <span className="capitalize">{p.substatus.replaceAll("_", " ")}</span>
                         {p.failureMessage && <span className="block max-w-[260px] truncate text-xs text-[var(--loss)]" title={p.failureMessage}>{p.failureMessage}</span>}
                         {p.nextAttempt && <span className="block text-xs text-muted-foreground">next attempt {fmtDate(p.nextAttempt)}</span>}
                       </td>
-                      <td className="py-2.5 text-right">
+                      <td className="py-2.5 text-end">
                         {canManage && (
                           <div className="flex justify-end gap-1.5">
                             {p.retryable && <RetryPaymentButton paymentId={p.id} email={p.email} />}
@@ -168,7 +168,7 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
                     <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                       <span>
                         <span className="font-mono font-medium">{c.code ?? c.id}</span>
-                        <span className="ml-2 text-muted-foreground">
+                        <span className="ms-2 text-muted-foreground">
                           {c.promoType === "percentage" ? `${c.amountOff}% off` : `${c.amountOff} ${c.currency.toUpperCase()} off`}
                           {c.durationMonths ? ` for ${c.durationMonths} mo` : ""}
                           {c.newUsersOnly ? " · new customers" : ""}
@@ -201,7 +201,7 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
                         {a.referrals} referral{a.referrals === 1 ? "" : "s"} · {a.activeMembers} active · joined {fmtDate(a.createdAt)}
                       </span>
                     </span>
-                    <span className="text-right text-xs text-muted-foreground">
+                    <span className="text-end text-xs text-muted-foreground">
                       <span className="block text-sm font-medium text-foreground tabular-nums">{fmtMoney(a.revenueUsd)} revenue</span>
                       {fmtMoney(a.earningsUsd)} earned · {fmtMoney(a.mrrUsd)} MRR
                     </span>
@@ -228,7 +228,7 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead>
-                <tr className="text-left text-xs text-muted-foreground">
+                <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">User</th>
                   <th className="pb-2 font-medium">Plan</th>
                   <th className="pb-2 font-medium">Status</th>
@@ -241,19 +241,19 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
               <tbody className="divide-y">
                 {subs.map((s) => (
                   <tr key={s.id}>
-                    <td className="py-2.5 pr-3">
+                    <td className="py-2.5 pe-3">
                       {s.userId ? (
                         <Link href={`/admin/users/${s.userId}`} className="hover:text-primary">{s.email || s.name}</Link>
                       ) : (
                         <span className="text-muted-foreground">{s.email || "unmatched payment"}</span>
                       )}
                     </td>
-                    <td className="py-2.5 pr-3 capitalize">{s.plan}{s.billing ? ` · ${s.billing}` : ""}</td>
-                    <td className="py-2.5 pr-3"><StatePill state={s.source === "admin" && s.status === "active" && !rowGrantsAccess(s) ? "expired" : s.status} /></td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{s.source === "admin" ? "Admin grant" : "Whop"}</td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{fmtDate(s.currentPeriodEnd)}</td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{fmtDate(s.updatedAt)}</td>
-                    <td className="py-2.5 text-right">{canManage && s.source === "admin" && rowGrantsAccess(s) && <RevokeGrantButton subscriptionId={s.id} />}</td>
+                    <td className="py-2.5 pe-3 capitalize">{s.plan}{s.billing ? ` · ${s.billing}` : ""}</td>
+                    <td className="py-2.5 pe-3"><StatePill state={s.source === "admin" && s.status === "active" && !rowGrantsAccess(s) ? "expired" : s.status} /></td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{s.source === "admin" ? "Admin grant" : "Whop"}</td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{fmtDate(s.currentPeriodEnd)}</td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{fmtDate(s.updatedAt)}</td>
+                    <td className="py-2.5 text-end">{canManage && s.source === "admin" && rowGrantsAccess(s) && <RevokeGrantButton subscriptionId={s.id} />}</td>
                   </tr>
                 ))}
                 {subs.length === 0 && <EmptyRow colSpan={7}>No subscriptions here.</EmptyRow>}

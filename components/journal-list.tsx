@@ -17,6 +17,7 @@ import {
 import { AccountCustomizer } from "@/components/account-customizer"
 import { JournalReflection } from "@/components/journal-reflection"
 import { Search, NotebookPen, ShieldCheck, Sparkles } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export interface JournalTrade {
   id: number
@@ -53,6 +54,8 @@ export function JournalList({
   accounts?: { id: number; name: string }[]
   activeAccountIds?: number[] | null
 }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const [query, setQuery] = useState("")
   const [market, setMarket] = useState("all")
   const [source, setSource] = useState<Source>("all")
@@ -100,52 +103,52 @@ export function JournalList({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         <FilterButton active={source === "all"} onClick={() => setSource("all")}>
-          All Trades <CountBadge n={counts.all} active={source === "all"} />
+          {t("All Trades")} <CountBadge n={counts.all} active={source === "all"} />
         </FilterButton>
         <FilterButton active={source === "manual"} onClick={() => setSource("manual")}>
-          Manual <CountBadge n={counts.manual} active={source === "manual"} />
+          {t("Manual")} <CountBadge n={counts.manual} active={source === "manual"} />
         </FilterButton>
         <FilterButton active={source === "verified"} onClick={() => setSource("verified")}>
-          <ShieldCheck className="size-3.5" /> Verified <CountBadge n={counts.verified} active={source === "verified"} />
+          <ShieldCheck className="size-3.5" /> {t("Verified")} <CountBadge n={counts.verified} active={source === "verified"} />
         </FilterButton>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-48 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search instrument or tag…"
-            className="pl-9"
+            placeholder={t("Search instrument or tag…")}
+            className="ps-9"
           />
         </div>
 
         <div className="flex items-center gap-1 rounded-lg border p-1">
-          <FilterChip active={session === "all"} onClick={() => setSession("all")}>All</FilterChip>
+          <FilterChip active={session === "all"} onClick={() => setSession("all")}>{t("All")}</FilterChip>
           {SESSIONS.map((s) => (
-            <FilterChip key={s} active={session === s} onClick={() => setSession(s)}>{s}</FilterChip>
+            <FilterChip key={s} active={session === s} onClick={() => setSession(s)}>{t(s)}</FilterChip>
           ))}
         </div>
 
         <div className="flex items-center gap-1 rounded-lg border p-1">
-          <FilterChip active={result === "all"} onClick={() => setResult("all")}>All</FilterChip>
-          <FilterChip active={result === "win"} onClick={() => setResult("win")} tone="gain">WIN</FilterChip>
-          <FilterChip active={result === "loss"} onClick={() => setResult("loss")} tone="loss">LOSS</FilterChip>
-          <FilterChip active={result === "breakeven"} onClick={() => setResult("breakeven")}>BREAKEVEN</FilterChip>
+          <FilterChip active={result === "all"} onClick={() => setResult("all")}>{t("All")}</FilterChip>
+          <FilterChip active={result === "win"} onClick={() => setResult("win")} tone="gain">{t("WIN")}</FilterChip>
+          <FilterChip active={result === "loss"} onClick={() => setResult("loss")} tone="loss">{t("LOSS")}</FilterChip>
+          <FilterChip active={result === "breakeven"} onClick={() => setResult("breakeven")}>{t("BREAKEVEN")}</FilterChip>
         </div>
 
         <Select value={market} onValueChange={setMarket}>
           <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All markets</SelectItem>
-            <SelectItem value="futures">Futures</SelectItem>
-            <SelectItem value="stocks">Stocks</SelectItem>
-            <SelectItem value="options">Options</SelectItem>
-            <SelectItem value="future_option">Future options</SelectItem>
-            <SelectItem value="forex">Forex</SelectItem>
-            <SelectItem value="crypto">Crypto</SelectItem>
-            <SelectItem value="cfd">CFD</SelectItem>
+            <SelectItem value="all">{t("All markets")}</SelectItem>
+            <SelectItem value="futures">{t("Futures")}</SelectItem>
+            <SelectItem value="stocks">{t("Stocks")}</SelectItem>
+            <SelectItem value="options">{t("Options")}</SelectItem>
+            <SelectItem value="future_option">{t("Future options")}</SelectItem>
+            <SelectItem value="forex">{t("Forex")}</SelectItem>
+            <SelectItem value="crypto">{t("Crypto")}</SelectItem>
+            <SelectItem value="cfd">{t("CFD")}</SelectItem>
           </SelectContent>
         </Select>
 
@@ -158,7 +161,7 @@ export function JournalList({
         <Card className="flex h-48 flex-col items-center justify-center gap-2 text-center">
           <NotebookPen className="size-7 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
-            {trades.length === 0 ? "Log trades and your journal writes itself here, day by day." : "No days match your filters."}
+            {trades.length === 0 ? t("Log trades and your journal writes itself here, day by day.") : t("No days match your filters.")}
           </p>
         </Card>
       )}
@@ -169,7 +172,7 @@ export function JournalList({
         const wins = dayTrades.filter((t) => Number(t.pnl) > 0).length
         const losses = dayTrades.filter((t) => Number(t.pnl) < 0).length
         const entry = entriesByDay[day]
-        const dateLabel = new Date(day + "T00:00:00").toLocaleDateString("en-US", {
+        const dateLabel = new Date(day + "T00:00:00").toLocaleDateString(dateLocale, {
           weekday: "long",
           month: "long",
           day: "numeric",
@@ -181,7 +184,7 @@ export function JournalList({
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-5 py-3">
               <h2 className="font-medium">{dateLabel}</h2>
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-muted-foreground">{wins}W / {losses}L</span>
+                <span className="text-muted-foreground">{t("{w}W / {l}L", { w: wins, l: losses })}</span>
                 <span
                   className={cn(
                     "font-semibold tabular-nums",
@@ -197,7 +200,7 @@ export function JournalList({
             <div className="space-y-4 p-5">
               <div className="flex items-start gap-2 rounded-md bg-accent/40 p-3">
                 <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
-                <p className="text-sm leading-relaxed">{entry?.autoSummary ?? "Summary will generate from this day's trades."}</p>
+                <p className="text-sm leading-relaxed">{entry?.autoSummary ?? t("Summary will generate from this day's trades.")}</p>
               </div>
 
               <div className="flex flex-wrap gap-2">

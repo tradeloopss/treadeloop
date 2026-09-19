@@ -166,3 +166,30 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* --- Arabic ------------------------------------------------------------- */
+/* Geist has no Arabic glyphs: Arabic pages read in IBM Plex Sans Arabic
+   (loaded in app/layout.tsx), which also carries the Latin used for
+   tickers and figures. Arabic letters join up, so any letter-spacing —
+   Tailwind's tracking-* utilities, the marketing page's headlines — breaks
+   words apart; it's zeroed wholesale (!important: the marketing page's own
+   stylesheet sets it on headings too). */
+html[lang="ar"] {
+  --font-geist-sans: var(--font-arabic), ui-sans-serif, system-ui, sans-serif;
+}
+html[lang="ar"] * {
+  letter-spacing: 0 !important;
+}
+
+/* Arrows and chevrons point along the reading direction: "next" points
+   left in Arabic. lucide-react names every icon in its class list, so the
+   directional ones mirror here in one place instead of at each call site.
+   Tailwind v4's rotate-* utilities use the separate `rotate` property, so
+   an icon that also rotates (a collapsible's chevron) still does. */
+[dir="rtl"] :is(.lucide-chevron-left, .lucide-chevron-right, .lucide-chevrons-left, .lucide-chevrons-right,
+  .lucide-arrow-left, .lucide-arrow-right, .lucide-arrow-up-right, .lucide-arrow-down-right, .lucide-arrow-up-left,
+  .lucide-arrow-down-left, .lucide-move-right, .lucide-move-left, .lucide-corner-down-right, .lucide-corner-down-left,
+  .lucide-log-out, .lucide-log-in, .lucide-external-link, .lucide-panel-left, .lucide-panel-right, .lucide-undo-2,
+  .lucide-redo-2, .lucide-reply, .lucide-send, .lucide-align-left, .lucide-align-right) {
+  transform: scaleX(-1);
+}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getRecentSyncEvents, type SyncEvent } from "@/app/actions/sync-events"
 import { Check, X } from "lucide-react"
+import { useDir, useT } from "@/components/locale-provider"
 
 // How often the banner asks the server whether anything new synced. A sync is
 // a background job the page has no way to hear about, so without this the
@@ -69,7 +70,7 @@ export function AutoSyncBanner({ events: initialEvents }: { events: SyncEvent[] 
     // Anchored to the viewport edge and clipped there, so a toast translated
     // off to the right is genuinely off-screen (and never creates a horizontal
     // scrollbar). The right padding keeps the visual gap from the edge.
-    <div className="pointer-events-none fixed right-0 bottom-4 z-50 flex w-[23rem] flex-col-reverse items-end overflow-hidden pr-4">
+    <div className="pointer-events-none fixed end-0 bottom-4 z-50 flex w-[23rem] flex-col-reverse items-end overflow-hidden pe-4">
       {visible.map((event) => {
         const key = keyOf(event)
         return <Toast key={key} event={event} closing={closing.has(key)} onDismiss={() => dismiss(key)} />
@@ -79,6 +80,8 @@ export function AutoSyncBanner({ events: initialEvents }: { events: SyncEvent[] 
 }
 
 function Toast({ event, closing, onDismiss }: { event: SyncEvent; closing: boolean; onDismiss: () => void }) {
+  const t = useT()
+  const dir = useDir()
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
   const raf = useRef<number | undefined>(undefined)
@@ -119,7 +122,7 @@ function Toast({ event, closing, onDismiss }: { event: SyncEvent; closing: boole
     // overflow-hidden would eat it.
     <div
       className="transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1.4,0.36,1)] motion-reduce:transition-none"
-      style={{ transform: shown ? "translateX(0) scale(1)" : "translateX(115%) scale(0.96)", opacity: shown ? 1 : 0 }}
+      style={{ transform: shown ? "translateX(0) scale(1)" : `translateX(${dir === "rtl" ? "-115%" : "115%"}) scale(0.96)`, opacity: shown ? 1 : 0 }}
     >
       <div
         className="grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none"
@@ -135,16 +138,16 @@ function Toast({ event, closing, onDismiss }: { event: SyncEvent; closing: boole
               <Check className="size-4.5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Auto-sync successful</p>
+              <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{t("Auto-sync successful")}</p>
               <p className="mt-0.5 truncate text-sm font-bold text-popover-foreground">
-                {event.count} trade{event.count === 1 ? "" : "s"} pulled from {event.source}
+                {event.count === 1 ? t("1 trade pulled from {source}", { source: event.source }) : t("{n} trades pulled from {source}", { n: event.count, source: event.source })}
               </p>
             </div>
             <button
               type="button"
               onClick={onDismiss}
               className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Dismiss"
+              aria-label={t("Dismiss")}
             >
               <X className="size-4" />
             </button>

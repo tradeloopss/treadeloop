@@ -52,7 +52,7 @@ export function AnnouncementForm() {
           Hide automatically after (optional)
           <Input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} className="h-9" />
         </label>
-        <span className="flex-1 text-right text-xs text-muted-foreground">{message.length}/280</span>
+        <span className="flex-1 text-end text-xs text-muted-foreground">{message.length}/280</span>
         <Button type="submit" disabled={pending}>
           Publish
         </Button>

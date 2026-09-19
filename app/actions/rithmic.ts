@@ -13,6 +13,7 @@ import { recordSyncRun } from "@/lib/sync-runs"
 import { requirePro } from "@/lib/subscription"
 import { matchFirmFromSystemName, defaultPresetForFirm } from "@/lib/propfirm-auto-detect"
 import { resolvePresetRules } from "@/lib/propfirm-presets"
+import { phaseFromAccountName } from "@/lib/broker-balance"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -160,26 +161,28 @@ export async function connectRithmic(formData: FormData) {
     )
 
     const snapshot = snapshots.get(account.accountId)
-    if (snapshot) await applyBrokerSnapshot(accountId, snapshot, rmsByAccountId.get(account.accountId))
+    if (snapshot) await applyBrokerSnapshot(accountId, snapshot, rmsByAccountId.get(account.accountId), account)
 
     // Auto-attach prop firm rules from the Rithmic system name — only when
     // this account has no rules yet, so it never overwrites a user's own
     // manual setup on a reconnect/resync. Sized to the starting balance
     // just worked out above, since most firms' thresholds are per-size
-    // dollar figures rather than a flat percentage.
+    // dollar figures rather than a flat percentage, and on the funded
+    // stage's rules when the firm labels the account as funded.
     const [existingRules] = await db.select({ id: propFirmRules.id }).from(propFirmRules).where(eq(propFirmRules.accountId, accountId))
     if (!existingRules) {
       const matchedFirm = matchFirmFromSystemName(systemName)
       const preset = matchedFirm ? defaultPresetForFirm(matchedFirm) : null
       if (matchedFirm && preset) {
+        const phase = phaseFromAccountName(account.accountId, account.accountName)
         const [sized] = await db.select({ startingBalance: tradingAccounts.startingBalance }).from(tradingAccounts).where(eq(tradingAccounts.id, accountId))
-        const rules = resolvePresetRules(preset, Number(sized?.startingBalance ?? 0), "evaluation")
+        const rules = resolvePresetRules(preset, Number(sized?.startingBalance ?? 0), phase)
         await db.insert(propFirmRules).values({
           accountId,
           userId,
           firmName: matchedFirm,
           planType: preset.program,
-          phase: "evaluation",
+          phase,
           profitTargetPct: rules.profitTargetPct != null ? String(rules.profitTargetPct) : null,
           maxDrawdownPct: String(rules.maxDrawdownPct),
           drawdownType: rules.drawdownType,
@@ -189,6 +192,9 @@ export async function connectRithmic(formData: FormData) {
           maxDrawdownAmount: String(rules.maxDrawdownAmount),
           dailyLossLimitAmount: rules.dailyLossLimitAmount != null ? String(rules.dailyLossLimitAmount) : null,
           consistencyPct: rules.consistencyPct != null ? String(rules.consistencyPct) : null,
+          minPayoutDays: rules.minPayoutDays,
+          minDayProfit: rules.minDayProfit != null ? String(rules.minDayProfit) : null,
+          payoutCap: rules.payoutCap != null ? String(rules.payoutCap) : null,
           autoDetected: true,
         })
       }

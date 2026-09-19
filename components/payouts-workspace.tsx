@@ -10,8 +10,10 @@ import { StatCard } from "@/components/stat-card"
 import { PayoutCertificate } from "@/components/payout-certificate"
 import { Banknote, CalendarRange, Wallet } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 export function PayoutsWorkspace({ initial, isPro }: { initial: PayoutSummary; isPro: boolean }) {
+  const t = useT()
   const [summary, setSummary] = useState(initial)
   const [pending, startTransition] = useTransition()
 
@@ -21,7 +23,7 @@ export function PayoutsWorkspace({ initial, isPro }: { initial: PayoutSummary; i
       try {
         setSummary(await getPayoutSummary(period))
       } catch {
-        toast.error("Could not load that period")
+        toast.error(t("Could not load that period"))
       }
     })
   }
@@ -34,8 +36,8 @@ export function PayoutsWorkspace({ initial, isPro }: { initial: PayoutSummary; i
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-1 rounded-lg border bg-muted p-1">
           {([
-            { value: "monthly" as const, label: "Monthly" },
-            { value: "biweekly" as const, label: "Bi-weekly" },
+            { value: "monthly" as const, label: t("Monthly") },
+            { value: "biweekly" as const, label: t("Bi-weekly") },
           ]).map((opt) => (
             <button
               key={opt.value}
@@ -52,31 +54,31 @@ export function PayoutsWorkspace({ initial, isPro }: { initial: PayoutSummary; i
         </div>
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
           <CalendarRange className="size-4" /> {summary.periodLabel}
-          {pending && <span className="text-xs">· updating…</span>}
+          {pending && <span className="text-xs">· {t("updating…")}</span>}
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard
-          label="Total payouts"
+          label={t("Total payouts")}
           value={formatCurrency(summary.total, summary.currency)}
-          sub={`${payoutCount} payout${payoutCount === 1 ? "" : "s"} logged`}
+          sub={payoutCount === 1 ? t("1 payout logged") : t("{n} payouts logged", { n: payoutCount })}
           tone={summary.total > 0 ? "gain" : "neutral"}
           icon={<Banknote className="size-4" />}
         />
-        <StatCard label="Accounts paid" value={summary.accountCount} sub="In this period" icon={<Wallet className="size-4" />} />
+        <StatCard label={t("Accounts paid")} value={summary.accountCount} sub={t("In this period")} icon={<Wallet className="size-4" />} />
         <StatCard
-          label="Avg per account"
+          label={t("Avg per account")}
           value={formatCurrency(avgPerAccount, summary.currency)}
-          sub="Across paid accounts"
+          sub={t("Across paid accounts")}
           icon={<CalendarRange className="size-4" />}
         />
       </div>
 
       <Card className="p-5">
-        <h2 className="text-sm font-medium text-muted-foreground">Payout certificate</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">{t("Payout certificate")}</h2>
         <p className="mt-1 mb-5 text-sm text-muted-foreground">
-          Covers every account with a payout in this period. Download it as an image or print it.
+          {t("Covers every account with a payout in this period. Download it as an image or print it.")}
         </p>
         <PayoutCertificate summary={summary} isPro={isPro} />
       </Card>
@@ -84,7 +86,7 @@ export function PayoutsWorkspace({ initial, isPro }: { initial: PayoutSummary; i
       {summary.lines.length === 0 && (
         <Card className="flex h-32 flex-col items-center justify-center gap-2 text-center">
           <p className="text-sm text-muted-foreground">
-            No payouts logged for {summary.periodLabel}. Log one from the Prop Firm Tracker — &quot;Log payout&quot; on any account.
+            {t("No payouts logged for {period}. Log one from the Prop Firm Tracker — “Log payout” on any account.", { period: summary.periodLabel })}
           </p>
         </Card>
       )}

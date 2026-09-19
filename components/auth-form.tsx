@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { BrandMark } from "@/components/brand-mark"
+import { useT } from "@/components/locale-provider"
+import { LanguageSwitcher } from "@/components/language-switcher"
 
 // Google's own mark, required by their branding guidelines on any
 // "Sign in with Google" button.
@@ -46,6 +48,7 @@ export function AuthForm({
   githubEnabled?: boolean
 }) {
   const router = useRouter()
+  const t = useT()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [name, setName] = useState("")
@@ -63,9 +66,9 @@ export function AuthForm({
       // Better Auth redirects the browser to the provider, so on success this
       // call never returns — only the failure path needs handling here.
       const { error } = await authClient.signIn.social({ provider, callbackURL: redirectTo })
-      if (error) throw new Error(error.message ?? `Could not continue with ${label}`)
+      if (error) throw new Error(error.message ?? t("Could not continue with {provider}", { provider: label }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Could not continue with ${label}`)
+      setError(err instanceof Error ? t(err.message) : t("Could not continue with {provider}", { provider: label }))
       setSocialLoading(null)
     }
   }
@@ -77,17 +80,17 @@ export function AuthForm({
     try {
       if (isSignUp) {
         const { error } = await authClient.signUp.email({ email, password, name })
-        if (error) throw new Error(error.message ?? "Could not create account")
+        if (error) throw new Error(error.message ?? t("Could not create account"))
       } else {
         const { data, error } = await authClient.signIn.email({ email, password })
-        if (error) throw new Error(error.message ?? "Invalid email or password")
+        if (error) throw new Error(error.message ?? t("Invalid email or password"))
         // 2FA accounts: the auth client is already navigating to /two-factor.
         if (data && "twoFactorRedirect" in data && data.twoFactorRedirect) return
       }
       router.push(redirectTo)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong")
+      setError(err instanceof Error ? t(err.message) : t("Something went wrong"))
     } finally {
       setLoading(false)
     }
@@ -95,11 +98,12 @@ export function AuthForm({
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-gradient-to-br from-background via-background to-accent/30 p-4">
-      <div className="w-full max-w-sm rounded-2xl border bg-card p-8 shadow-lg">
+      <div className="relative w-full max-w-sm rounded-2xl border bg-card p-8 shadow-lg">
+        <LanguageSwitcher compact className="absolute top-3 end-3" />
         <div className="flex flex-col items-center text-center">
           <BrandMark className="size-14" alt="TradeLoop" />
-          <h1 className="mt-5 text-2xl font-bold tracking-tight">{isSignUp ? "Welcome to TradeLoop" : "Sign in"}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Journal smarter. Trade with clarity.</p>
+          <h1 className="mt-5 text-2xl font-bold tracking-tight">{isSignUp ? t("Welcome to TradeLoop") : t("Sign in")}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{t("Journal smarter. Trade with clarity.")}</p>
         </div>
 
         {(googleEnabled || githubEnabled) && (
@@ -114,7 +118,7 @@ export function AuthForm({
                   className="h-12 w-full rounded-xl text-base font-medium"
                 >
                   <GoogleMark />
-                  {socialLoading === "google" ? "Redirecting…" : "Continue with Google"}
+                  {socialLoading === "google" ? t("Redirecting…") : t("Continue with Google")}
                 </Button>
               )}
               {githubEnabled && (
@@ -126,13 +130,13 @@ export function AuthForm({
                   className="h-12 w-full rounded-xl text-base font-medium"
                 >
                   <GithubMark />
-                  {socialLoading === "github" ? "Redirecting…" : "Continue with GitHub"}
+                  {socialLoading === "github" ? t("Redirecting…") : t("Continue with GitHub")}
                 </Button>
               )}
             </div>
             <div className="mt-5 flex items-center gap-3">
               <span className="h-px flex-1 bg-border" />
-              <span className="text-xs text-muted-foreground">or</span>
+              <span className="text-xs text-muted-foreground">{t("or")}</span>
               <span className="h-px flex-1 bg-border" />
             </div>
           </>
@@ -141,31 +145,31 @@ export function AuthForm({
         <form onSubmit={onSubmit} className={cn("flex flex-col gap-3", googleEnabled || githubEnabled ? "mt-5" : "mt-7")}>
           {isSignUp && (
             <div>
-              <Label htmlFor="name" className="sr-only">Name</Label>
-              <Input id="name" className="h-12 rounded-xl" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" required />
+              <Label htmlFor="name" className="sr-only">{t("Name")}</Label>
+              <Input id="name" className="h-12 rounded-xl" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("Name")} required />
             </div>
           )}
           <div>
-            <Label htmlFor="email" className="sr-only">Email</Label>
+            <Label htmlFor="email" className="sr-only">{t("Email")}</Label>
             <Input
               id="email"
               type="email"
               className="h-12 rounded-xl"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
+              placeholder={t("Email")}
               required
             />
           </div>
           <div>
-            <Label htmlFor="password" className="sr-only">{isSignUp ? "Create password" : "Password"}</Label>
+            <Label htmlFor="password" className="sr-only">{isSignUp ? t("Create password") : t("Password")}</Label>
             <Input
               id="password"
               type="password"
               className="h-12 rounded-xl"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={isSignUp ? "Create password" : "Password"}
+              placeholder={isSignUp ? t("Create password") : t("Password")}
               minLength={8}
               required
             />
@@ -175,31 +179,31 @@ export function AuthForm({
               href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ""}`}
               className="-mt-1 self-end text-xs font-medium text-muted-foreground hover:text-primary"
             >
-              Forgot password?
+              {t("Forgot password?")}
             </Link>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" disabled={loading} className="mt-2 h-12 w-full rounded-xl text-base font-semibold">
-            {loading ? "Please wait…" : isSignUp ? "Sign up" : "Sign in"}
+            {loading ? t("Please wait…") : isSignUp ? t("Sign up") : t("Sign in")}
           </Button>
         </form>
 
         {isSignUp && (
           <p className="mt-4 text-center text-xs text-muted-foreground">
-            By creating an account you agree to our{" "}
-            <Link href="/terms" className="font-medium text-primary hover:underline">Terms of Service</Link>{" "}
-            and{" "}
-            <Link href="/privacy" className="font-medium text-primary hover:underline">Privacy Policy</Link>
+            {t("By creating an account you agree to our")}{" "}
+            <Link href="/terms" className="font-medium text-primary hover:underline">{t("Terms of Service")}</Link>{" "}
+            {t("and")}{" "}
+            <Link href="/privacy" className="font-medium text-primary hover:underline">{t("Privacy Policy")}</Link>
           </p>
         )}
 
         <p className="mt-5 text-center text-sm text-muted-foreground">
-          {isSignUp ? "Already have an account? " : "Don't have an account? "}
+          {isSignUp ? t("Already have an account?") : t("Don't have an account?")}{" "}
           <Link
             href={`${isSignUp ? "/sign-in" : "/sign-up"}${redirectTo !== "/dashboard" ? `?next=${encodeURIComponent(redirectTo)}` : ""}`}
             className="font-medium text-primary hover:underline"
           >
-            {isSignUp ? "Sign in" : "Sign up"}
+            {isSignUp ? t("Sign in") : t("Sign up")}
           </Link>
         </p>
       </div>

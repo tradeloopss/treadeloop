@@ -127,7 +127,7 @@ export function evaluatePropFirmAccount(
       const ddReference = rules.drawdownType === "trailing" ? peak : startingBalance
       const currentDrawdown = ddReference - balance
       if (currentDrawdown >= maxDrawdownAmount) {
-        breach = { reason: `Max drawdown exceeded (${rules.drawdownType})`, at: t.exitTime, netProfit: balance - startingBalance }
+        breach = { reason: rules.drawdownType === "trailing" ? "Max drawdown exceeded (trailing)" : "Max drawdown exceeded (static)", at: t.exitTime, netProfit: balance - startingBalance }
       } else if (dailyLossLimitAmount != null && -dayTotal >= dailyLossLimitAmount) {
         breach = { reason: "Daily loss limit exceeded", at: t.exitTime, netProfit: balance - startingBalance }
       }

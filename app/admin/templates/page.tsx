@@ -31,7 +31,7 @@ export default async function AdminTemplatesPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead>
-                <tr className="text-left text-xs text-muted-foreground">
+                <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Shared</th>
                   <th className="pb-2 font-medium">Type</th>
                   <th className="pb-2 font-medium">Owner</th>
@@ -42,17 +42,17 @@ export default async function AdminTemplatesPage() {
               <tbody className="divide-y">
                 {shares.map((s) => (
                   <tr key={`${s.kind}-${s.id}`}>
-                    <td className="max-w-[320px] truncate py-2.5 pr-3">
+                    <td className="max-w-[320px] truncate py-2.5 pe-3">
                       <a href={`/p/${s.token}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-primary">
                         {s.label} <ExternalLink className="size-3 text-muted-foreground" />
                       </a>
                     </td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{KIND_LABELS[s.kind]}</td>
-                    <td className="max-w-[220px] truncate py-2.5 pr-3">
+                    <td className="py-2.5 pe-3 text-muted-foreground">{KIND_LABELS[s.kind]}</td>
+                    <td className="max-w-[220px] truncate py-2.5 pe-3">
                       <Link href={`/admin/users/${s.userId}`} className="hover:text-primary">{s.email ?? s.userId}</Link>
                     </td>
-                    <td className="py-2.5 pr-3 text-muted-foreground">{fmtAgo(s.createdAt)}</td>
-                    <td className="py-2.5 text-right"><DisableShareButton kind={s.kind} id={s.id} /></td>
+                    <td className="py-2.5 pe-3 text-muted-foreground">{fmtAgo(s.createdAt)}</td>
+                    <td className="py-2.5 text-end"><DisableShareButton kind={s.kind} id={s.id} /></td>
                   </tr>
                 ))}
                 {shares.length === 0 && <EmptyRow colSpan={5}>Nothing is publicly shared right now.</EmptyRow>}

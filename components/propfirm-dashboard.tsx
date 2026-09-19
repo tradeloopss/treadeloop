@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/card"
 import { StatCard } from "@/components/stat-card"
 import type { PropFirmDashboardData, FirmBreakdown } from "@/lib/propfirm-dashboard"
 import { TrendingUp, TrendingDown, DollarSign } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 const CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"]
 
@@ -63,6 +64,7 @@ function TextTabs<T extends string>({ value, onChange, options }: { value: T; on
 }
 
 function PassBar({ label, passed, attempted }: { label: string; passed: number; attempted: number }) {
+  const t = useT()
   const pct = attempted > 0 ? (passed / attempted) * 100 : 0
   return (
     <div>
@@ -76,13 +78,14 @@ function PassBar({ label, passed, attempted }: { label: string; passed: number; 
         <div className="h-full rounded-full bg-[var(--gain)] transition-all" style={{ width: `${pct}%` }} />
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Passed {passed} out of {attempted} accounts
+        {t("Passed {passed} out of {attempted} accounts", { passed, attempted })}
       </p>
     </div>
   )
 }
 
 function FinanceRow({ item, currency, color }: { item: FirmBreakdown; currency: string; color: string }) {
+  const t = useT()
   const total = item.spent + item.earned
   const earnedPct = total > 0 ? (item.earned / total) * 100 : 0
   return (
@@ -90,7 +93,7 @@ function FinanceRow({ item, currency, color }: { item: FirmBreakdown; currency: 
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-2 font-medium">
           <span className="size-2 rounded-full" style={{ background: color }} />
-          {item.key}
+          {t(item.key)}
         </span>
         <span className={cn("font-semibold tabular-nums", item.net >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
           {item.net >= 0 ? "+" : ""}
@@ -98,7 +101,7 @@ function FinanceRow({ item, currency, color }: { item: FirmBreakdown; currency: 
         </span>
       </div>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        Spent {formatCurrency(item.spent, currency)} · Earned {formatCurrency(item.earned, currency)}
+        {t("Spent {spent} · Earned {earned}", { spent: formatCurrency(item.spent, currency), earned: formatCurrency(item.earned, currency) })}
       </p>
       <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div className="h-full rounded-full bg-[var(--gain)]" style={{ width: `${earnedPct}%` }} />
@@ -116,6 +119,7 @@ function rangeStart(range: "1w" | "1m" | "1y"): Date {
 }
 
 export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardData; currency: string }) {
+  const t = useT()
   const [chartRange, setChartRange] = useState<"1w" | "1m" | "1y">("1y")
   const [passTab, setPassTab] = useState<"firm" | "planType" | "size">("firm")
   const [financeTab, setFinanceTab] = useState<"firm" | "type" | "size" | "expenses">("firm")
@@ -132,11 +136,11 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
 
   const financePieData =
     financeTab === "expenses"
-      ? data.expenseBreakdown.map((e, i) => ({ name: e.key, value: e.amount, color: CHART_COLORS[i % CHART_COLORS.length] }))
-      : financeItems.map((f) => ({ name: f.key, value: Math.abs(f.net), color: f.net >= 0 ? "var(--gain)" : "var(--loss)" }))
+      ? data.expenseBreakdown.map((e, i) => ({ name: t(e.key), value: e.amount, color: CHART_COLORS[i % CHART_COLORS.length] }))
+      : financeItems.map((f) => ({ name: t(f.key), value: Math.abs(f.net), color: f.net >= 0 ? "var(--gain)" : "var(--loss)" }))
 
   const financeCenterLabel =
-    financeTab === "firm" ? "Net by firm" : financeTab === "type" ? "Net by account type" : financeTab === "size" ? "Net by account size" : "Total expenses"
+    financeTab === "firm" ? t("Net by firm") : financeTab === "type" ? t("Net by account type") : financeTab === "size" ? t("Net by account size") : t("Total expenses")
   const financeCenterValue = financeTab === "expenses" ? formatCurrency(totalExpenses, currency) : `${financeTotalNet >= 0 ? "+" : ""}${formatCurrency(financeTotalNet, currency)}`
 
   const breachBucket = data.breachByPhase[breachTab]
@@ -148,26 +152,26 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
           <div className="space-y-3">
             <div>
               <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <span className="size-1.5 rounded-full bg-[var(--gain)]" /> Funded
+                <span className="size-1.5 rounded-full bg-[var(--gain)]" /> {t("Funded")}
               </div>
               <p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(data.fundedBalance, currency)}</p>
-              <p className="text-xs text-muted-foreground">{data.fundedCount} funded account{data.fundedCount === 1 ? "" : "s"}</p>
+              <p className="text-xs text-muted-foreground">{data.fundedCount === 1 ? t("1 funded account") : t("{n} funded accounts", { n: data.fundedCount })}</p>
             </div>
             <div className="border-t pt-3">
               <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <span className="size-1.5 rounded-full bg-[var(--chart-1)]" /> Evaluation
+                <span className="size-1.5 rounded-full bg-[var(--chart-1)]" /> {t("Evaluation")}
               </div>
               <p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(data.evaluationBalance, currency)}</p>
-              <p className="text-xs text-muted-foreground">{data.evaluationCount} eval account{data.evaluationCount === 1 ? "" : "s"}</p>
+              <p className="text-xs text-muted-foreground">{data.evaluationCount === 1 ? t("1 eval account") : t("{n} eval accounts", { n: data.evaluationCount })}</p>
             </div>
           </div>
         </Card>
-        <StatCard label="Total spent" value={formatCurrency(data.totalSpent, currency)} sub="Evaluation fees & resets" icon={<DollarSign className="size-4" />} />
-        <StatCard label="Total earned" value={formatCurrency(data.totalEarned, currency)} sub="Payouts received" tone="gain" icon={<TrendingUp className="size-4" />} />
+        <StatCard label={t("Total spent")} value={formatCurrency(data.totalSpent, currency)} sub={t("Evaluation fees & resets")} icon={<DollarSign className="size-4" />} />
+        <StatCard label={t("Total earned")} value={formatCurrency(data.totalEarned, currency)} sub={t("Payouts received")} tone="gain" icon={<TrendingUp className="size-4" />} />
         <StatCard
-          label="Net total"
+          label={t("Net total")}
           value={`${data.netTotal >= 0 ? "+" : ""}${formatCurrency(data.netTotal, currency)}`}
-          sub={data.roiPct != null ? `${data.roiPct >= 0 ? "+" : ""}${data.roiPct.toFixed(1)}% ROI` : "No spend logged yet"}
+          sub={data.roiPct != null ? t("{pct}% ROI", { pct: `${data.roiPct >= 0 ? "+" : ""}${data.roiPct.toFixed(1)}` }) : t("No spend logged yet")}
           tone={data.netTotal >= 0 ? "gain" : "loss"}
           icon={data.netTotal >= 0 ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
         />
@@ -176,8 +180,8 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="font-medium">ROI progression</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Track how your cumulative net return on investment evolves over time</p>
+            <h2 className="font-medium">{t("ROI progression")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("Track how your cumulative net return on investment evolves over time")}</p>
           </div>
           <PillTabs
             value={chartRange}
@@ -214,7 +218,7 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
                   contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12, color: "var(--popover-foreground)" }}
                   formatter={(value, name) => [
                     formatCurrency(typeof value === "number" ? value : 0, currency),
-                    name === "cumulativeEarned" ? "Income" : name === "cumulativeSpent" ? "Expenses" : "Return on investment",
+                    name === "cumulativeEarned" ? t("Income") : name === "cumulativeSpent" ? t("Expenses") : t("Return on investment"),
                   ]}
                 />
                 <Area type="monotone" dataKey="cumulativeEarned" stroke="var(--gain)" strokeWidth={2} fill="url(#earnedFill)" />
@@ -223,33 +227,33 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
               </AreaChart>
             </ResponsiveContainer>
             <div className="mt-2 flex items-center justify-center gap-4 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--gain)]" /> Income</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--primary)]" /> Return on investment</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--loss)]" /> Expenses</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--gain)]" /> {t("Income")}</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--primary)]" /> {t("Return on investment")}</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--loss)]" /> {t("Expenses")}</span>
             </div>
           </div>
         ) : (
-          <p className="mt-4 text-sm text-muted-foreground">Log at least two fees or payouts to see this chart build up.</p>
+          <p className="mt-4 text-sm text-muted-foreground">{t("Log at least two fees or payouts to see this chart build up.")}</p>
         )}
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="space-y-4 p-5">
           <div>
-            <h2 className="font-medium">Finance breakdown</h2>
+            <h2 className="font-medium">{t("Finance breakdown")}</h2>
             <TextTabs
               value={financeTab}
               onChange={setFinanceTab}
               options={[
-                { value: "firm", label: "By firm" },
-                { value: "type", label: "By account type" },
-                { value: "size", label: "By account size" },
-                { value: "expenses", label: "Expenses" },
+                { value: "firm", label: t("By firm") },
+                { value: "type", label: t("By account type") },
+                { value: "size", label: t("By account size") },
+                { value: "expenses", label: t("Expenses") },
               ]}
             />
           </div>
           {financePieData.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Log a cost or payout on an account to see this.</p>
+            <p className="text-sm text-muted-foreground">{t("Log a cost or payout on an account to see this.")}</p>
           ) : (
             <>
               <div className="relative mx-auto h-[180px] w-[180px]">
@@ -282,7 +286,7 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
                           <div className="flex items-center justify-between">
                             <span className="flex items-center gap-2 font-medium">
                               <span className="size-2 rounded-full" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
-                              {e.key}
+                              {t(e.key)}
                             </span>
                             <span className="font-semibold tabular-nums">{formatCurrency(e.amount, currency)}</span>
                           </div>
@@ -302,25 +306,25 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
 
         <Card className="space-y-4 p-5">
           <div>
-            <h2 className="font-medium">Passing insights</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Understand your passing rates across different dimensions</p>
+            <h2 className="font-medium">{t("Passing insights")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("Understand your passing rates across different dimensions")}</p>
             <TextTabs
               value={passTab}
               onChange={setPassTab}
               options={[
-                { value: "firm", label: "By firm" },
-                { value: "planType", label: "By account type" },
-                { value: "size", label: "By account size" },
+                { value: "firm", label: t("By firm") },
+                { value: "planType", label: t("By account type") },
+                { value: "size", label: t("By account size") },
               ]}
             />
           </div>
-          <p className="text-xs text-muted-foreground">Passing rate = accounts passed / accounts attempted</p>
+          <p className="text-xs text-muted-foreground">{t("Passing rate = accounts passed / accounts attempted")}</p>
           {passInsights.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No resolved accounts yet (passed or breached).</p>
+            <p className="text-sm text-muted-foreground">{t("No resolved accounts yet (passed or breached).")}</p>
           ) : (
             <div className="space-y-4">
               {passInsights.map((p) => (
-                <PassBar key={p.key} label={p.key} passed={p.passed} attempted={p.attempted} />
+                <PassBar key={p.key} label={t(p.key)} passed={p.passed} attempted={p.attempted} />
               ))}
             </div>
           )}
@@ -329,27 +333,27 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
 
       <Card className="space-y-4 p-5">
         <div>
-          <h2 className="font-medium">Breach insights</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Understand why your accounts get breached and spot patterns</p>
+          <h2 className="font-medium">{t("Breach insights")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("Understand why your accounts get breached and spot patterns")}</p>
           <TextTabs
             value={breachTab}
             onChange={setBreachTab}
             options={[
-              { value: "evaluation", label: `Evaluation Breaches (${data.breachByPhase.evaluation.count})` },
-              { value: "funded", label: `Funded Breaches (${data.breachByPhase.funded.count})` },
+              { value: "evaluation", label: t("Evaluation Breaches ({n})", { n: data.breachByPhase.evaluation.count }) },
+              { value: "funded", label: t("Funded Breaches ({n})", { n: data.breachByPhase.funded.count }) },
             ]}
           />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Top breach reasons</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("Top breach reasons")}</p>
             {breachBucket.reasons.length === 0 ? (
-              <p className="text-sm text-muted-foreground">When marking an account as breached, select a reason and it will appear here.</p>
+              <p className="text-sm text-muted-foreground">{t("When marking an account as breached, select a reason and it will appear here.")}</p>
             ) : (
               <ul className="space-y-1.5">
                 {breachBucket.reasons.map((r) => (
                   <li key={r.reason} className="flex items-center justify-between text-sm">
-                    <span>{r.reason}</span>
+                    <span>{t(r.reason)}</span>
                     <span className="font-medium tabular-nums text-muted-foreground">{r.count}</span>
                   </li>
                 ))}
@@ -357,25 +361,25 @@ export function PropFirmDashboard({ data, currency }: { data: PropFirmDashboardD
             )}
           </div>
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Correlated metrics</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("Correlated metrics")}</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Avg days before breach</p>
-                <p className="mt-1 text-lg font-semibold tabular-nums">{breachBucket.avgDaysBeforeBreach != null ? `${breachBucket.avgDaysBeforeBreach.toFixed(0)}d` : "—"}</p>
+                <p className="text-xs text-muted-foreground">{t("Avg days before breach")}</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{breachBucket.avgDaysBeforeBreach != null ? t("{n}d", { n: breachBucket.avgDaysBeforeBreach.toFixed(0) }) : "—"}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Avg P&L before breach</p>
+                <p className="text-xs text-muted-foreground">{t("Avg P&L before breach")}</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--loss)]">
                   {breachBucket.avgPnlBeforeBreach != null ? formatCurrency(breachBucket.avgPnlBeforeBreach, currency) : "—"}
                 </p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Most common size</p>
+                <p className="text-xs text-muted-foreground">{t("Most common size")}</p>
                 <p className="mt-1 text-lg font-semibold">{breachBucket.mostCommonSize ?? "—"}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Most common firm</p>
-                <p className="mt-1 text-lg font-semibold">{breachBucket.mostCommonFirm ?? "—"}</p>
+                <p className="text-xs text-muted-foreground">{t("Most common firm")}</p>
+                <p className="mt-1 text-lg font-semibold">{breachBucket.mostCommonFirm ? t(breachBucket.mostCommonFirm) : "—"}</p>
               </div>
             </div>
           </div>

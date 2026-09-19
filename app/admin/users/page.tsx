@@ -57,12 +57,12 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
         <div className="mt-4 overflow-x-auto rounded-xl border bg-card">
           <table className="w-full min-w-[820px] text-sm">
             <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
+              <tr className="border-b text-start text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">User</th>
                 <th className="px-3 py-3 font-medium">Status</th>
                 <th className="px-3 py-3 font-medium">Plan</th>
                 <th className="px-3 py-3 font-medium">Brokers</th>
-                <th className="px-3 py-3 text-right font-medium">Trades</th>
+                <th className="px-3 py-3 text-end font-medium">Trades</th>
                 <th className="px-3 py-3 font-medium">Last seen</th>
                 <th className="px-4 py-3 font-medium">Joined</th>
               </tr>
@@ -78,7 +78,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   </td>
                   <td className="px-3 py-3">
                     <StatePill state={u.state} />
-                    {u.role && u.role !== "user" && <span className="ml-1.5 text-xs text-muted-foreground">admin</span>}
+                    {u.role && u.role !== "user" && <span className="ms-1.5 text-xs text-muted-foreground">admin</span>}
                   </td>
                   <td className="px-3 py-3 capitalize">
                     {u.is_owner ? "Owner" : u.plan && u.has_access ? `${u.plan}${u.sub_status === "trialing" ? " (trial)" : u.sub_source === "admin" ? " (granted)" : ""}` : "—"}
@@ -86,7 +86,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   <td className="px-3 py-3 text-xs text-muted-foreground">
                     {[u.rithmic && "Rithmic", u.mt && "MetaTrader"].filter(Boolean).join(", ") || "—"}
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums">{Number(u.trades).toLocaleString("en-US")}</td>
+                  <td className="px-3 py-3 text-end tabular-nums">{Number(u.trades).toLocaleString("en-US")}</td>
                   <td className="px-3 py-3 text-muted-foreground">{fmtAgo(u.seen)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{fmtDate(u.createdAt)}</td>
                 </tr>

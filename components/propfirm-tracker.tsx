@@ -11,6 +11,7 @@ import {
   type PropFirmAccount,
 } from "@/app/actions/propfirm"
 import { formatCurrency } from "@/lib/calc"
+import { phaseFromAccountName } from "@/lib/broker-balance"
 import { cn } from "@/lib/utils"
 import { PROP_FIRM_NAMES, getPresetPrograms, presetSizes, resolvePresetRules, type PropFirmPreset } from "@/lib/propfirm-presets"
 import { Card } from "@/components/ui/card"
@@ -60,14 +61,16 @@ import {
   Wallet,
 } from "lucide-react"
 import { toast } from "sonner"
+import { useIntlLocale, useT } from "@/components/locale-provider"
+import type { TFunction } from "@/lib/i18n"
 
-function fmtAgo(iso: string): string {
+function fmtAgo(iso: string, t: TFunction): string {
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
-  if (mins < 1) return "just now"
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 1) return t("just now")
+  if (mins < 60) return t("{n}m ago", { n: mins })
   const hours = Math.round(mins / 60)
-  if (hours < 48) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
+  if (hours < 48) return t("{n}h ago", { n: hours })
+  return t("{n}d ago", { n: Math.round(hours / 24) })
 }
 
 const CUSTOM = "__custom__"
@@ -114,7 +117,9 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
   const [firm, setFirm] = useState<string>(initialFirm)
   const [program, setProgram] = useState<string>(account.planType ?? "")
   const [customFirmName, setCustomFirmName] = useState(initialFirm === CUSTOM ? (account.firmName ?? "") : "")
-  const [phase, setPhase] = useState(rules?.phase ?? "evaluation")
+  // A synced account that has no rules yet is labelled by its firm —
+  // "PA-…", "…FUNDED…" — so the form opens on the right stage.
+  const [phase, setPhase] = useState(rules?.phase ?? phaseFromAccountName(account.name))
   const [size, setSize] = useState(size0 > 0 ? String(size0) : "")
   const [profitTargetAmount, setProfitTargetAmount] = useState((rules?.profitTargetAmount ?? fromPct(rules?.profitTargetPct))?.toString() ?? "")
   const [maxDrawdownAmount, setMaxDrawdownAmount] = useState((rules?.maxDrawdownAmount ?? fromPct(rules?.maxDrawdownPct))?.toString() ?? "")
@@ -126,6 +131,7 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
   const [minDayProfit, setMinDayProfit] = useState(rules?.minDayProfit?.toString() ?? "")
   const [payoutCap, setPayoutCap] = useState(rules?.payoutCap?.toString() ?? "")
   const [pending, startTransition] = useTransition()
+  const t = useT()
 
   const programs = firm !== CUSTOM ? getPresetPrograms(firm) : []
   const activePreset: PropFirmPreset | undefined = programs.find((p) => p.program === program)
@@ -133,7 +139,7 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
   const funded = phase === "funded"
   const pctLabel = (amount: string) => {
     const n = Number(amount)
-    return sizeNumber > 0 && n > 0 ? `${(Math.round((n / sizeNumber) * 10000) / 100).toString()}% of account` : null
+    return sizeNumber > 0 && n > 0 ? t("{pct}% of account", { pct: (Math.round((n / sizeNumber) * 10000) / 100).toString() }) : null
   }
 
   function applyPreset(preset: PropFirmPreset, forSize: number, forPhase: string) {
@@ -168,10 +174,10 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
     startTransition(async () => {
       try {
         await savePropFirmRules(account.id, formData)
-        toast.success("Rules saved")
+        toast.success(t("Rules saved"))
         onDone()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save rules")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not save rules"))
       }
     })
   }
@@ -182,7 +188,7 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Prop firm</Label>
+          <Label>{t("Prop firm")}</Label>
           <Select
             value={firm}
             onValueChange={(v) => {
@@ -196,12 +202,12 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
               {PROP_FIRM_NAMES.map((name) => (
                 <SelectItem key={name} value={name}>{name}</SelectItem>
               ))}
-              <SelectItem value={CUSTOM}>Custom / other firm</SelectItem>
+              <SelectItem value={CUSTOM}>{t("Custom / other firm")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>Account type</Label>
+          <Label>{t("Account type")}</Label>
           <Select
             value={program}
             onValueChange={(v) => {
@@ -212,10 +218,10 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
             }}
             disabled={firm === CUSTOM}
           >
-            <SelectTrigger className="w-full"><SelectValue placeholder={firm === CUSTOM ? "—" : "Select…"} /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder={firm === CUSTOM ? "—" : t("Select…")} /></SelectTrigger>
             <SelectContent>
               {programs.map((p) => (
-                <SelectItem key={p.program} value={p.program}>{p.program}</SelectItem>
+                <SelectItem key={p.program} value={p.program}>{t(p.program)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -224,10 +230,10 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
 
       {firm === CUSTOM && (
         <div className="space-y-1.5">
-          <Label htmlFor="customFirmName">Firm name</Label>
+          <Label htmlFor="customFirmName">{t("Firm name")}</Label>
           <Input
             id="customFirmName"
-            placeholder="e.g. My Prop Firm"
+            placeholder={t("e.g. My Prop Firm")}
             value={customFirmName}
             onChange={(e) => setCustomFirmName(e.target.value)}
           />
@@ -237,13 +243,13 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
       {activePreset && (
         <p className="flex items-start gap-1.5 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          {activePreset.notes} Fields below are pre-filled but editable — always verify against your firm's current rulebook.
+          {t(activePreset.notes)} {t("Fields below are pre-filled but editable — always verify against your firm's current rulebook.")}
         </p>
       )}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Phase</Label>
+          <Label>{t("Phase")}</Label>
           <Select
             value={phase}
             onValueChange={(v) => {
@@ -254,14 +260,14 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
           >
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="evaluation">Evaluation</SelectItem>
-              <SelectItem value="verification">Verification</SelectItem>
-              <SelectItem value="funded">Funded</SelectItem>
+              <SelectItem value="evaluation">{t("Evaluation")}</SelectItem>
+              <SelectItem value="verification">{t("Verification")}</SelectItem>
+              <SelectItem value="funded">{t("Funded")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="rules-size">Account size ($)</Label>
+          <Label htmlFor="rules-size">{t("Account size ($)")}</Label>
           <Input
             id="rules-size"
             type="number"
@@ -300,19 +306,19 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
       {size0 <= 0 && (
         <p className="flex items-start gap-1.5 text-xs text-[var(--chart-4)]">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          This account has no size yet, so every threshold below reads as $0 until you set one.
+          {t("This account has no size yet, so every threshold below reads as $0 until you set one.")}
         </p>
       )}
 
       <div className="grid grid-cols-2 gap-3">
         {!funded && (
           <div className="space-y-1.5">
-            <Label htmlFor="profitTargetAmount">Profit target ($)</Label>
+            <Label htmlFor="profitTargetAmount">{t("Profit target ($)")}</Label>
             <Input
               id="profitTargetAmount"
               type="number"
               step="any"
-              placeholder="Leave blank if none"
+              placeholder={t("Leave blank if none")}
               value={profitTargetAmount}
               onChange={(e) => setProfitTargetAmount(e.target.value)}
             />
@@ -320,7 +326,7 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
           </div>
         )}
         <div className="space-y-1.5">
-          <Label htmlFor="maxDrawdownAmount">Max drawdown ($)</Label>
+          <Label htmlFor="maxDrawdownAmount">{t("Max drawdown ($)")}</Label>
           <Input
             id="maxDrawdownAmount"
             type="number"
@@ -335,22 +341,22 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Drawdown type</Label>
+          <Label>{t("Drawdown type")}</Label>
           <Select value={drawdownType} onValueChange={(v) => v && setDrawdownType(v as "trailing" | "static")}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="trailing">Trailing (from peak balance)</SelectItem>
-              <SelectItem value="static">Static (from starting balance)</SelectItem>
+              <SelectItem value="trailing">{t("Trailing (from peak balance)")}</SelectItem>
+              <SelectItem value="static">{t("Static (from starting balance)")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="dailyLossLimitAmount">Daily loss limit ($)</Label>
+          <Label htmlFor="dailyLossLimitAmount">{t("Daily loss limit ($)")}</Label>
           <Input
             id="dailyLossLimitAmount"
             type="number"
             step="any"
-            placeholder="Leave blank if none"
+            placeholder={t("Leave blank if none")}
             value={dailyLossLimitAmount}
             onChange={(e) => setDailyLossLimitAmount(e.target.value)}
           />
@@ -360,59 +366,59 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
       <div className="grid grid-cols-2 gap-3">
         {!funded && (
           <div className="space-y-1.5">
-            <Label htmlFor="minTradingDays">Min trading days</Label>
+            <Label htmlFor="minTradingDays">{t("Min trading days")}</Label>
             <Input
               id="minTradingDays"
               type="number"
-              placeholder="Leave blank if none"
+              placeholder={t("Leave blank if none")}
               value={minTradingDays}
               onChange={(e) => setMinTradingDays(e.target.value)}
             />
           </div>
         )}
         <div className="space-y-1.5">
-          <Label htmlFor="consistencyPct">Consistency rule (%)</Label>
+          <Label htmlFor="consistencyPct">{t("Consistency rule (%)")}</Label>
           <Input
             id="consistencyPct"
             type="number"
             step="any"
-            placeholder="Leave blank if none"
+            placeholder={t("Leave blank if none")}
             value={consistencyPct}
             onChange={(e) => setConsistencyPct(e.target.value)}
           />
-          <p className="text-[11px] text-muted-foreground">Best day may be at most this share of {funded ? "profit since the last payout" : "total profit"}.</p>
+          <p className="text-[11px] text-muted-foreground">{funded ? t("Best day may be at most this share of profit since the last payout.") : t("Best day may be at most this share of total profit.")}</p>
         </div>
       </div>
 
       {funded && (
         <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-          <p className="text-xs font-medium">Payout rules</p>
+          <p className="text-xs font-medium">{t("Payout rules")}</p>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="minPayoutDays">Qualifying days</Label>
-              <Input id="minPayoutDays" type="number" placeholder="e.g. 3" value={minPayoutDays} onChange={(e) => setMinPayoutDays(e.target.value)} />
+              <Label htmlFor="minPayoutDays">{t("Qualifying days")}</Label>
+              <Input id="minPayoutDays" type="number" placeholder={t("e.g. 3")} value={minPayoutDays} onChange={(e) => setMinPayoutDays(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="minDayProfit">Day counts at ($)</Label>
-              <Input id="minDayProfit" type="number" step="any" placeholder="e.g. 200" value={minDayProfit} onChange={(e) => setMinDayProfit(e.target.value)} />
+              <Label htmlFor="minDayProfit">{t("Day counts at ($)")}</Label>
+              <Input id="minDayProfit" type="number" step="any" placeholder={t("e.g. 200")} value={minDayProfit} onChange={(e) => setMinDayProfit(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="payoutCap">Max per payout ($)</Label>
-              <Input id="payoutCap" type="number" step="any" placeholder="No cap" value={payoutCap} onChange={(e) => setPayoutCap(e.target.value)} />
+              <Label htmlFor="payoutCap">{t("Max per payout ($)")}</Label>
+              <Input id="payoutCap" type="number" step="any" placeholder={t("No cap")} value={payoutCap} onChange={(e) => setPayoutCap(e.target.value)} />
             </div>
           </div>
-          <p className="text-[11px] text-muted-foreground">Payout progress counts from the last payout you logged on this account.</p>
+          <p className="text-[11px] text-muted-foreground">{t("Payout progress counts from the last payout you logged on this account.")}</p>
         </div>
       )}
 
       <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        Presets are researched, not official — double check against your firm's current rules before relying on this.
+        {t("Presets are researched, not official — double check against your firm's current rules before relying on this.")}
       </p>
 
       <DialogFooter>
         <Button type="submit" disabled={pending} className="w-full">
-          {pending ? "Saving…" : "Save rules"}
+          {pending ? t("Saving…") : t("Save rules")}
         </Button>
       </DialogFooter>
     </form>
@@ -420,6 +426,7 @@ export function RulesForm({ account, onDone }: { account: PropFirmAccount; onDon
 }
 
 export function LogTransactionForm({ account, onDone }: { account: PropFirmAccount; onDone: () => void }) {
+  const t = useT()
   const [type, setType] = useState<"cost" | "payout">("cost")
   const [category, setCategory] = useState("evaluation_fee")
   const [pending, startTransition] = useTransition()
@@ -432,10 +439,10 @@ export function LogTransactionForm({ account, onDone }: { account: PropFirmAccou
     startTransition(async () => {
       try {
         await logPropFirmTransaction(account.id, formData)
-        toast.success("Logged")
+        toast.success(t("Logged"))
         onDone()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not log transaction")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not log transaction"))
       }
     })
   }
@@ -444,52 +451,52 @@ export function LogTransactionForm({ account, onDone }: { account: PropFirmAccou
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Type</Label>
+          <Label>{t("Type")}</Label>
           <Select value={type} onValueChange={(v) => v && setType(v as "cost" | "payout")}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="cost">Cost (fee / reset)</SelectItem>
-              <SelectItem value="payout">Payout received</SelectItem>
+              <SelectItem value="cost">{t("Cost (fee / reset)")}</SelectItem>
+              <SelectItem value="payout">{t("Payout received")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         {type === "cost" ? (
           <div className="space-y-1.5">
-            <Label>Category</Label>
+            <Label>{t("Category")}</Label>
             <Select value={category} onValueChange={(v) => v && setCategory(v)}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="evaluation_fee">Evaluation fee</SelectItem>
-                <SelectItem value="reset_fee">Reset fee</SelectItem>
-                <SelectItem value="activation_fee">Activation fee</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                <SelectItem value="evaluation_fee">{t("Evaluation fee")}</SelectItem>
+                <SelectItem value="reset_fee">{t("Reset fee")}</SelectItem>
+                <SelectItem value="activation_fee">{t("Activation fee")}</SelectItem>
+                <SelectItem value="other">{t("Other")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
         ) : (
           <div className="space-y-1.5">
-            <Label htmlFor="occurredAt">Date</Label>
+            <Label htmlFor="occurredAt">{t("Date")}</Label>
             <Input id="occurredAt" name="occurredAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
           </div>
         )}
       </div>
       {type === "cost" && (
         <div className="space-y-1.5">
-          <Label htmlFor="occurredAt">Date</Label>
+          <Label htmlFor="occurredAt">{t("Date")}</Label>
           <Input id="occurredAt" name="occurredAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
         </div>
       )}
       <div className="space-y-1.5">
-        <Label htmlFor="amount">Amount</Label>
+        <Label htmlFor="amount">{t("Amount")}</Label>
         <Input id="amount" name="amount" type="number" step="0.01" required placeholder="0.00" />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="note">Note (optional)</Label>
-        <Input id="note" name="note" placeholder="e.g. 50K reset after breach" />
+        <Label htmlFor="note">{t("Note (optional)")}</Label>
+        <Input id="note" name="note" placeholder={t("e.g. 50K reset after breach")} />
       </div>
       <DialogFooter>
         <Button type="submit" disabled={pending} className="w-full">
-          {pending ? "Saving…" : "Log it"}
+          {pending ? t("Saving…") : t("Log it")}
         </Button>
       </DialogFooter>
     </form>
@@ -497,6 +504,8 @@ export function LogTransactionForm({ account, onDone }: { account: PropFirmAccou
 }
 
 function AccountCard({ account }: { account: PropFirmAccount }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const [open, setOpen] = useState(false)
   const [txOpen, setTxOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -505,9 +514,9 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
     startTransition(async () => {
       try {
         await deletePropFirmRules(account.id)
-        toast.success("Rules removed")
+        toast.success(t("Rules removed"))
       } catch {
-        toast.error("Could not remove rules")
+        toast.error(t("Could not remove rules"))
       }
     })
   }
@@ -516,9 +525,9 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
     startTransition(async () => {
       try {
         await setBreachReason(account.id, reason === "" ? null : reason)
-        toast.success("Saved")
+        toast.success(t("Saved"))
       } catch {
-        toast.error("Could not save reason")
+        toast.error(t("Could not save reason"))
       }
     })
   }
@@ -528,7 +537,7 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
   const { evaluation, rules } = account
   const meta = STATUS_META[evaluation.status]
   const StatusIcon = meta.icon
-  const stepLabel = rules.phase === "evaluation" ? "Step 1" : rules.phase === "verification" ? "Step 2" : "Funded"
+  const stepLabel = rules.phase === "evaluation" ? t("Step 1") : rules.phase === "verification" ? t("Step 2") : t("Funded")
 
   const drawdownPct = evaluation.drawdownLimitAmount > 0 ? (evaluation.currentDrawdownAmount / evaluation.drawdownLimitAmount) * 100 : 0
   const dailyLossPct = evaluation.dailyLossLimitAmount ? (evaluation.worstDayLossAmount / evaluation.dailyLossLimitAmount) * 100 : 0
@@ -548,31 +557,31 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
           <Link href={`/accounts/${account.id}`} className="text-lg font-semibold hover:underline">{account.name}</Link>
           <span className="text-xs font-medium text-muted-foreground uppercase">{stepLabel}</span>
           <Badge variant="outline" className={cn("uppercase", meta.className)}>
-            <StatusIcon className="size-3.5" /> {meta.label}
+            <StatusIcon className="size-3.5" /> {t(meta.label)}
           </Badge>
           {account.autoDetected && (
             <Badge variant="outline" className="border-primary/30 text-primary uppercase">
-              <Sparkles className="size-3.5" /> Verify
+              <Sparkles className="size-3.5" /> {t("Verify")}
             </Badge>
           )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Account actions">
+              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label={t("Account actions")}>
                 <MoreHorizontal className="size-4" />
               </Button>
             }
           />
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setTxOpen(true)}>
-              <Receipt className="size-4" /> Log fee/payout
+              <Receipt className="size-4" /> {t("Log fee/payout")}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setOpen(true)}>
-              <Settings2 className="size-4" /> Edit rules
+              <Settings2 className="size-4" /> {t("Edit rules")}
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={onRemoveRules} disabled={pending}>
-              <Trash2 className="size-4" /> Stop tracking
+              <Trash2 className="size-4" /> {t("Stop tracking")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -580,27 +589,36 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm">
-          <span className="text-muted-foreground">Balance:</span>{" "}
+          <span className="text-muted-foreground">{t("Balance:")}</span>{" "}
           <span className="font-semibold tabular-nums">{formatCurrency(evaluation.currentBalance, account.currency)}</span>{" "}
           <span className={cn("font-medium tabular-nums", evaluation.netProfit >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
             ({evaluation.netProfit >= 0 ? "+" : ""}
             {formatCurrency(evaluation.netProfit, account.currency)})
           </span>
           {account.balanceUpdatedAt && (
-            <span className="ml-1.5 text-xs text-muted-foreground" title="Balance as reported by Rithmic">
-              · from Rithmic {fmtAgo(account.balanceUpdatedAt)}
+            <span className="ms-1.5 text-xs text-muted-foreground" title={t("Balance as reported by Rithmic")}>
+              · {t("from Rithmic {ago}", { ago: fmtAgo(account.balanceUpdatedAt, t) })}
             </span>
           )}
         </p>
-        <p className="text-sm text-muted-foreground">{account.firmName ?? "Firm not set"}</p>
+        <p className="text-sm text-muted-foreground">{account.firmName ?? t("Firm not set")}</p>
       </div>
       {account.startingBalance <= 0 && (
         <div className="flex items-start gap-2 rounded-md border border-[var(--chart-4)]/40 bg-[var(--chart-4)]/10 px-3 py-2 text-sm">
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--chart-4)]" />
           <span>
-            This account has no size, so its limits read as $0.{" "}
-            <button type="button" className="font-medium underline" onClick={() => setOpen(true)}>Set the account size</button>
-            {account.balanceUpdatedAt == null && " — or sync it from Rithmic and it's worked out from the balance."}
+            {t("This account has no size, so its limits read as $0.")}{" "}
+            <button type="button" className="font-medium underline" onClick={() => setOpen(true)}>{t("Set the account size")}</button>
+            {account.balanceUpdatedAt == null && " " + t("— or sync it from Rithmic and it's worked out from the balance.")}
+          </span>
+        </div>
+      )}
+      {account.startingBalance > 0 && account.startingBalanceInferred && (
+        <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          <Info className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {t("Account size {size} was worked out from the Rithmic balance — the rules are sized to it.", { size: formatCurrency(account.startingBalance, account.currency).replace(/\.00$/, "") })}{" "}
+            <button type="button" className="font-medium text-foreground underline" onClick={() => setOpen(true)}>{t("Not right? Correct it")}</button>
           </span>
         </div>
       )}
@@ -608,29 +626,29 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
       <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
         <CalendarClock className="size-4 shrink-0" />
         <span>
-          {rules.minTradingDays != null ? `${evaluation.tradingDays}/${rules.minTradingDays} trading days` : "No time limit"}
-          {account.trackedSince && <> · Started on {new Date(account.trackedSince).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })}</>}
+          {rules.minTradingDays != null ? t("{days}/{needed} trading days", { days: evaluation.tradingDays, needed: rules.minTradingDays }) : t("No time limit")}
+          {account.trackedSince && <> · {t("Started on {date}", { date: new Date(account.trackedSince).toLocaleDateString(dateLocale, { month: "short", day: "2-digit", year: "numeric" }) })}</>}
         </span>
       </div>
 
       <p className="text-sm">
-        <span className="text-muted-foreground">Account:</span> {account.name}
-        {account.planType && <span className="text-muted-foreground"> · {account.planType}</span>}
+        <span className="text-muted-foreground">{t("Account:")}</span> {account.name}
+        {account.planType && <span className="text-muted-foreground"> · {t(account.planType)}</span>}
       </p>
 
       {evaluation.breachReason && (
         <div className="space-y-2 rounded-md border border-[var(--loss)]/30 bg-[var(--loss)]/10 px-3 py-2 text-sm text-[var(--loss)]">
           <p>
-            {evaluation.breachReason}
-            {evaluation.breachedAt && <> — {new Date(evaluation.breachedAt).toLocaleDateString()}</>}
+            {t(evaluation.breachReason)}
+            {evaluation.breachedAt && <> — {new Date(evaluation.breachedAt).toLocaleDateString(dateLocale)}</>}
           </p>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--loss)]/80">What actually caused it?</span>
+            <span className="text-xs text-[var(--loss)]/80">{t("What actually caused it?")}</span>
             <Select value={account.breachReasonTag ?? ""} onValueChange={(v) => v && onSetBreachReason(v)}>
-              <SelectTrigger className="h-7 w-48 bg-background text-xs"><SelectValue placeholder="Tag a reason…" /></SelectTrigger>
+              <SelectTrigger className="h-7 w-48 bg-background text-xs"><SelectValue placeholder={t("Tag a reason…")} /></SelectTrigger>
               <SelectContent>
                 {BREACH_REASONS.map((r) => (
-                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                  <SelectItem key={r} value={r}>{t(r)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -645,11 +663,11 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
               <Target className="size-4" />
             </span>
             <div className="w-40 shrink-0">
-              <p className="text-sm font-medium">Profit: {formatCurrency(evaluation.netProfit, account.currency)}</p>
-              <p className="text-xs text-muted-foreground">Target: {formatCurrency(evaluation.profitTargetAmount, account.currency)}{pct(evaluation.profitTargetAmount)}</p>
+              <p className="text-sm font-medium">{t("Profit:")} {formatCurrency(evaluation.netProfit, account.currency)}</p>
+              <p className="text-xs text-muted-foreground">{t("Target:")} {formatCurrency(evaluation.profitTargetAmount, account.currency)}{pct(evaluation.profitTargetAmount)}</p>
             </div>
             <div className="flex-1"><Bar pct={evaluation.profitProgressPct ?? 0} tone="gain" /></div>
-            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{Math.round(evaluation.profitProgressPct ?? 0)}%</span>
+            <span className="w-10 shrink-0 text-end text-sm font-medium tabular-nums">{Math.round(evaluation.profitProgressPct ?? 0)}%</span>
           </div>
         )}
 
@@ -660,10 +678,10 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
             </span>
             <div className="w-40 shrink-0">
               <p className="text-sm font-medium">{formatCurrency(evaluation.worstDayLossAmount, account.currency)}</p>
-              <p className="text-xs text-muted-foreground">Max daily loss: {formatCurrency(evaluation.dailyLossLimitAmount, account.currency)}</p>
+              <p className="text-xs text-muted-foreground">{t("Max daily loss:")} {formatCurrency(evaluation.dailyLossLimitAmount, account.currency)}</p>
             </div>
             <div className="flex-1"><Bar pct={dailyLossPct} tone="loss" /></div>
-            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{Math.round(dailyLossPct)}%</span>
+            <span className="w-10 shrink-0 text-end text-sm font-medium tabular-nums">{Math.round(dailyLossPct)}%</span>
           </div>
         )}
 
@@ -672,18 +690,18 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
             {drawdownPct < 100 ? <CheckCircle2 className="size-4" /> : <AlertCircle className="size-4" />}
           </span>
           <div className="w-40 shrink-0">
-            <p className="text-sm font-medium">Drawdown: {formatCurrency(evaluation.currentDrawdownAmount, account.currency)}</p>
+            <p className="text-sm font-medium">{t("Drawdown:")} {formatCurrency(evaluation.currentDrawdownAmount, account.currency)}</p>
             <p className="text-xs text-muted-foreground">
-              Max: {formatCurrency(evaluation.drawdownLimitAmount, account.currency)}{pct(evaluation.drawdownLimitAmount)} · Floor: {formatCurrency(floor, account.currency)}
+              {t("Max:")} {formatCurrency(evaluation.drawdownLimitAmount, account.currency)}{pct(evaluation.drawdownLimitAmount)} · {t("Floor:")} {formatCurrency(floor, account.currency)}
             </p>
             {account.brokerDrawdownFloor != null && (
-              <p className="text-xs text-muted-foreground" title="The liquidation threshold Rithmic's risk system reports for this account">
-                Rithmic floor: {formatCurrency(account.brokerDrawdownFloor, account.currency)}
+              <p className="text-xs text-muted-foreground" title={t("The liquidation threshold Rithmic's risk system reports for this account")}>
+                {t("Rithmic floor:")} {formatCurrency(account.brokerDrawdownFloor, account.currency)}
               </p>
             )}
           </div>
           <div className="flex-1"><Bar pct={drawdownPct} tone="loss" /></div>
-          <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{Math.round(drawdownPct)}%</span>
+          <span className="w-10 shrink-0 text-end text-sm font-medium tabular-nums">{Math.round(drawdownPct)}%</span>
         </div>
 
         {rules.consistencyPct != null && (
@@ -692,11 +710,11 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
               {evaluation.consistencyMet ? <CheckCircle2 className="size-4" /> : <AlertCircle className="size-4" />}
             </span>
             <div className="w-40 shrink-0">
-              <p className="text-sm font-medium">Best day: {consistencyPct == null ? "—" : `${Math.round(consistencyPct)}% of profit`}</p>
-              <p className="text-xs text-muted-foreground">Consistency limit: {rules.consistencyPct}%{funded ? " · since last payout" : ""}</p>
+              <p className="text-sm font-medium">{t("Best day:")} {consistencyPct == null ? "—" : t("{pct}% of profit", { pct: Math.round(consistencyPct) })}</p>
+              <p className="text-xs text-muted-foreground">{t("Consistency limit:")} {rules.consistencyPct}%{funded ? ` · ${t("since last payout")}` : ""}</p>
             </div>
             <div className="flex-1"><Bar pct={consistencyBar} tone="loss" /></div>
-            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{consistencyPct == null ? "—" : `${Math.round(consistencyPct)}%`}</span>
+            <span className="w-10 shrink-0 text-end text-sm font-medium tabular-nums">{consistencyPct == null ? "—" : `${Math.round(consistencyPct)}%`}</span>
           </div>
         )}
 
@@ -707,18 +725,18 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
             </span>
             <div className="w-40 shrink-0">
               <p className="text-sm font-medium">
-                {evaluation.payoutEligible ? "Payout ready" : "Next payout"}
+                {evaluation.payoutEligible ? t("Payout ready") : t("Next payout")}
                 {evaluation.payoutAvailable != null && <>: {formatCurrency(evaluation.payoutAvailable, account.currency)}</>}
               </p>
               <p className="text-xs text-muted-foreground">
                 {rules.minPayoutDays != null
-                  ? `${evaluation.qualifyingDays}/${rules.minPayoutDays} qualifying days${rules.minDayProfit != null ? ` (${formatCurrency(rules.minDayProfit, account.currency)}+)` : ""}`
-                  : `${formatCurrency(evaluation.cycleNetProfit, account.currency)} since last payout`}
-                {rules.payoutCap != null && ` · cap ${formatCurrency(rules.payoutCap, account.currency)}`}
+                  ? `${t("{days}/{needed} qualifying days", { days: evaluation.qualifyingDays, needed: rules.minPayoutDays })}${rules.minDayProfit != null ? ` (${formatCurrency(rules.minDayProfit, account.currency)}+)` : ""}`
+                  : t("{amount} since last payout", { amount: formatCurrency(evaluation.cycleNetProfit, account.currency) })}
+                {rules.payoutCap != null && ` · ${t("cap {amount}", { amount: formatCurrency(rules.payoutCap, account.currency) })}`}
               </p>
             </div>
             <div className="flex-1"><Bar pct={payoutDaysBar} tone="gain" /></div>
-            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">
+            <span className="w-10 shrink-0 text-end text-sm font-medium tabular-nums">
               {rules.minPayoutDays != null ? `${evaluation.qualifyingDays}/${rules.minPayoutDays}` : evaluation.payoutEligible ? "✓" : "—"}
             </span>
           </div>
@@ -730,11 +748,11 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
               <CheckCircle2 className="size-4" />
             </span>
             <div className="w-40 shrink-0">
-              <p className="text-sm font-medium">Trading days</p>
-              <p className="text-xs text-muted-foreground">Minimum: {rules.minTradingDays}</p>
+              <p className="text-sm font-medium">{t("Trading days")}</p>
+              <p className="text-xs text-muted-foreground">{t("Minimum:")} {rules.minTradingDays}</p>
             </div>
             <div className="flex-1"><Bar pct={(evaluation.tradingDays / rules.minTradingDays) * 100} tone="gain" /></div>
-            <span className="w-10 shrink-0 text-right text-sm font-medium tabular-nums">{evaluation.tradingDays}/{rules.minTradingDays}</span>
+            <span className="w-10 shrink-0 text-end text-sm font-medium tabular-nums">{evaluation.tradingDays}/{rules.minTradingDays}</span>
           </div>
         )}
       </div>
@@ -742,8 +760,8 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
       <Dialog open={txOpen} onOpenChange={setTxOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Log a fee or payout for {account.name}</DialogTitle>
-            <DialogDescription>Powers the financial dashboard's spend/earn/ROI totals.</DialogDescription>
+            <DialogTitle>{t("Log a fee or payout for {name}", { name: account.name })}</DialogTitle>
+            <DialogDescription>{t("Powers the financial dashboard's spend/earn/ROI totals.")}</DialogDescription>
           </DialogHeader>
           <LogTransactionForm account={account} onDone={() => setTxOpen(false)} />
         </DialogContent>
@@ -751,8 +769,8 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit rules for {account.name}</DialogTitle>
-            <DialogDescription>Update your firm's evaluation rules.</DialogDescription>
+            <DialogTitle>{t("Edit rules for {name}", { name: account.name })}</DialogTitle>
+            <DialogDescription>{t("Update your firm's evaluation rules.")}</DialogDescription>
           </DialogHeader>
           <RulesForm account={account} onDone={() => setOpen(false)} />
         </DialogContent>
@@ -762,10 +780,11 @@ function AccountCard({ account }: { account: PropFirmAccount }) {
 }
 
 function AccountGroup({ accounts, view }: { accounts: PropFirmAccount[]; view: "list" | "grid" }) {
+  const t = useT()
   if (accounts.length === 0) {
     return (
       <Card className="flex h-32 flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm text-muted-foreground">Nothing in this group yet.</p>
+        <p className="text-sm text-muted-foreground">{t("Nothing in this group yet.")}</p>
       </Card>
     )
   }
@@ -779,13 +798,14 @@ function AccountGroup({ accounts, view }: { accounts: PropFirmAccount[]; view: "
 }
 
 export function PropFirmTracker({ accounts }: { accounts: PropFirmAccount[] }) {
+  const t = useT()
   const [view, setView] = useState<"list" | "grid">("list")
 
   if (accounts.length === 0) {
     return (
       <Card className="flex h-40 flex-col items-center justify-center gap-2 text-center">
         <p className="text-sm text-muted-foreground">
-          No prop firm accounts yet — use &quot;Track prop firm account&quot; above to add one.
+          {t("No prop firm accounts yet — use “Track prop firm account” above to add one.")}
         </p>
       </Card>
     )
@@ -799,22 +819,21 @@ export function PropFirmTracker({ accounts }: { accounts: PropFirmAccount[] }) {
     <div className="space-y-4">
       <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        Status is computed from your closed, synced trades — it can't see floating P&L on a position that's still
-        open. Treat this as a tracker, not a final ruling; always confirm with your firm's own dashboard.
+        {t("Status is computed from your closed, synced trades — it can't see floating P&L on a position that's still open. Treat this as a tracker, not a final ruling; always confirm with your firm's own dashboard.")}
       </div>
 
       <Tabs defaultValue="evaluations">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
-            <TabsTrigger value="evaluations">Evaluations ({evaluations.length})</TabsTrigger>
-            <TabsTrigger value="funded">Funded ({funded.length})</TabsTrigger>
-            <TabsTrigger value="breached">Breached ({breached.length})</TabsTrigger>
+            <TabsTrigger value="evaluations">{t("Evaluations ({n})", { n: evaluations.length })}</TabsTrigger>
+            <TabsTrigger value="funded">{t("Funded ({n})", { n: funded.length })}</TabsTrigger>
+            <TabsTrigger value="breached">{t("Breached ({n})", { n: breached.length })}</TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-1 rounded-lg border p-1">
             <button
               type="button"
               onClick={() => setView("list")}
-              aria-label="List view"
+              aria-label={t("List view")}
               className={cn("rounded-md p-1.5 transition-colors", view === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
             >
               <List className="size-4" />
@@ -822,7 +841,7 @@ export function PropFirmTracker({ accounts }: { accounts: PropFirmAccount[] }) {
             <button
               type="button"
               onClick={() => setView("grid")}
-              aria-label="Grid view"
+              aria-label={t("Grid view")}
               className={cn("rounded-md p-1.5 transition-colors", view === "grid" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
             >
               <LayoutGrid className="size-4" />

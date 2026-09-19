@@ -14,8 +14,10 @@ import { ManualTradeForm } from "@/components/manual-trade-form"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Upload, Wifi, Building2, PenLine } from "lucide-react"
+import { getT } from "@/lib/i18n/server"
 
 export default async function AddTradePage() {
+  const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const [accounts, playbooks, mtConnections, rithmicConnections, pro, lockedAccountIds] = await Promise.all([
     getAccounts(),
@@ -32,7 +34,7 @@ export default async function AddTradePage() {
 
   return (
     <div>
-      <PageHeader title="Add Trade" description="Bring your trades in however works best for you" />
+      <PageHeader title={t("Add Trade")} description={t("Bring your trades in however works best for you")} />
       <div className="p-4 sm:p-6">
         <Tabs defaultValue="upload" className="items-start gap-5">
           <TabsList className="group-data-horizontal/tabs:h-auto w-full max-w-2xl flex-wrap justify-start gap-2 rounded-xl border bg-muted/30 p-2">
@@ -43,7 +45,7 @@ export default async function AddTradePage() {
               <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500">
                 <Upload className="size-3.5" />
               </span>
-              File Upload
+              {t("File Upload")}
             </TabsTrigger>
             <TabsTrigger
               value="broker"
@@ -52,7 +54,7 @@ export default async function AddTradePage() {
               <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-500">
                 <Wifi className="size-3.5" />
               </span>
-              Broker Sync
+              {t("Broker Sync")}
             </TabsTrigger>
             <TabsTrigger
               value="propfirm"
@@ -61,7 +63,7 @@ export default async function AddTradePage() {
               <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-500">
                 <Building2 className="size-3.5" />
               </span>
-              Prop Firm Sync
+              {t("Prop Firm Sync")}
             </TabsTrigger>
             <TabsTrigger
               value="manual"
@@ -70,7 +72,7 @@ export default async function AddTradePage() {
               <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-500">
                 <PenLine className="size-3.5" />
               </span>
-              Manual
+              {t("Manual")}
             </TabsTrigger>
           </TabsList>
 
@@ -80,14 +82,14 @@ export default async function AddTradePage() {
 
           <TabsContent value="broker" className="w-full space-y-5">
             <p className="max-w-lg text-sm text-muted-foreground">
-              Connect your personal broker account — trades sync automatically, no file exports needed.
+              {t("Connect your personal broker account — trades sync automatically, no file exports needed.")}
             </p>
             {pro ? (
               <MetaTraderConnect connections={mtConnections} />
             ) : (
               <LiveSyncUpgradeBanner
-                title="MetaTrader Connection"
-                description="Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro."
+                title={t("MetaTrader Connection")}
+                description={t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")}
               />
             )}
           </TabsContent>
@@ -103,7 +105,7 @@ export default async function AddTradePage() {
 
           <TabsContent value="manual" className="w-full">
             <Card className="max-w-2xl p-5">
-              <h2 className="mb-4 font-medium">Log a trade manually</h2>
+              <h2 className="mb-4 font-medium">{t("Log a trade manually")}</h2>
               <ManualTradeForm
                 accounts={manualEntryAccounts.map((a) => ({ id: a.id, name: a.name }))}
                 playbooks={playbooks.map((p) => ({ id: p.id, name: p.name }))}

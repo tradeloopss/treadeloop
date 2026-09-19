@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Receipt } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 type DateRange = "all" | "30d" | "90d" | "12m"
 
@@ -52,6 +53,7 @@ export function PropFirmWorkspace({
   evaluationTrades: FundedTrade[]
   isPro: boolean
 }) {
+  const t = useT()
   const [range, setRange] = useState<DateRange>("all")
   const [accountFilter, setAccountFilter] = useState<"all" | number>("all")
   const [payoutOpen, setPayoutOpen] = useState(false)
@@ -79,30 +81,30 @@ export function PropFirmWorkspace({
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4 border-b px-4 py-4 sm:px-6 sm:py-5">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Prop Firm Tracker</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Here&apos;s an overview of your prop firm activity</p>
+          <h1 className="text-xl font-semibold tracking-tight">{t("Prop Firm Tracker")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("Here's an overview of your prop firm activity")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={range} onValueChange={(v) => v && setRange(v as DateRange)}>
             <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="30d">Last 30 days</SelectItem>
-              <SelectItem value="90d">Last 90 days</SelectItem>
-              <SelectItem value="12m">Last 12 months</SelectItem>
+              <SelectItem value="all">{t("All time")}</SelectItem>
+              <SelectItem value="30d">{t("Last 30 days")}</SelectItem>
+              <SelectItem value="90d">{t("Last 90 days")}</SelectItem>
+              <SelectItem value="12m">{t("Last 12 months")}</SelectItem>
             </SelectContent>
           </Select>
           <Select value={accountFilter === "all" ? "all" : String(accountFilter)} onValueChange={(v) => setAccountFilter(v === "all" || !v ? "all" : Number(v))}>
             <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All accounts</SelectItem>
+              <SelectItem value="all">{t("All accounts")}</SelectItem>
               {accounts.map((a) => (
                 <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Button variant="outline" size="sm" onClick={() => setPayoutOpen(true)}>
-            <Receipt className="size-4" /> Log payout
+            <Receipt className="size-4" /> {t("Log payout")}
           </Button>
           <TrackPropFirmWizard accounts={allAccounts} isPro={isPro} />
         </div>
@@ -111,11 +113,11 @@ export function PropFirmWorkspace({
       <div className="p-4 sm:p-6">
         <Tabs defaultValue="dashboard">
           <TabsList>
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
-            <TabsTrigger value="funded">Funded</TabsTrigger>
-            <TabsTrigger value="accounts">Accounts</TabsTrigger>
-            <TabsTrigger value="transactions">Transactions</TabsTrigger>
+            <TabsTrigger value="dashboard">{t("Dashboard")}</TabsTrigger>
+            <TabsTrigger value="evaluation">{t("Evaluation")}</TabsTrigger>
+            <TabsTrigger value="funded">{t("Funded")}</TabsTrigger>
+            <TabsTrigger value="accounts">{t("Accounts")}</TabsTrigger>
+            <TabsTrigger value="transactions">{t("Transactions")}</TabsTrigger>
           </TabsList>
           <TabsContent value="dashboard" className="mt-4">
             <PropFirmDashboard data={dashboardData} currency={currency} />
@@ -144,13 +146,13 @@ export function PropFirmWorkspace({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Log a fee or payout</DialogTitle>
-            <DialogDescription>Powers the financial dashboard&apos;s spend/earn/ROI totals.</DialogDescription>
+            <DialogTitle>{t("Log a fee or payout")}</DialogTitle>
+            <DialogDescription>{t("Powers the financial dashboard's spend/earn/ROI totals.")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
-            <Label>Account</Label>
+            <Label>{t("Account")}</Label>
             <Select value={payoutAccountId != null ? String(payoutAccountId) : ""} onValueChange={(v) => setPayoutAccountId(v ? Number(v) : null)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Choose an account…" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder={t("Choose an account…")} /></SelectTrigger>
               <SelectContent>
                 {accounts.map((a) => (
                   <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>

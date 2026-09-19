@@ -12,6 +12,7 @@ import { PayoutCertificate } from "@/components/payout-certificate"
 import { Card } from "@/components/ui/card"
 import { CheckCircle2 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
+import { getT } from "@/lib/i18n/server"
 
 function resolveBaseUrl() {
   return (
@@ -30,6 +31,7 @@ export default async function SharedPage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
+  const t = await getT()
   const [playbook, trade, dailyPnl, payout, session] = await Promise.all([
     getSharedPlaybook(token),
     getSharedTrade(token),
@@ -45,7 +47,7 @@ export default async function SharedPage({
           <BrandMark className="size-9" />
           <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
         </div>
-        <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">Shared trade</p>
+        <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Shared trade")}</p>
         <TradePnlCard
           trade={trade}
           traderName={trade.traderName}
@@ -64,7 +66,7 @@ export default async function SharedPage({
           <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
         </div>
         <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Shared {dailyPnl.period === "weekly" ? "weekly" : "daily"} P&amp;L
+          {dailyPnl.period === "weekly" ? t("Shared weekly P&L") : t("Shared daily P&L")}
         </p>
         <DailyPnlCard
           data={dailyPnl}
@@ -86,7 +88,7 @@ export default async function SharedPage({
           <span className="text-xl font-semibold tracking-tight">TradeLoop</span>
         </div>
         <p className="mb-4 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Shared payout certificate
+          {t("Shared payout certificate")}
         </p>
         <PayoutCertificate summary={payout} isPro={payout.traderIsPro} shareUrl={`${resolveBaseUrl()}/p/${token}`} />
       </div>
@@ -104,7 +106,7 @@ export default async function SharedPage({
 
       <div className="w-full max-w-lg">
         <p className="mb-2 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Shared playbook
+          {t("Shared playbook")}
         </p>
         <Card className="p-6">
           <h1 className="text-xl font-semibold">{playbook.name}</h1>

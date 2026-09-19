@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 export function ProfileForm({
   name: initialName,
@@ -20,6 +21,7 @@ export function ProfileForm({
   image: string | null
 }) {
   const router = useRouter()
+  const t = useT()
   const [name, setName] = useState(initialName)
   const [image, setImage] = useState(initialImage ?? "")
   const [email, setEmail] = useState(initialEmail)
@@ -31,11 +33,11 @@ export function ProfileForm({
     setSavingProfile(true)
     try {
       const { error } = await authClient.updateUser({ name, image: image.trim() === "" ? null : image.trim() })
-      if (error) throw new Error(error.message ?? "Could not update profile")
-      toast.success("Profile updated")
+      if (error) throw new Error(error.message ?? t("Could not update profile"))
+      toast.success(t("Profile updated"))
       router.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update profile")
+      toast.error(err instanceof Error ? t(err.message) : t("Could not update profile"))
     } finally {
       setSavingProfile(false)
     }
@@ -47,11 +49,11 @@ export function ProfileForm({
     setSavingEmail(true)
     try {
       const { error } = await authClient.changeEmail({ newEmail: email })
-      if (error) throw new Error(error.message ?? "Could not update email")
-      toast.success("Email updated")
+      if (error) throw new Error(error.message ?? t("Could not update email"))
+      toast.success(t("Email updated"))
       router.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update email")
+      toast.error(err instanceof Error ? t(err.message) : t("Could not update email"))
       setEmail(initialEmail)
     } finally {
       setSavingEmail(false)
@@ -71,25 +73,25 @@ export function ProfileForm({
             )}
           </div>
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor="image">Avatar URL</Label>
+            <Label htmlFor="image">{t("Avatar URL")}</Label>
             <Input id="image" value={image} onChange={(e) => setImage(e.target.value)} placeholder="https://…" />
           </div>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="name">Display name</Label>
+          <Label htmlFor="name">{t("Display name")}</Label>
           <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
         </div>
         <Button type="submit" disabled={savingProfile}>
-          {savingProfile ? "Saving…" : "Save profile"}
+          {savingProfile ? t("Saving…") : t("Save profile")}
         </Button>
       </form>
 
       <form onSubmit={onSaveEmail} className="space-y-1.5 border-t pt-5">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="email">{t("Email")}</Label>
         <div className="flex gap-2">
           <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <Button type="submit" variant="outline" disabled={savingEmail || email === initialEmail}>
-            {savingEmail ? "Saving…" : "Update"}
+            {savingEmail ? t("Saving…") : t("Update")}
           </Button>
         </div>
       </form>

@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Copy, Download, Printer, Share2, TrendingUp, BadgeCheck, Loader2 } from "lucide-react"
 import { ChevronGlow } from "@/components/chevron-glow"
 import { toast } from "sonner"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 // The gold the certificates share — same family as the payout card.
 const GOLD = "#f0b429"
@@ -52,10 +53,12 @@ export function DailyPnlCard({
   shareUrl?: string | null
   generatedAt?: Date
 }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const isWin = data.pnl >= 0
   const tone = isWin ? "var(--gain)" : "var(--loss)"
   const rows: BrokerBreakdown[] =
-    data.scope === "all" ? data.breakdown : [{ broker: data.accountName ?? "Account", pnl: data.pnl, accounts: 1 }]
+    data.scope === "all" ? data.breakdown : [{ broker: data.accountName ?? t("Account"), pnl: data.pnl, accounts: 1 }]
   const stamp = generatedAt ?? new Date()
 
   return (
@@ -66,7 +69,7 @@ export function DailyPnlCard({
     >
       <ChevronGlow tone={GOLD} />
       <div
-        className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full blur-3xl"
+        className="pointer-events-none absolute -end-16 -top-16 size-56 rounded-full blur-3xl"
         style={{ background: GOLD, opacity: 0.16 }}
       />
 
@@ -99,19 +102,19 @@ export function DailyPnlCard({
           className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase"
           style={{ background: `${GOLD}26`, color: GOLD }}
         >
-          <BadgeCheck className="size-3" /> {data.period === "weekly" ? "Weekly" : "Daily"}
+          <BadgeCheck className="size-3" /> {data.period === "weekly" ? t("Weekly") : t("Daily")}
         </span>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90">
           {data.periodLabel}
         </span>
         <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-white/90">
-          {data.scope === "all" ? `${data.accountCount} account${data.accountCount === 1 ? "" : "s"}` : "1 account"}
+          {data.scope === "all" ? (data.accountCount === 1 ? t("1 account") : t("{n} accounts", { n: data.accountCount })) : t("1 account")}
         </span>
       </div>
 
       <div className="relative mt-5">
         <p className="text-[11px] font-medium uppercase tracking-wide text-white/40">
-          {data.period === "weekly" ? "Weekly" : "Daily"} P&amp;L
+          {data.period === "weekly" ? t("Weekly P&L") : t("Daily P&L")}
         </p>
         <div className="mt-1 flex items-center gap-2">
           <span className="text-4xl font-extrabold tabular-nums" style={{ color: tone }}>
@@ -126,7 +129,7 @@ export function DailyPnlCard({
 
       <div className="relative mt-5 border-t border-white/10 pt-4">
         <p className="text-[10px] font-medium uppercase tracking-wide text-white/40">
-          {data.scope === "all" ? "Combined across accounts" : "Account"}
+          {data.scope === "all" ? t("Combined across accounts") : t("Account")}
         </p>
         <div className="mt-2 space-y-1.5">
           {rows.map((row) => {
@@ -159,7 +162,7 @@ export function DailyPnlCard({
 
       <div className="relative mt-5 flex items-end justify-between">
         <p className="text-[10px] text-white/35">
-          {stamp.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          {stamp.toLocaleDateString(dateLocale, { month: "short", day: "numeric", year: "numeric" })}
         </p>
         {shareUrl && (
           <div className="rounded-lg bg-white p-1.5">
@@ -193,26 +196,27 @@ export function DailyPnlShareDialog({
   const [downloading, setDownloading] = useState(false)
   const [generatedAt] = useState(() => new Date())
   const cardRef = useRef<HTMLDivElement>(null)
+  const t = useT()
 
   useEffect(() => {
     if (!open || token) return
     setLoading(true)
     shareDailyPnl(accountId, data.date, data.period)
       .then(setToken)
-      .catch(() => toast.error("Could not create a share link"))
+      .catch(() => toast.error(t("Could not create a share link")))
       .finally(() => setLoading(false))
     // Only fetch once per time the dialog opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const shareUrl = token && typeof window !== "undefined" ? `${window.location.origin}/p/${token}` : null
-  const label = data.scope === "all" ? "all accounts" : (data.accountName ?? "this account")
+  const label = data.scope === "all" ? t("all accounts") : (data.accountName ?? t("this account"))
 
   function onCopyLink() {
     if (!shareUrl) return
     navigator.clipboard.writeText(shareUrl).then(
-      () => toast.success("Link copied"),
-      () => toast.error("Could not copy link"),
+      () => toast.success(t("Link copied")),
+      () => toast.error(t("Could not copy link")),
     )
   }
 
@@ -226,7 +230,7 @@ export function DailyPnlShareDialog({
       link.href = dataUrl
       link.click()
     } catch {
-      toast.error("Could not generate image")
+      toast.error(t("Could not generate image"))
     } finally {
       setDownloading(false)
     }
@@ -241,7 +245,7 @@ export function DailyPnlShareDialog({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `${data.period === "weekly" ? "Weekly" : "Daily"} P&L — ${label}`,
+          title: `${data.period === "weekly" ? t("Weekly P&L") : t("Daily P&L")} — ${label}`,
           url: shareUrl,
         })
       } catch {
@@ -256,9 +260,9 @@ export function DailyPnlShareDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Share {data.period === "weekly" ? "this week\u2019s" : "today\u2019s"} P&amp;L</DialogTitle>
+          <DialogTitle>{data.period === "weekly" ? t("Share this week’s P&L") : t("Share today’s P&L")}</DialogTitle>
           <DialogDescription>
-            Anyone with the link (or who scans the QR code) can view this card — no account needed.
+            {t("Anyone with the link (or who scans the QR code) can view this card — no account needed.")}
           </DialogDescription>
         </DialogHeader>
 
@@ -277,22 +281,22 @@ export function DailyPnlShareDialog({
 
         {loading && (
           <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Generating link…
+            <Loader2 className="size-4 animate-spin" /> {t("Generating link…")}
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-2">
           <Button type="button" variant="outline" onClick={onCopyLink} disabled={!shareUrl}>
-            <Copy className="size-4" /> Copy link
+            <Copy className="size-4" /> {t("Copy link")}
           </Button>
           <Button type="button" variant="outline" onClick={onShare} disabled={!shareUrl}>
-            <Share2 className="size-4" /> Share
+            <Share2 className="size-4" /> {t("Share")}
           </Button>
           <Button type="button" variant="outline" onClick={onDownload} disabled={downloading}>
-            <Download className="size-4" /> {downloading ? "Saving…" : "Download PNG"}
+            <Download className="size-4" /> {downloading ? t("Saving…") : t("Download PNG")}
           </Button>
           <Button type="button" variant="outline" onClick={onPrint}>
-            <Printer className="size-4" /> Print
+            <Printer className="size-4" /> {t("Print")}
           </Button>
         </div>
       </DialogContent>

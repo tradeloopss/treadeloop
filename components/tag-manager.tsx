@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { Tag, MoreHorizontal, X, Plus } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 const COLORS = ["violet", "pink", "yellow", "red", "blue", "emerald"] as const
 type TagColor = (typeof COLORS)[number]
@@ -41,12 +42,13 @@ export interface TagGroupData {
 }
 
 export function TagManager({ groups }: { groups: TagGroupData[] }) {
+  const t = useT()
   return (
     <Card className="max-w-2xl space-y-1 p-5">
       <div>
-        <h2 className="font-medium">Custom Tagging System</h2>
+        <h2 className="font-medium">{t("Custom Tagging System")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Organize trades with custom tags for setups, emotions, mistakes, and more.
+          {t("Organize trades with custom tags for setups, emotions, mistakes, and more.")}
         </p>
       </div>
 
@@ -62,6 +64,7 @@ export function TagManager({ groups }: { groups: TagGroupData[] }) {
 }
 
 function TagGroupRow({ group }: { group: TagGroupData }) {
+  const t = useT()
   const [pending, startTransition] = useTransition()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(group.name)
@@ -112,21 +115,21 @@ function TagGroupRow({ group }: { group: TagGroupData }) {
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="icon" className="ml-auto size-7" disabled={pending}>
+              <Button variant="ghost" size="icon" className="ms-auto size-7" disabled={pending}>
                 <MoreHorizontal className="size-4" />
               </Button>
             }
           />
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setEditing(true)}>Rename</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setEditing(true)}>{t("Rename")}</DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => startTransition(() => deleteTagGroup(group.id))}>
-              Delete group
+              {t("Delete group")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-6">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 ps-6">
         {group.tags.map((tag) => (
           <span
             key={tag.id}
@@ -135,7 +138,7 @@ function TagGroupRow({ group }: { group: TagGroupData }) {
             {tag.name}
             <button
               type="button"
-              aria-label={`Remove ${tag.name}`}
+              aria-label={t("Remove {name}", { name: tag.name })}
               onClick={() => startTransition(() => deleteTagOption(tag.id))}
               className="text-muted-foreground hover:text-foreground"
             >
@@ -147,7 +150,7 @@ function TagGroupRow({ group }: { group: TagGroupData }) {
           <Input
             value={newTag}
             onChange={(e) => setNewTag(e.target.value)}
-            placeholder="Add tag…"
+            placeholder={t("Add tag…")}
             className="h-7 w-28 rounded-full border-dashed text-xs"
           />
         </form>
@@ -157,6 +160,7 @@ function TagGroupRow({ group }: { group: TagGroupData }) {
 }
 
 function NewGroupForm() {
+  const t = useT()
   const [pending, startTransition] = useTransition()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
@@ -175,7 +179,7 @@ function NewGroupForm() {
     return (
       <Button variant="outline" size="sm" className="mt-3" onClick={() => setOpen(true)}>
         <Plus className="size-4" />
-        Add tag group
+        {t("Add tag group")}
       </Button>
     )
   }
@@ -186,7 +190,7 @@ function NewGroupForm() {
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Group name (e.g. Setups)"
+        placeholder={t("Group name (e.g. Setups)")}
         className="h-8 w-48 text-sm"
       />
       <div className="flex items-center gap-1">
@@ -210,10 +214,10 @@ function NewGroupForm() {
         ))}
       </div>
       <Button type="submit" size="sm" disabled={pending}>
-        Add
+        {t("Add")}
       </Button>
       <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
-        Cancel
+        {t("Cancel")}
       </Button>
     </form>
   )

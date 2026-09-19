@@ -5,8 +5,10 @@ import Link from "next/link"
 import { authClient } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useT } from "@/components/locale-provider"
 
 export function TwoFactorForm({ next }: { next: string }) {
+  const t = useT()
   const [useBackup, setUseBackup] = useState(false)
   const [code, setCode] = useState("")
   const [trustDevice, setTrustDevice] = useState(true)
@@ -24,8 +26,8 @@ export function TwoFactorForm({ next }: { next: string }) {
       setLoading(false)
       setError(
         error.status === 401 && /session|cookie|expired/i.test(error.message ?? "")
-          ? "This sign-in expired. Go back and sign in again."
-          : (error.message ?? "That code didn't work.")
+          ? t("This sign-in expired. Go back and sign in again.")
+          : (error.message ? t(error.message) : t("That code didn't work."))
       )
       return
     }
@@ -40,19 +42,19 @@ export function TwoFactorForm({ next }: { next: string }) {
         className="h-12 rounded-xl text-center text-lg tracking-[0.3em]"
         value={code}
         onChange={(e) => setCode(e.target.value)}
-        placeholder={useBackup ? "backup code" : "123456"}
+        placeholder={useBackup ? t("backup code") : "123456"}
         inputMode={useBackup ? "text" : "numeric"}
         autoComplete="one-time-code"
-        aria-label={useBackup ? "Backup code" : "Authentication code"}
+        aria-label={useBackup ? t("Backup code") : t("Authentication code")}
         required
       />
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
         <input type="checkbox" checked={trustDevice} onChange={(e) => setTrustDevice(e.target.checked)} className="size-4 accent-[var(--primary)]" />
-        Don&apos;t ask again on this device for 30 days
+        {t("Don't ask again on this device for 30 days")}
       </label>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" disabled={loading} className="mt-1 h-12 w-full rounded-xl text-base font-semibold">
-        {loading ? "Checking…" : "Verify"}
+        {loading ? t("Checking…") : t("Verify")}
       </Button>
       <div className="mt-2 flex items-center justify-between text-sm">
         <button
@@ -64,10 +66,10 @@ export function TwoFactorForm({ next }: { next: string }) {
           }}
           className="font-medium text-primary hover:underline"
         >
-          {useBackup ? "Use authenticator code" : "Use a backup code"}
+          {useBackup ? t("Use authenticator code") : t("Use a backup code")}
         </button>
         <Link href="/sign-in" className="text-muted-foreground hover:text-foreground">
-          Back to sign in
+          {t("Back to sign in")}
         </Link>
       </div>
     </form>

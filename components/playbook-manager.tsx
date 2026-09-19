@@ -31,6 +31,7 @@ import {
 import { SharePlaybookDialog, type SharedPerson } from "@/components/share-playbook-dialog"
 import { Plus, MoreHorizontal, Search, CheckCircle2, Copy } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 export interface PlaybookCard {
   id: number
@@ -63,6 +64,7 @@ export function PlaybookManager({
   playbooks: PlaybookCard[]
   sharedWithMe: SharedPlaybookCard[]
 }) {
+  const t = useT()
   const [createOpen, setCreateOpen] = useState(false)
   const [pending, startTransition] = useTransition()
   const [query, setQuery] = useState("")
@@ -83,10 +85,10 @@ export function PlaybookManager({
     startTransition(async () => {
       try {
         await createPlaybook(formData)
-        toast.success("Playbook created")
+        toast.success(t("Playbook created"))
         setCreateOpen(false)
       } catch {
-        toast.error("Could not create playbook")
+        toast.error(t("Could not create playbook"))
       }
     })
   }
@@ -95,9 +97,9 @@ export function PlaybookManager({
     startTransition(async () => {
       try {
         await deletePlaybook(id)
-        toast.success("Playbook deleted")
+        toast.success(t("Playbook deleted"))
       } catch {
-        toast.error("Could not delete playbook")
+        toast.error(t("Could not delete playbook"))
       }
     })
   }
@@ -106,9 +108,9 @@ export function PlaybookManager({
     startTransition(async () => {
       try {
         await cloneSharedPlaybook(id)
-        toast.success("Added to your playbooks")
+        toast.success(t("Added to your playbooks"))
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save a copy")
+        toast.error(err instanceof Error ? t(err.message) : t("Could not save a copy"))
       }
     })
   }
@@ -117,9 +119,9 @@ export function PlaybookManager({
     startTransition(async () => {
       try {
         await removePlaybookShare(playbookId, ownerUserId)
-        toast.success("Removed from your shared playbooks")
+        toast.success(t("Removed from your shared playbooks"))
       } catch {
-        toast.error("Could not remove")
+        toast.error(t("Could not remove"))
       }
     })
   }
@@ -129,47 +131,47 @@ export function PlaybookManager({
       <Tabs defaultValue="mine">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
-            <TabsTrigger value="mine">My Playbook</TabsTrigger>
-            <TabsTrigger value="shared">Shared Playbook</TabsTrigger>
+            <TabsTrigger value="mine">{t("My Playbook")}</TabsTrigger>
+            <TabsTrigger value="shared">{t("Shared Playbook")}</TabsTrigger>
           </TabsList>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <div className="relative flex-1 sm:flex-none">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search playbooks…"
-                className="w-full pl-8 sm:w-48"
+                placeholder={t("Search playbooks…")}
+                className="w-full ps-8 sm:w-48"
               />
             </div>
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger render={<Button className="shrink-0"><Plus className="size-4" /> Create Playbook</Button>} />
+              <DialogTrigger render={<Button className="shrink-0"><Plus className="size-4" /> {t("Create Playbook")}</Button>} />
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Create a playbook</DialogTitle>
-                  <DialogDescription>Define a repeatable setup and the rules that make it valid.</DialogDescription>
+                  <DialogTitle>{t("Create a playbook")}</DialogTitle>
+                  <DialogDescription>{t("Define a repeatable setup and the rules that make it valid.")}</DialogDescription>
                 </DialogHeader>
                 <form onSubmit={onSubmit} className="space-y-4">
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="name">Name</Label>
-                    <Input id="name" name="name" placeholder="Opening range breakout" required />
+                    <Label htmlFor="name">{t("Name")}</Label>
+                    <Input id="name" name="name" placeholder={t("Opening range breakout")} required />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="description">Description</Label>
-                    <Input id="description" name="description" placeholder="Short thesis for this setup" />
+                    <Label htmlFor="description">{t("Description")}</Label>
+                    <Input id="description" name="description" placeholder={t("Short thesis for this setup")} />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="rules">Rules (one per line)</Label>
+                    <Label htmlFor="rules">{t("Rules (one per line)")}</Label>
                     <Textarea
                       id="rules"
                       name="rules"
                       rows={5}
-                      placeholder={"Wait for 5m opening range\nEnter on retest of breakout\nStop below range low\nTarget 2R minimum"}
+                      placeholder={t("Wait for 5m opening range\nEnter on retest of breakout\nStop below range low\nTarget 2R minimum")}
                     />
                   </div>
                   <DialogFooter>
                     <Button type="submit" disabled={pending} className="w-full">
-                      {pending ? "Creating…" : "Create playbook"}
+                      {pending ? t("Creating…") : t("Create playbook")}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -183,7 +185,7 @@ export function PlaybookManager({
             <Card className="flex h-48 flex-col items-center justify-center gap-2 text-center">
               <CheckCircle2 className="size-7 text-muted-foreground/50" />
               <p className="text-sm text-muted-foreground">
-                {playbooks.length === 0 ? "No playbooks yet. Create one to grade your setups against your rules." : "No playbooks match your search."}
+                {playbooks.length === 0 ? t("No playbooks yet. Create one to grade your setups against your rules.") : t("No playbooks match your search.")}
               </p>
             </Card>
           ) : (
@@ -191,11 +193,11 @@ export function PlaybookManager({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Playbook Name</TableHead>
-                    <TableHead className="text-right">Trades</TableHead>
-                    <TableHead className="text-right">Win Rate</TableHead>
-                    <TableHead className="text-right">Net P&L</TableHead>
-                    <TableHead>Shared Playbooks</TableHead>
+                    <TableHead>{t("Playbook Name")}</TableHead>
+                    <TableHead className="text-end">{t("Trades")}</TableHead>
+                    <TableHead className="text-end">{t("Win Rate")}</TableHead>
+                    <TableHead className="text-end">{t("Net P&L")}</TableHead>
+                    <TableHead>{t("Shared Playbooks")}</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -206,11 +208,11 @@ export function PlaybookManager({
                         <p className="font-medium">{p.name}</p>
                         {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{p.trades}</TableCell>
-                      <TableCell className="text-right tabular-nums">{p.winRate.toFixed(0)}%</TableCell>
+                      <TableCell className="text-end tabular-nums">{p.trades}</TableCell>
+                      <TableCell className="text-end tabular-nums">{p.winRate.toFixed(0)}%</TableCell>
                       <TableCell
                         className={cn(
-                          "text-right font-medium tabular-nums",
+                          "text-end font-medium tabular-nums",
                           p.netPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]",
                         )}
                       >
@@ -240,15 +242,15 @@ export function PlaybookManager({
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
-                              <Button variant="ghost" size="icon" className="size-8" aria-label={`${p.name} options`}>
+                              <Button variant="ghost" size="icon" className="size-8" aria-label={t("{name} options", { name: p.name })}>
                                 <MoreHorizontal className="size-4" />
                               </Button>
                             }
                           />
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setShareTarget(p)}>Share</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setShareTarget(p)}>{t("Share")}</DropdownMenuItem>
                             <DropdownMenuItem variant="destructive" onClick={() => onDelete(p.id)}>
-                              Delete
+                              {t("Delete")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -266,7 +268,7 @@ export function PlaybookManager({
             <Card className="flex h-48 flex-col items-center justify-center gap-2 text-center">
               <CheckCircle2 className="size-7 text-muted-foreground/50" />
               <p className="text-sm text-muted-foreground">
-                {sharedWithMe.length === 0 ? "No one has shared a playbook with you yet." : "No shared playbooks match your search."}
+                {sharedWithMe.length === 0 ? t("No one has shared a playbook with you yet.") : t("No shared playbooks match your search.")}
               </p>
             </Card>
           ) : (
@@ -274,11 +276,11 @@ export function PlaybookManager({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Playbook Name</TableHead>
-                    <TableHead>Shared By</TableHead>
-                    <TableHead className="text-right">Trades</TableHead>
-                    <TableHead className="text-right">Win Rate</TableHead>
-                    <TableHead className="text-right">Net P&L</TableHead>
+                    <TableHead>{t("Playbook Name")}</TableHead>
+                    <TableHead>{t("Shared By")}</TableHead>
+                    <TableHead className="text-end">{t("Trades")}</TableHead>
+                    <TableHead className="text-end">{t("Win Rate")}</TableHead>
+                    <TableHead className="text-end">{t("Net P&L")}</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -290,11 +292,11 @@ export function PlaybookManager({
                         {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{p.ownerName}</TableCell>
-                      <TableCell className="text-right tabular-nums">{p.trades}</TableCell>
-                      <TableCell className="text-right tabular-nums">{p.winRate.toFixed(0)}%</TableCell>
+                      <TableCell className="text-end tabular-nums">{p.trades}</TableCell>
+                      <TableCell className="text-end tabular-nums">{p.winRate.toFixed(0)}%</TableCell>
                       <TableCell
                         className={cn(
-                          "text-right font-medium tabular-nums",
+                          "text-end font-medium tabular-nums",
                           p.netPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]",
                         )}
                       >
@@ -305,17 +307,17 @@ export function PlaybookManager({
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
-                              <Button variant="ghost" size="icon" className="size-8" aria-label={`${p.name} options`}>
+                              <Button variant="ghost" size="icon" className="size-8" aria-label={t("{name} options", { name: p.name })}>
                                 <MoreHorizontal className="size-4" />
                               </Button>
                             }
                           />
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => onSaveCopy(p.id)}>
-                              <Copy className="size-4" /> Save a copy
+                              <Copy className="size-4" /> {t("Save a copy")}
                             </DropdownMenuItem>
                             <DropdownMenuItem variant="destructive" onClick={() => onRemoveShared(p.id, p.ownerId)}>
-                              Remove
+                              {t("Remove")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ChevronLeft, ChevronRight, GripVertical, Plus, X } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 // Tailwind needs the whole class name at build time, so column counts are
 // looked up rather than interpolated.
@@ -44,6 +45,7 @@ export function DashboardCanvas({
   panelNodes: Record<string, React.ReactNode>
 }) {
   const router = useRouter()
+  const t = useT()
   const searchParams = useSearchParams()
   const editing = searchParams.get("edit") === "1"
 
@@ -79,16 +81,16 @@ export function DashboardCanvas({
       // The built-in layout has no row to write to, so saving edits to it
       // creates the trader's own template instead of silently discarding them.
       if (isBuiltIn) {
-        await createTemplate("My layout", stats, panels)
-        toast.success("Saved as a new template, “My layout”")
+        await createTemplate(t("My layout"), stats, panels)
+        toast.success(t("Saved as a new template, “{name}”", { name: t("My layout") }))
       } else {
         await updateTemplate(template.id, template.name, stats, panels)
-        toast.success(`Saved ${template.name}`)
+        toast.success(t("Saved {name}", { name: template.name }))
       }
       router.replace("/dashboard")
       router.refresh()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save the layout")
+      toast.error(error instanceof Error ? t(error.message) : t("Could not save the layout"))
     } finally {
       setSaving(false)
     }
@@ -136,14 +138,14 @@ export function DashboardCanvas({
           dragging === id && "opacity-40",
         )}
       >
-        <div className="absolute -top-3 left-3 z-10 flex items-center gap-0.5 rounded-md border bg-background px-1 py-0.5 shadow-sm">
+        <div className="absolute -top-3 start-3 z-10 flex items-center gap-0.5 rounded-md border bg-background px-1 py-0.5 shadow-sm">
           <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
-          <span className="pr-1 text-[11px] font-medium">{widget.label}</span>
+          <span className="pe-1 text-[11px] font-medium">{t(widget.label)}</span>
           {/* Drag is the quick path; the arrows keep reordering usable on touch
               and with a keyboard, where HTML5 drag events never fire. */}
           <button
             type="button"
-            aria-label={`Move ${widget.label} earlier`}
+            aria-label={t("Move {name} earlier", { name: t(widget.label) })}
             disabled={index === 0}
             onClick={() => move(ids, setIds, id, -1)}
             className="rounded p-0.5 text-muted-foreground hover:bg-accent disabled:opacity-30"
@@ -152,7 +154,7 @@ export function DashboardCanvas({
           </button>
           <button
             type="button"
-            aria-label={`Move ${widget.label} later`}
+            aria-label={t("Move {name} later", { name: t(widget.label) })}
             disabled={index === ids.length - 1}
             onClick={() => move(ids, setIds, id, 1)}
             className="rounded p-0.5 text-muted-foreground hover:bg-accent disabled:opacity-30"
@@ -161,7 +163,7 @@ export function DashboardCanvas({
           </button>
           <button
             type="button"
-            aria-label={`Remove ${widget.label}`}
+            aria-label={t("Remove {name}", { name: t(widget.label) })}
             onClick={() => setIds(ids.filter((w) => w !== id))}
             className="rounded p-0.5 text-[var(--loss)] hover:bg-accent"
           >
@@ -179,18 +181,18 @@ export function DashboardCanvas({
         <div className="sticky top-2 z-30 flex flex-wrap items-center gap-3 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium">
-              Editing {isBuiltIn ? "the default layout" : template.name}
+              {isBuiltIn ? t("Editing the default layout") : t("Editing {name}", { name: template.name })}
             </p>
             <p className="text-xs text-muted-foreground">
-              Drag widgets to rearrange, remove them with ×, or add more below.
-              {isBuiltIn && " Saving creates your own template."}
+              {t("Drag widgets to rearrange, remove them with ×, or add more below.")}
+              {isBuiltIn && " " + t("Saving creates your own template.")}
             </p>
           </div>
           <Button variant="outline" onClick={cancel} disabled={saving}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button onClick={save} disabled={saving || !dirty}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("Saving…") : t("Save")}
           </Button>
         </div>
       )}
@@ -205,7 +207,7 @@ export function DashboardCanvas({
 
       {editing && (
         <AddWidgets
-          title="Top row"
+          title={t("Top row")}
           catalogue={STAT_WIDGETS}
           selected={stats}
           max={MAX_STAT_WIDGETS}
@@ -224,13 +226,13 @@ export function DashboardCanvas({
       )}
 
       {editing && (
-        <AddWidgets title="Lower section" catalogue={PANEL_WIDGETS} selected={panels} onAdd={(id) => setPanels([...panels, id])} />
+        <AddWidgets title={t("Lower section")} catalogue={PANEL_WIDGETS} selected={panels} onAdd={(id) => setPanels([...panels, id])} />
       )}
 
       {!editing && stats.length === 0 && panels.length === 0 && (
         <Card className="flex h-40 flex-col items-center justify-center gap-2 text-center">
           <p className="text-sm text-muted-foreground">
-            This template has no widgets. Open <span className="font-medium">Template</span> above to add some.
+            {t("This template has no widgets. Open")} <span className="font-medium">{t("Template")}</span> {t("above to add some.")}
           </p>
         </Card>
       )}
@@ -251,17 +253,18 @@ function AddWidgets({
   max?: number
   onAdd: (id: string) => void
 }) {
+  const t = useT()
   const available = catalogue.filter((w) => !selected.includes(w.id))
   const full = max != null && selected.length >= max
 
   return (
     <div className="rounded-lg border border-dashed p-3">
       <p className="mb-2 text-xs font-medium text-muted-foreground">
-        Add to {title}
-        {max != null && ` · ${selected.length}/${max} used`}
+        {t("Add to {section}", { section: title })}
+        {max != null && ` · ${t("{used}/{max} used", { used: selected.length, max })}`}
       </p>
       {available.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Every widget in this section is already on the dashboard.</p>
+        <p className="text-xs text-muted-foreground">{t("Every widget in this section is already on the dashboard.")}</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {available.map((widget) => (
@@ -270,11 +273,11 @@ function AddWidgets({
               variant="outline"
               size="sm"
               disabled={full}
-              title={full ? `The top row holds at most ${max} widgets` : widget.description}
+              title={full ? t("The top row holds at most {max} widgets", { max: max ?? 0 }) : t(widget.description)}
               onClick={() => onAdd(widget.id)}
             >
               <Plus className="size-3.5" />
-              {widget.label}
+              {t(widget.label)}
             </Button>
           ))}
         </div>

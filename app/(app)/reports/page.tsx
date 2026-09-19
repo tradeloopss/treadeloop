@@ -12,11 +12,22 @@ import { StatCard } from "@/components/stat-card"
 import { Card } from "@/components/ui/card"
 import { UpgradePrompt } from "@/components/upgrade-prompt"
 import { recordRequestTiming } from "@/lib/telemetry"
+import { getT } from "@/lib/i18n/server"
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+const MARKET_LABELS: Record<string, string> = {
+  futures: "Futures",
+  stocks: "Stocks",
+  options: "Options",
+  future_option: "Future options",
+  forex: "Forex",
+  crypto: "Crypto",
+  cfd: "CFD",
+}
 
 export default async function ReportsPage() {
   const startedAt = Date.now()
+  const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const pro = session?.user ? await isPro(session.user.id) : false
   const rows = await getTrades()
@@ -35,7 +46,7 @@ export default async function ReportsPage() {
   const marketMap = new Map<string, number>()
   for (const t of closed) marketMap.set(t.market, (marketMap.get(t.market) ?? 0) + Number(t.pnl))
   const byMarket: BarDatum[] = Array.from(marketMap.entries()).map(([label, value]) => ({
-    label: label.charAt(0).toUpperCase() + label.slice(1),
+    label: t(MARKET_LABELS[label] ?? label.charAt(0).toUpperCase() + label.slice(1)),
     value: Number(value.toFixed(2)),
   }))
 
@@ -45,7 +56,7 @@ export default async function ReportsPage() {
     const d = new Date(t.exitTime ?? t.entryTime).getDay()
     dayMap.set(d, (dayMap.get(d) ?? 0) + Number(t.pnl))
   }
-  const byWeekday: BarDatum[] = WEEKDAYS.map((label, i) => ({ label, value: Number((dayMap.get(i) ?? 0).toFixed(2)) })).filter(
+  const byWeekday: BarDatum[] = WEEKDAYS.map((label, i) => ({ label: t(label), value: Number((dayMap.get(i) ?? 0).toFixed(2)) })).filter(
     (_, i) => i >= 1 && i <= 5,
   )
 
@@ -88,39 +99,39 @@ export default async function ReportsPage() {
   void recordRequestTiming("/reports", Date.now() - startedAt)
   return (
     <div>
-      <PageHeader title="Reports" description="Deep-dive analytics across markets, timing, and risk" />
+      <PageHeader title={t("Reports")} description={t("Deep-dive analytics across markets, timing, and risk")} />
       <div className="space-y-6 p-4 sm:p-6">
-        {pro ? <PeriodInsights trades={reportTrades} /> : <UpgradePrompt feature="Period insights" />}
+        {pro ? <PeriodInsights trades={reportTrades} /> : <UpgradePrompt feature={t("Period insights")} />}
 
-        <h2 className="text-sm font-medium text-muted-foreground">All-time</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">{t("All-time")}</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Net P&L" value={formatCurrency(a.netPnl)} tone={a.netPnl >= 0 ? "gain" : "loss"} />
-          <StatCard label="Avg Win" value={formatCurrency(a.avgWin)} tone="gain" />
-          <StatCard label="Avg Loss" value={formatCurrency(a.avgLoss)} tone="loss" />
-          <StatCard label="Avg R-Multiple" value={`${a.avgRMultiple >= 0 ? "+" : ""}${a.avgRMultiple.toFixed(2)}R`} tone={a.avgRMultiple >= 0 ? "gain" : "loss"} />
+          <StatCard label={t("Net P&L")} value={formatCurrency(a.netPnl)} tone={a.netPnl >= 0 ? "gain" : "loss"} />
+          <StatCard label={t("Avg Win")} value={formatCurrency(a.avgWin)} tone="gain" />
+          <StatCard label={t("Avg Loss")} value={formatCurrency(a.avgLoss)} tone="loss" />
+          <StatCard label={t("Avg R-Multiple")} value={`${a.avgRMultiple >= 0 ? "+" : ""}${a.avgRMultiple.toFixed(2)}R`} tone={a.avgRMultiple >= 0 ? "gain" : "loss"} />
         </div>
 
         {hasData ? (
           <>
             <div className="grid gap-4 lg:grid-cols-2">
               <Card className="p-5">
-                <h2 className="mb-4 text-sm font-medium text-muted-foreground">P&L by Market</h2>
+                <h2 className="mb-4 text-sm font-medium text-muted-foreground">{t("P&L by Market")}</h2>
                 <PnlBarChart data={byMarket} />
               </Card>
               <Card className="p-5">
-                <h2 className="mb-4 text-sm font-medium text-muted-foreground">P&L by Day of Week</h2>
+                <h2 className="mb-4 text-sm font-medium text-muted-foreground">{t("P&L by Day of Week")}</h2>
                 <PnlBarChart data={byWeekday} />
               </Card>
             </div>
             <Card className="p-5">
-              <h2 className="mb-4 text-sm font-medium text-muted-foreground">R-Multiple Distribution</h2>
+              <h2 className="mb-4 text-sm font-medium text-muted-foreground">{t("R-Multiple Distribution")}</h2>
               <CountBarChart data={rDist} />
             </Card>
-            {pro ? <CrossAnalysis data={crossAnalysis} /> : <UpgradePrompt feature="Cross Analysis" />}
+            {pro ? <CrossAnalysis data={crossAnalysis} /> : <UpgradePrompt feature={t("Cross Analysis")} />}
           </>
         ) : (
           <Card className="flex h-48 items-center justify-center">
-            <p className="text-sm text-muted-foreground">Log closed trades to unlock your performance reports.</p>
+            <p className="text-sm text-muted-foreground">{t("Log closed trades to unlock your performance reports.")}</p>
           </Card>
         )}
       </div>

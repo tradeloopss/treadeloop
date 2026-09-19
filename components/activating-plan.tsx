@@ -6,6 +6,7 @@ import { checkActivation } from "@/app/actions/subscriptions"
 import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
+import { useT } from "@/components/locale-provider"
 
 const POLL_MS = 2_000
 // Whop's confirmation normally lands within seconds; after this long, stop
@@ -14,6 +15,7 @@ const GIVE_UP_AFTER_MS = 90_000
 
 export function ActivatingPlan() {
   const router = useRouter()
+  const t = useT()
   const [timedOut, setTimedOut] = useState(false)
 
   useEffect(() => {
@@ -46,25 +48,24 @@ export function ActivatingPlan() {
         <BrandMark className="mx-auto size-14" alt="TradeLoop" />
         {timedOut ? (
           <>
-            <h1 className="mt-5 text-xl font-bold tracking-tight">Still confirming your payment</h1>
+            <h1 className="mt-5 text-xl font-bold tracking-tight">{t("Still confirming your payment")}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              This is taking longer than usual. Your plan will switch on as soon as Whop confirms it — try again in a
-              minute, or contact{" "}
+              {t("This is taking longer than usual. Your plan will switch on as soon as Whop confirms it — try again in a minute, or contact")}{" "}
               <a href="mailto:support@tradeloop.pro" className="font-medium text-primary hover:underline">
                 support@tradeloop.pro
               </a>
               .
             </p>
             <Button className="mt-6 h-11 w-full rounded-xl" onClick={() => router.refresh()}>
-              Check again
+              {t("Check again")}
             </Button>
           </>
         ) : (
           <>
             <Loader2 className="mx-auto mt-6 size-6 animate-spin text-primary" aria-hidden="true" />
-            <h1 className="mt-4 text-xl font-bold tracking-tight">Activating your plan…</h1>
+            <h1 className="mt-4 text-xl font-bold tracking-tight">{t("Activating your plan…")}</h1>
             <p className="mt-2 text-sm text-muted-foreground" role="status">
-              Checkout complete. Taking you to your dashboard in a moment.
+              {t("Checkout complete. Taking you to your dashboard in a moment.")}
             </p>
           </>
         )}

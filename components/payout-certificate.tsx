@@ -10,15 +10,16 @@ import { chipColor, initials } from "@/lib/ui-chips"
 import { Button } from "@/components/ui/button"
 import { BadgeCheck, Copy, Download, Loader2, Printer, Share2 } from "lucide-react"
 import { toast } from "sonner"
+import { useT } from "@/components/locale-provider"
 
 // Cascading chevrons — an original geometric pattern in the "tech glow" idiom
 // of trading share cards, not a copied logo or asset. Kept recessive so the
 // QR code and figures stay readable on top of it.
 function ArrowGlow({ tone }: { tone: string }) {
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-0 w-[52%] overflow-hidden">
+    <div className="pointer-events-none absolute inset-y-0 end-0 w-[52%] overflow-hidden">
       <div
-        className="absolute -right-10 top-1/2 size-[340px] -translate-y-1/2 rounded-full blur-3xl"
+        className="absolute -end-10 top-1/2 size-[340px] -translate-y-1/2 rounded-full blur-3xl"
         style={{ background: `${tone}1f` }}
       />
       <svg className="absolute inset-0 size-full" viewBox="0 0 300 260" fill="none" preserveAspectRatio="xMidYMid meet">
@@ -42,6 +43,7 @@ export function PayoutCertificate({
   /** Set on the public /p/<token> page, where the link already exists. */
   shareUrl?: string | null
 }) {
+  const t = useT()
   const [downloading, setDownloading] = useState(false)
   const [token, setToken] = useState<string | null>(null)
   const [linking, setLinking] = useState(false)
@@ -66,7 +68,7 @@ export function PayoutCertificate({
         if (!cancelled) setToken(t)
       })
       .catch(() => {
-        if (!cancelled) toast.error("Could not create the certificate's share link")
+        if (!cancelled) toast.error(t("Could not create the certificate's share link"))
       })
       .finally(() => {
         if (!cancelled) setLinking(false)
@@ -82,8 +84,8 @@ export function PayoutCertificate({
   function onCopyLink() {
     if (!shareUrl) return
     navigator.clipboard.writeText(shareUrl).then(
-      () => toast.success("Link copied"),
-      () => toast.error("Could not copy link")
+      () => toast.success(t("Link copied")),
+      () => toast.error(t("Could not copy link"))
     )
   }
 
@@ -91,7 +93,7 @@ export function PayoutCertificate({
     if (!shareUrl) return
     if (navigator.share) {
       try {
-        await navigator.share({ title: `Payouts — ${summary.periodLabel}`, url: shareUrl })
+        await navigator.share({ title: t("Payouts — {period}", { period: summary.periodLabel }), url: shareUrl })
       } catch {
         // user cancelled — nothing to do
       }
@@ -110,7 +112,7 @@ export function PayoutCertificate({
       link.href = dataUrl
       link.click()
     } catch {
-      toast.error("Could not generate the certificate image")
+      toast.error(t("Could not generate the certificate image"))
     } finally {
       setDownloading(false)
     }
@@ -159,17 +161,17 @@ export function PayoutCertificate({
                     style={{ borderColor: `${tone}40`, color: tone }}
                   >
                     <BadgeCheck className="size-3.5" />
-                    PAYOUT
+                    {t("PAYOUT")}
                   </span>
                   <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-white/70">
-                    {summary.period === "monthly" ? "MONTHLY" : "BI-WEEKLY"}
+                    {summary.period === "monthly" ? t("MONTHLY") : t("BI-WEEKLY")}
                   </span>
                   <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-white/70">
                     {summary.periodLabel}
                   </span>
                 </div>
 
-                <p className="mt-6 text-[13px] font-medium text-white/50">Total Payouts</p>
+                <p className="mt-6 text-[13px] font-medium text-white/50">{t("Total Payouts")}</p>
                 <div className="mt-1 flex flex-wrap items-baseline gap-2">
                   <span
                     className="text-[44px] font-extrabold tabular-nums leading-none"
@@ -178,23 +180,23 @@ export function PayoutCertificate({
                     {formatCurrency(summary.total, summary.currency)}
                   </span>
                   <span className="text-[15px] font-semibold" style={{ color: tone }}>
-                    {payoutCount} payout{payoutCount === 1 ? "" : "s"}
+                    {payoutCount === 1 ? t("1 payout") : t("{n} payouts", { n: payoutCount })}
                   </span>
                 </div>
 
                 <div className="mt-7 grid grid-cols-3 gap-4 border-t border-white/[0.07] pt-4">
                   <div>
-                    <p className="text-[11px] text-white/40">Accounts Paid</p>
+                    <p className="text-[11px] text-white/40">{t("Accounts Paid")}</p>
                     <p className="mt-0.5 text-[15px] font-semibold tabular-nums">{summary.accountCount}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-white/40">Avg per Account</p>
+                    <p className="text-[11px] text-white/40">{t("Avg per Account")}</p>
                     <p className="mt-0.5 text-[15px] font-semibold tabular-nums">
                       {formatCurrency(avgPerAccount, summary.currency)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-white/40">Largest Payout</p>
+                    <p className="text-[11px] text-white/40">{t("Largest Payout")}</p>
                     <p className="mt-0.5 text-[15px] font-semibold tabular-nums" style={{ color: tone }}>
                       {formatCurrency(largest, summary.currency)}
                     </p>
@@ -208,7 +210,7 @@ export function PayoutCertificate({
                       return (
                         <span
                           key={line.accountId}
-                          className="flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-1 pr-2.5 text-[11px]"
+                          className="flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] py-1 ps-1 pe-2.5 text-[11px]"
                         >
                           <span
                             className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-black text-white"
@@ -225,7 +227,7 @@ export function PayoutCertificate({
                     })}
                     {summary.lines.length > 3 && (
                       <span className="flex items-center rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-semibold text-white/60">
-                        +{summary.lines.length - 3} more
+                        {t("+{n} more", { n: summary.lines.length - 3 })}
                       </span>
                     )}
                   </div>
@@ -255,19 +257,19 @@ export function PayoutCertificate({
         {!fixedShareUrl && (
           <div className="flex gap-2">
             <Button type="button" variant="outline" className="flex-1" onClick={onCopyLink} disabled={!shareUrl}>
-              <Copy className="size-4" /> {linking ? "Preparing link…" : "Copy link"}
+              <Copy className="size-4" /> {linking ? t("Preparing link…") : t("Copy link")}
             </Button>
             <Button type="button" variant="outline" className="flex-1" onClick={onShare} disabled={!shareUrl}>
-              <Share2 className="size-4" /> Share
+              <Share2 className="size-4" /> {t("Share")}
             </Button>
           </div>
         )}
         <div className="flex gap-2">
           <Button type="button" variant="outline" className="flex-1" onClick={onDownload} disabled={downloading}>
-            <Download className="size-4" /> {downloading ? "Saving…" : "Download PNG"}
+            <Download className="size-4" /> {downloading ? t("Saving…") : t("Download PNG")}
           </Button>
           <Button type="button" variant="outline" className="flex-1" onClick={() => window.print()}>
-            <Printer className="size-4" /> Print
+            <Printer className="size-4" /> {t("Print")}
           </Button>
         </div>
       </div>

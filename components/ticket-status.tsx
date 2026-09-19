@@ -1,10 +1,12 @@
 import { cn } from "@/lib/utils"
+import { getT } from "@/lib/i18n/server"
 
 // "open" means the ball is with staff, "waiting" means it's with the user —
 // worded from whichever side is looking.
-export function TicketStatus({ status, forStaff }: { status: string; forStaff: boolean }) {
+export async function TicketStatus({ status, forStaff }: { status: string; forStaff: boolean }) {
+  const t = await getT()
   const label =
-    status === "closed" ? "Closed" : status === "waiting" ? (forStaff ? "Waiting on user" : "Reply from support") : forStaff ? "Needs reply" : "Open"
+    status === "closed" ? t("Closed") : status === "waiting" ? (forStaff ? t("Waiting on user") : t("Reply from support")) : forStaff ? t("Needs reply") : t("Open")
   return (
     <span
       className={cn(

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, Sparkles } from "lucide-react"
+import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export type ReportTrade = {
   symbol: string
@@ -36,7 +37,7 @@ function startOfWeek(d: Date): Date {
   return out
 }
 
-function periodRange(period: Period, cursor: Date): { start: Date; end: Date; label: string } {
+function periodRange(period: Period, cursor: Date, dateLocale: string): { start: Date; end: Date; label: string } {
   if (period === "week") {
     const start = startOfWeek(cursor)
     const end = new Date(start)
@@ -45,13 +46,13 @@ function periodRange(period: Period, cursor: Date): { start: Date; end: Date; la
     endInclusive.setDate(endInclusive.getDate() - 1)
     const label =
       start.getMonth() === endInclusive.getMonth()
-        ? `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString("en-US", { day: "numeric", year: "numeric" })}`
-        : `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+        ? `${start.toLocaleDateString(dateLocale, { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString(dateLocale, { day: "numeric", year: "numeric" })}`
+        : `${start.toLocaleDateString(dateLocale, { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString(dateLocale, { month: "short", day: "numeric", year: "numeric" })}`
     return { start, end, label }
   }
   const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
   const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
-  return { start, end, label: start.toLocaleDateString("en-US", { month: "long", year: "numeric" }) }
+  return { start, end, label: start.toLocaleDateString(dateLocale, { month: "long", year: "numeric" }) }
 }
 
 function shiftCursor(period: Period, cursor: Date, dir: 1 | -1): Date {
@@ -71,10 +72,12 @@ const findingClass = {
 }
 
 export function PeriodInsights({ trades }: { trades: ReportTrade[] }) {
+  const t = useT()
+  const dateLocale = useIntlLocale()
   const [period, setPeriod] = useState<Period>("week")
   const [cursor, setCursor] = useState(() => new Date())
 
-  const { start, end, label } = periodRange(period, cursor)
+  const { start, end, label } = periodRange(period, cursor, dateLocale)
 
   const periodTrades = useMemo(
     () => trades.filter((t) => (t.exitTime ?? t.entryTime) >= start && (t.exitTime ?? t.entryTime) < end),
@@ -103,8 +106,8 @@ export function PeriodInsights({ trades }: { trades: ReportTrade[] }) {
       exitTime: t.exitTime,
       status: t.status,
     }))
-    return generateFindings(asInsightTrades)
-  }, [periodTrades])
+    return generateFindings(asInsightTrades, t)
+  }, [periodTrades, t])
 
   const isCurrentPeriod = (() => {
     const now = new Date()
@@ -117,16 +120,16 @@ export function PeriodInsights({ trades }: { trades: ReportTrade[] }) {
         <Select value={period} onValueChange={(v) => v && setPeriod(v as Period)}>
           <SelectTrigger className="w-24 shrink-0 sm:w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="week">Week</SelectItem>
-            <SelectItem value="month">Month</SelectItem>
+            <SelectItem value="week">{t("Week")}</SelectItem>
+            <SelectItem value="month">{t("Month")}</SelectItem>
           </SelectContent>
         </Select>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor((c) => shiftCursor(period, c, -1))} aria-label="Previous period">
+          <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor((c) => shiftCursor(period, c, -1))} aria-label={t("Previous period")}>
             <ChevronLeft className="size-4" />
           </Button>
           <h2 className="shrink-0 whitespace-nowrap text-center text-sm font-semibold sm:text-base">{label}</h2>
-          <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor((c) => shiftCursor(period, c, 1))} aria-label="Next period">
+          <Button variant="outline" size="icon" className="size-8 shrink-0" onClick={() => setCursor((c) => shiftCursor(period, c, 1))} aria-label={t("Next period")}>
             <ChevronRight className="size-4" />
           </Button>
         </div>
@@ -136,15 +139,15 @@ export function PeriodInsights({ trades }: { trades: ReportTrade[] }) {
           className={cn("h-8 shrink-0", isCurrentPeriod && "bg-accent")}
           onClick={() => setCursor(new Date())}
         >
-          This {period}
+          {period === "week" ? t("This week") : t("This month")}
         </Button>
-        <p className="w-full text-sm text-muted-foreground sm:ml-auto sm:w-auto">
-          {stats.totalTrades} trade{stats.totalTrades === 1 ? "" : "s"} ·{" "}
+        <p className="w-full text-sm text-muted-foreground sm:ms-auto sm:w-auto">
+          {stats.totalTrades === 1 ? t("1 trade") : t("{n} trades", { n: stats.totalTrades })} ·{" "}
           <span className={cn("font-medium", stats.netPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
             {stats.netPnl >= 0 ? "+" : ""}
             {formatCurrency(stats.netPnl)}
           </span>{" "}
-          · {stats.winRate.toFixed(0)}% win rate
+          · {t("{rate}% win rate", { rate: stats.winRate.toFixed(0) })}
         </p>
       </div>
 
@@ -152,12 +155,12 @@ export function PeriodInsights({ trades }: { trades: ReportTrade[] }) {
         <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
           <Sparkles className="size-6 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
-            Log at least 3 closed trades in this {period} to unlock pattern analysis.
+            {period === "week" ? t("Log at least 3 closed trades in this week to unlock pattern analysis.") : t("Log at least 3 closed trades in this month to unlock pattern analysis.")}
           </p>
         </div>
       ) : findings.length === 0 ? (
         <div className="flex h-24 flex-col items-center justify-center gap-1 rounded-md border border-dashed text-center">
-          <p className="text-sm text-muted-foreground">No strong patterns found this {period} — trading looks consistent.</p>
+          <p className="text-sm text-muted-foreground">{period === "week" ? t("No strong patterns found this week — trading looks consistent.") : t("No strong patterns found this month — trading looks consistent.")}</p>
         </div>
       ) : (
         <div className="space-y-2">

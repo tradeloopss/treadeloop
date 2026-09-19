@@ -2,8 +2,10 @@ import { getPlaybooks, getPlaybookSharesForOwner, getSharedWithMePlaybooks } fro
 import { getTrades } from "@/app/actions/trades"
 import { PageHeader } from "@/components/page-header"
 import { PlaybookManager, type PlaybookCard, type SharedPlaybookCard } from "@/components/playbook-manager"
+import { getT } from "@/lib/i18n/server"
 
 export default async function PlaybooksPage() {
+  const t = await getT()
   const [playbooks, trades, shares, sharedWithMe] = await Promise.all([
     getPlaybooks(),
     getTrades(),
@@ -42,7 +44,7 @@ export default async function PlaybooksPage() {
 
   return (
     <div>
-      <PageHeader title="Playbooks" description="Your trading strategies and how each one actually performs" />
+      <PageHeader title={t("Playbooks")} description={t("Your trading strategies and how each one actually performs")} />
       <div className="p-4 sm:p-6">
         <PlaybookManager playbooks={cards} sharedWithMe={sharedCards} />
       </div>

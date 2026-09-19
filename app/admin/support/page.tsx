@@ -35,11 +35,11 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
         <div className="overflow-x-auto rounded-xl border bg-card">
           <table className="w-full min-w-[720px] text-sm">
             <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
+              <tr className="border-b text-start text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Request</th>
                 <th className="px-3 py-3 font-medium">From</th>
                 <th className="px-3 py-3 font-medium">Status</th>
-                <th className="px-3 py-3 text-right font-medium">Messages</th>
+                <th className="px-3 py-3 text-end font-medium">Messages</th>
                 <th className="px-4 py-3 font-medium">Last activity</th>
               </tr>
             </thead>
@@ -53,7 +53,7 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
                     <Link href={`/admin/users/${t.userId}`} className="hover:text-primary">{t.email ?? t.userId}</Link>
                   </td>
                   <td className="px-3 py-3"><TicketStatus status={t.status} forStaff /></td>
-                  <td className="px-3 py-3 text-right tabular-nums">{t.messages}</td>
+                  <td className="px-3 py-3 text-end tabular-nums">{t.messages}</td>
                   <td className="px-4 py-3 text-muted-foreground">{fmtAgo(t.lastMessageAt)}</td>
                 </tr>
               ))}

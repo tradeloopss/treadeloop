@@ -8,8 +8,10 @@ import { SettingsShell } from "@/components/settings-shell"
 import { db } from "@/lib/db"
 import { account } from "@/lib/db/schema"
 import { and, eq } from "drizzle-orm"
+import { getT } from "@/lib/i18n/server"
 
 export default async function SettingsPage() {
+  const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const [accounts, subscription, owner, pro, credential] = await Promise.all([
     getAccounts(),
@@ -23,7 +25,7 @@ export default async function SettingsPage() {
 
   return (
     <div>
-      <PageHeader title="Settings" description="Manage your accounts, subscription, and security" />
+      <PageHeader title={t("Settings")} description={t("Manage your accounts, subscription, and security")} />
       <div className="p-4 sm:p-6">
         <SettingsShell
           accounts={accounts.map((a) => ({

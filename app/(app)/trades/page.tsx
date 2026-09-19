@@ -12,9 +12,11 @@ import { StatCard } from "@/components/stat-card"
 import { BiggestLossAnalysis } from "@/components/biggest-loss-analysis"
 import { AccountCustomizer } from "@/components/account-customizer"
 import { recordRequestTiming } from "@/lib/telemetry"
+import { getT } from "@/lib/i18n/server"
 
 export default async function TradesPage() {
   const startedAt = Date.now()
+  const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const [rows, accounts, activeAccountIds, playbooks, lockedAccountIds] = await Promise.all([
     getTrades(),
@@ -60,14 +62,14 @@ export default async function TradesPage() {
   const bigWin = winAmounts.length ? Math.max(...winAmounts) : 0
   const bigLoss = lossAmounts.length ? Math.min(...lossAmounts) : 0
   const avgLoss = lossAmounts.length ? lossAmounts.reduce((a, b) => a + b, 0) / lossAmounts.length : 0
-  const lossAnalysis = analyzeBiggestLoss(rows, avgLoss)
+  const lossAnalysis = analyzeBiggestLoss(rows, avgLoss, t)
 
   void recordRequestTiming("/trades", Date.now() - startedAt)
   return (
     <div>
       <PageHeader
-        title="Trades"
-        description={`${trades.length} trade${trades.length === 1 ? "" : "s"} logged`}
+        title={t("Trades")}
+        description={trades.length === 1 ? t("1 trade logged") : t("{n} trades logged", { n: trades.length })}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <AccountCustomizer accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} activeAccountIds={activeAccountIds} />
@@ -80,20 +82,20 @@ export default async function TradesPage() {
       />
       <div className="space-y-4 p-4 sm:p-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <StatCard label="Total Trades" value={rows.length} />
-          <StatCard label="Wins" value={wins} tone="gain" />
-          <StatCard label="Losses" value={losses} tone="loss" />
-          <StatCard label="Breakevens" value={breakevens} />
+          <StatCard label={t("Total Trades")} value={rows.length} />
+          <StatCard label={t("Wins")} value={wins} tone="gain" />
+          <StatCard label={t("Losses")} value={losses} tone="loss" />
+          <StatCard label={t("Breakevens")} value={breakevens} />
           <StatCard
-            label="Total P&L"
+            label={t("Total P&L")}
             value={`${totalPnl >= 0 ? "+" : ""}${formatCurrency(totalPnl)}`}
             tone={totalPnl > 0 ? "gain" : totalPnl < 0 ? "loss" : "neutral"}
           />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <StatCard label="Big Win" value={formatCurrency(bigWin)} tone="gain" />
-          <StatCard label="Big Loss" value={formatCurrency(bigLoss)} tone="loss" />
+          <StatCard label={t("Big Win")} value={formatCurrency(bigWin)} tone="gain" />
+          <StatCard label={t("Big Loss")} value={formatCurrency(bigLoss)} tone="loss" />
         </div>
 
         {lossAnalysis && <BiggestLossAnalysis result={lossAnalysis} />}

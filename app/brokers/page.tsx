@@ -1,8 +1,12 @@
 import Link from "next/link"
 import { Zap, Clock, Upload, Check } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
+import { getT } from "@/lib/i18n/server"
 
-export const metadata = { title: "Supported Brokers — TradeLoop" }
+export async function generateMetadata() {
+  const t = await getT()
+  return { title: t("Supported Brokers — TradeLoop") }
+}
 
 // Only what the app actually does today. Anything not yet built is labelled
 // as such rather than listed alongside the working connections.
@@ -32,7 +36,8 @@ const FILE_IMPORT = [
   { name: "MetaTrader 4 / 5", how: "Terminal → Account History → right-click → Save as Report (HTML)" },
 ]
 
-export default function BrokersPage() {
+export default async function BrokersPage() {
+  const t = await getT()
   return (
     <div className="min-h-svh bg-gradient-to-b from-background to-accent/20 px-4 py-16">
       <div className="mx-auto mb-10 flex max-w-4xl items-center justify-center gap-2">
@@ -44,10 +49,9 @@ export default function BrokersPage() {
 
       <div className="mx-auto max-w-4xl">
         <div className="text-center">
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Supported brokers</h1>
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{t("Supported brokers")}</h1>
           <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">
-            Two ways to get your trades in: connect an account and let it sync itself, or upload the file your platform
-            already exports.
+            {t("Two ways to get your trades in: connect an account and let it sync itself, or upload the file your platform already exports.")}
           </p>
         </div>
 
@@ -57,8 +61,8 @@ export default function BrokersPage() {
               <Zap className="size-4" />
             </span>
             <div>
-              <h2 className="font-semibold">Auto connection &amp; auto sync</h2>
-              <p className="text-xs text-muted-foreground">Connect once — new trades appear on their own.</p>
+              <h2 className="font-semibold">{t("Auto connection & auto sync")}</h2>
+              <p className="text-xs text-muted-foreground">{t("Connect once — new trades appear on their own.")}</p>
             </div>
           </div>
 
@@ -68,12 +72,12 @@ export default function BrokersPage() {
                 <div className="flex items-center gap-2">
                   <Check className="size-4 shrink-0 text-[var(--gain)]" />
                   <h3 className="font-semibold">{broker.name}</h3>
-                  <span className="ml-auto rounded-full bg-[var(--gain)]/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--gain)]">
-                    Live
+                  <span className="ms-auto rounded-full bg-[var(--gain)]/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--gain)]">
+                    {t("Live")}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-muted-foreground">{broker.detail}</p>
-                <p className="mt-2 text-xs text-muted-foreground/80">{broker.note}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{t(broker.detail)}</p>
+                <p className="mt-2 text-xs text-muted-foreground/80">{t(broker.note)}</p>
               </div>
             ))}
           </div>
@@ -85,8 +89,8 @@ export default function BrokersPage() {
               <Clock className="size-4" />
             </span>
             <div>
-              <h2 className="font-semibold">Auto connection — coming soon</h2>
-              <p className="text-xs text-muted-foreground">Built and usable today by file import.</p>
+              <h2 className="font-semibold">{t("Auto connection — coming soon")}</h2>
+              <p className="text-xs text-muted-foreground">{t("Built and usable today by file import.")}</p>
             </div>
           </div>
 
@@ -95,11 +99,11 @@ export default function BrokersPage() {
               <div key={broker.name} className="rounded-xl border border-dashed p-4">
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-muted-foreground">{broker.name}</h3>
-                  <span className="ml-auto rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                    Coming soon
+                  <span className="ms-auto rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                    {t("Coming soon")}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-muted-foreground">{broker.detail}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{t(broker.detail)}</p>
               </div>
             ))}
           </div>
@@ -111,8 +115,8 @@ export default function BrokersPage() {
               <Upload className="size-4" />
             </span>
             <div>
-              <h2 className="font-semibold">Every other broker — file import</h2>
-              <p className="text-xs text-muted-foreground">No login or API key needed.</p>
+              <h2 className="font-semibold">{t("Every other broker — file import")}</h2>
+              <p className="text-xs text-muted-foreground">{t("No login or API key needed.")}</p>
             </div>
           </div>
 
@@ -120,18 +124,17 @@ export default function BrokersPage() {
             {FILE_IMPORT.map((broker) => (
               <li key={broker.name} className="flex flex-wrap items-center justify-between gap-2 p-4">
                 <span className="font-medium">{broker.name}</span>
-                <span className="text-sm text-muted-foreground">{broker.how}</span>
+                <span className="text-sm text-muted-foreground">{t(broker.how)}</span>
               </li>
             ))}
           </ul>
 
           <p className="mt-4 text-sm text-muted-foreground">
-            These are the export formats TradeLoop reads today. If your broker can export to one of them — most can
-            export a Tradovate-style or NinjaTrader-style CSV — your trades will import. If yours can&apos;t, tell us at{" "}
+            {t("These are the export formats TradeLoop reads today. If your broker can export to one of them — most can export a Tradovate-style or NinjaTrader-style CSV — your trades will import. If yours can't, tell us at")}{" "}
             <a href="mailto:support@tradeloop.pro" className="font-medium text-primary hover:underline">
               support@tradeloop.pro
             </a>{" "}
-            and we&apos;ll look at adding it.
+            {t("and we'll look at adding it.")}
           </p>
         </section>
 
@@ -140,7 +143,7 @@ export default function BrokersPage() {
             href="/sign-up"
             className="inline-flex h-11 items-center rounded-xl bg-primary px-6 font-semibold text-primary-foreground hover:bg-primary/90"
           >
-            Start your free trial
+            {t("Start your free trial")}
           </Link>
         </div>
       </div>

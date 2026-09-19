@@ -9,6 +9,7 @@ import { authClient } from "@/lib/auth-client"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useT } from "@/components/locale-provider"
 
 type Step = { kind: "idle" } | { kind: "scan"; uri: string; backupCodes: string[] } | { kind: "codes"; backupCodes: string[] }
 
@@ -16,6 +17,7 @@ type Step = { kind: "idle" } | { kind: "scan"; uri: string; backupCodes: string[
 // save backup codes), turn it off, or get fresh backup codes.
 export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; hasPassword: boolean }) {
   const router = useRouter()
+  const t = useT()
   const [step, setStep] = useState<Step>({ kind: "idle" })
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
@@ -28,12 +30,12 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
     setBusy(true)
     const { data, error } = await fn()
     setBusy(false)
-    if (error) toast.error(error.message ?? "That didn't work.")
+    if (error) toast.error(error.message ? t(error.message) : t("That didn't work."))
     return error ? null : data
   }
 
   const passwordField = hasPassword && (
-    <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your current password" className="max-w-xs" required />
+    <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("Your current password")} className="max-w-xs" required />
   )
 
   return (
@@ -41,11 +43,11 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
       <div className="flex items-start gap-3">
         {enabled ? <ShieldCheck className="mt-0.5 size-5 text-[var(--gain)]" /> : <ShieldOff className="mt-0.5 size-5 text-muted-foreground" />}
         <div>
-          <h2 className="font-medium">Two-step verification</h2>
+          <h2 className="font-medium">{t("Two-step verification")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {enabled
-              ? "On. Signing in with your password also asks for a code from your authenticator app."
-              : "Add a code from an authenticator app (Google Authenticator, 1Password, Authy…) to your password sign-in."}
+              ? t("On. Signing in with your password also asks for a code from your authenticator app.")
+              : t("Add a code from an authenticator app (Google Authenticator, 1Password, Authy…) to your password sign-in.")}
           </p>
         </div>
       </div>
@@ -58,7 +60,7 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
             if (enabled) {
               const ok = await run(() => authClient.twoFactor.disable(pw))
               if (ok) {
-                toast.success("Two-step verification is off.")
+                toast.success(t("Two-step verification is off."))
                 setPassword("")
                 router.refresh()
               }
@@ -70,7 +72,7 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
         >
           {passwordField}
           <Button type="submit" variant={enabled ? "outline" : "default"} disabled={busy}>
-            {enabled ? "Turn off" : "Set up"}
+            {enabled ? t("Turn off") : t("Set up")}
           </Button>
           {enabled && (
             <Button
@@ -82,7 +84,7 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
                 if (data) setStep({ kind: "codes", backupCodes: data.backupCodes })
               }}
             >
-              New backup codes
+              {t("New backup codes")}
             </Button>
           )}
         </form>
@@ -95,30 +97,30 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
             e.preventDefault()
             const ok = await run(() => authClient.twoFactor.verifyTotp({ code: code.replace(/\s/g, "") }))
             if (ok) {
-              toast.success("Two-step verification is on.")
+              toast.success(t("Two-step verification is on."))
               setStep({ kind: "codes", backupCodes: step.backupCodes })
               setCode("")
               router.refresh()
             }
           }}
         >
-          <p className="text-sm">1. Scan this with your authenticator app.</p>
+          <p className="text-sm">{t("1. Scan this with your authenticator app.")}</p>
           <div className="inline-block rounded-lg bg-white p-3">
             <QRCodeSVG value={step.uri} size={168} />
           </div>
           {secret && (
             <p className="text-xs text-muted-foreground">
-              Can&apos;t scan? Enter this key instead: <span className="select-all font-mono text-foreground">{secret}</span>
+              {t("Can't scan? Enter this key instead:")} <span className="select-all font-mono text-foreground">{secret}</span>
             </p>
           )}
-          <p className="text-sm">2. Enter the 6-digit code it shows.</p>
+          <p className="text-sm">{t("2. Enter the 6-digit code it shows.")}</p>
           <div className="flex gap-2">
             <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" className="max-w-40" required />
             <Button type="submit" disabled={busy}>
-              Turn on
+              {t("Turn on")}
             </Button>
             <Button type="button" variant="ghost" onClick={() => setStep({ kind: "idle" })}>
-              Cancel
+              {t("Cancel")}
             </Button>
           </div>
         </form>
@@ -127,7 +129,7 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
       {step.kind === "codes" && (
         <div className="mt-4 space-y-3">
           <p className="text-sm">
-            Save these backup codes somewhere safe. Each one signs you in once if you lose your phone. They won&apos;t be shown again.
+            {t("Save these backup codes somewhere safe. Each one signs you in once if you lose your phone. They won't be shown again.")}
           </p>
           <div className="grid grid-cols-2 gap-1.5 rounded-lg bg-muted p-3 font-mono text-sm">
             {step.backupCodes.map((c) => (
@@ -138,10 +140,10 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
             <Button
               variant="outline"
               onClick={() => {
-                navigator.clipboard.writeText(step.backupCodes.join("\n")).then(() => toast.success("Copied."))
+                navigator.clipboard.writeText(step.backupCodes.join("\n")).then(() => toast.success(t("Copied.")))
               }}
             >
-              Copy codes
+              {t("Copy codes")}
             </Button>
             <Button
               onClick={() => {
@@ -149,7 +151,7 @@ export function TwoFactorPanel({ enabled, hasPassword }: { enabled: boolean; has
                 setPassword("")
               }}
             >
-              I&apos;ve saved them
+              {t("I've saved them")}
             </Button>
           </div>
         </div>

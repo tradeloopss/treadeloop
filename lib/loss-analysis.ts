@@ -1,6 +1,9 @@
 // Rule-based coaching for the single largest losing trade — deterministic,
 // derived only from what the trade itself recorded (mistakes, rating, stop,
-// size relative to average), never fabricated advice.
+// size relative to average), never fabricated advice. The sentences go
+// through `t` so they read in the trader's language.
+import type { TFunction } from "@/lib/i18n"
+
 export interface LossAnalysisTrade {
   id: number
   symbol: string
@@ -35,7 +38,7 @@ const MISTAKE_ADVICE: [pattern: string, advice: string][] = [
   ["impulsive", "Slow down before entering — an impulsive entry skips the checklist that normally keeps losses small."],
 ]
 
-export function analyzeBiggestLoss(trades: LossAnalysisTrade[], avgLoss: number): LossAnalysisResult | null {
+export function analyzeBiggestLoss(trades: LossAnalysisTrade[], avgLoss: number, t: TFunction = fill): LossAnalysisResult | null {
   const closed = trades.filter((t) => t.status === "closed" && Number(t.pnl) < 0)
   if (closed.length === 0) return null
 
@@ -46,29 +49,33 @@ export function analyzeBiggestLoss(trades: LossAnalysisTrade[], avgLoss: number)
   for (const m of mistakes) {
     const lower = m.toLowerCase()
     const match = MISTAKE_ADVICE.find(([pattern]) => lower.includes(pattern))
-    if (match) tips.push(match[1])
+    if (match) tips.push(t(match[1]))
   }
 
   if (trade.stopLoss == null) {
-    tips.push("No stop-loss was recorded for this trade — defining risk before entry keeps a bad trade from becoming your worst one.")
+    tips.push(t("No stop-loss was recorded for this trade — defining risk before entry keeps a bad trade from becoming your worst one."))
   }
 
   if (trade.rating != null && trade.rating <= 2) {
-    tips.push(`You rated your own execution ${trade.rating}/5 on this trade — worth revisiting what broke down in the moment.`)
+    tips.push(t("You rated your own execution {rating}/5 on this trade — worth revisiting what broke down in the moment.", { rating: trade.rating }))
   }
 
   const pnl = Number(trade.pnl)
   if (avgLoss < 0 && Math.abs(pnl) > Math.abs(avgLoss) * 2) {
     tips.push(
-      `This loss was ${(Math.abs(pnl) / Math.abs(avgLoss)).toFixed(1)}x your average loss — check whether size or stop distance was out of line with the rest of your trades.`,
+      t("This loss was {x}x your average loss — check whether size or stop distance was out of line with the rest of your trades.", { x: (Math.abs(pnl) / Math.abs(avgLoss)).toFixed(1) }),
     )
   }
 
   if (tips.length === 0) {
     tips.push(
-      "No mistakes or notes were logged on this trade — add a quick note next time a big loss happens so there's something concrete to learn from.",
+      t("No mistakes or notes were logged on this trade — add a quick note next time a big loss happens so there's something concrete to learn from."),
     )
   }
 
   return { trade, tips }
+}
+
+function fill(key: string, vars?: Record<string, string | number>): string {
+  return vars ? key.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match)) : key
 }
