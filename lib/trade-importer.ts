@@ -13,6 +13,19 @@ import { regenerateJournalForDay } from "@/app/actions/trades"
 
 export type ImportResult = { source: string; imported: number; duplicates: number; skippedRows: number; totalRows: number }
 
+// The name TradingView fills are grouped under. With no account chosen it's
+// the one an import would create anyway, so both cases agree.
+export const TRADINGVIEW_DEFAULT_ACCOUNT = "TradingView Paper"
+
+async function tradingViewAccountName(userId: string, fixedAccountId: number | null): Promise<string> {
+  if (fixedAccountId == null) return TRADINGVIEW_DEFAULT_ACCOUNT
+  const [account] = await db
+    .select({ name: tradingAccounts.name })
+    .from(tradingAccounts)
+    .where(and(eq(tradingAccounts.id, fixedAccountId), eq(tradingAccounts.userId, userId)))
+  return account?.name ?? TRADINGVIEW_DEFAULT_ACCOUNT
+}
+
 // Which parser a file belongs to, without parsing it — for logging failures.
 export function detectSource(csvText: string): string | null {
   const headerRow = Papa.parse<string[]>(csvText, { preview: 1 }).data[0] ?? []
@@ -65,7 +78,10 @@ export async function importCsvText(userId: string, csvText: string, fixedAccoun
     source = "NinjaTrader"
     market = "futures"
   } else if (isTradingViewCsv(headerRow)) {
-    const parsed = parseTradingViewCsv(csvText)
+    // Keyed on the account the rows are going into, so the same history
+    // pasted (app/actions/tradingview.ts) and uploaded here produces the
+    // same trade ids and dedupes across both routes.
+    const parsed = parseTradingViewCsv(csvText, await tradingViewAccountName(userId, fixedAccountId))
     imported = reconstructFills(parsed.fills, "tradingview-csv")
     totalRows = parsed.totalRows
     skippedRows = parsed.skippedRows

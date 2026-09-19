@@ -87,15 +87,15 @@ export default async function AddTradePage() {
             <p className="max-w-lg text-sm text-muted-foreground">
               {t("Connect your personal broker account — trades sync automatically, no file exports needed.")}
             </p>
+            {/* The TradingView card carries the paste route, which every plan
+                can use, so it shows whether or not they're on Pro. */}
+            <TradingViewConnect connections={tvConnections} accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} isPro={pro} />
             {pro ? (
-              <>
-                <TradingViewConnect connections={tvConnections} />
-                <MetaTraderConnect connections={mtConnections} />
-              </>
+              <MetaTraderConnect connections={mtConnections} />
             ) : (
               <LiveSyncUpgradeBanner
-                title={t("TradingView & MetaTrader Connection")}
-                description={t("Connect TradingView or your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")}
+                title={t("MetaTrader Connection")}
+                description={t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")}
               />
             )}
           </TabsContent>

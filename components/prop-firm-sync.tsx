@@ -91,15 +91,16 @@ export function PropFirmSync({
 
   return (
     <div className="space-y-5">
-      {!isPro && platform !== "other" && (
+      {/* TradingView is left out: its card's paste route works on every
+          plan, so an upgrade banner over it would be selling something the
+          trader doesn't need. */}
+      {!isPro && platform !== "other" && platform !== "tradingview" && (
         <LiveSyncUpgradeBanner
-          title={platform === "rithmic" ? t("Rithmic Connection") : platform === "tradingview" ? t("TradingView Connection") : t("MetaTrader Connection")}
+          title={platform === "rithmic" ? t("Rithmic Connection") : t("MetaTrader Connection")}
           description={
             platform === "rithmic"
               ? t("Connect your prop firm and every trade lands in your journal automatically — no CSV needed. Rithmic sync into the journal is included with Pro.")
-              : platform === "tradingview"
-                ? t("Point a TradingView alert at your journal and every fill it reports is logged as it happens. Included with Pro.")
-                : t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")
+              : t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")
           }
         />
       )}
@@ -130,7 +131,7 @@ export function PropFirmSync({
             logoClassName="bg-[#2962ff]"
             activeClassName="border-[#2962ff] bg-[#2962ff]/10 text-[#2962ff]"
             name="TradingView"
-            description={t("Alert webhooks — paper and live fills as they happen")}
+            description={t("Paste your paper trades, or auto-sync on a paid TradingView plan")}
           />
           <PlatformCard
             active={platform === "metatrader"}
@@ -155,7 +156,7 @@ export function PropFirmSync({
       </Card>
 
       {platform === "rithmic" && isPro && <RithmicConnect connections={rithmicConnections} />}
-      {platform === "tradingview" && isPro && <TradingViewConnect connections={tradingviewConnections} />}
+      {platform === "tradingview" && <TradingViewConnect connections={tradingviewConnections} accounts={accounts} isPro={isPro} />}
       {platform === "metatrader" && isPro && <MetaTraderConnect connections={mtConnections} />}
       {platform === "other" && <BrokerImport accounts={accounts} />}
     </div>

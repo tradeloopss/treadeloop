@@ -5,14 +5,17 @@ import { useState, useTransition } from "react"
 import {
   connectTradingView,
   disconnectTradingView,
+  importTradingViewPaste,
   regenerateTradingViewWebhook,
   type TradingViewConnectionView,
 } from "@/app/actions/tradingview"
 import { tradingviewAlertTemplate } from "@/lib/tradingview-alert"
+import { tradingviewExportSnippet } from "@/lib/tradingview-export-snippet"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -30,7 +33,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Copy, Unplug, Wifi, RefreshCw, Info, AlertCircle } from "lucide-react"
+import { Plus, Copy, Unplug, Wifi, RefreshCw, Info, AlertCircle, ClipboardPaste, Lock } from "lucide-react"
 import { toast } from "sonner"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
@@ -203,54 +206,171 @@ function ConnectionRow({ connection }: { connection: TradingViewConnectionView }
   )
 }
 
-export function TradingViewConnect({ connections }: { connections: TradingViewConnectionView[] }) {
+
+// Bringing trades in on a free TradingView plan. Every automatic route is
+// paid — webhooks and strategy alerts need Essential, and so does the
+// Trading Panel's own Export data… button — so what's left is the rows the
+// trader can see. They copy them and paste them here.
+function PasteImport({ accounts }: { accounts: { id: number; name: string }[] }) {
+  const t = useT()
+  const [pasted, setPasted] = useState("")
+  const [accountId, setAccountId] = useState<string>("auto")
+  const [pending, startTransition] = useTransition()
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    startTransition(async () => {
+      try {
+        const result = await importTradingViewPaste(pasted, accountId === "auto" ? null : Number(accountId))
+        const into = t("into {account}", { account: result.accountName })
+        if (result.imported > 0) {
+          toast.success(
+            `${result.imported === 1 ? t("1 trade imported") : t("{n} trades imported", { n: result.imported })} ${into}`,
+          )
+        } else {
+          toast.success(t("Nothing new — those trades are already in your journal"))
+        }
+        if (result.skippedRows > 0) {
+          toast.message(
+            result.skippedRows === 1 ? t("1 row skipped (not a fill)") : t("{n} rows skipped (not fills)", { n: result.skippedRows }),
+          )
+        }
+        setPasted("")
+      } catch (err) {
+        toast.error(err instanceof Error ? t(err.message) : t("Could not import those rows"))
+      }
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium">{t("Paste your trades")}</h3>
+        <span className="rounded-full border border-[var(--gain)]/30 bg-[var(--gain)]/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[var(--gain)] uppercase">
+          {t("Works on the free plan")}
+        </span>
+      </div>
+      <ol className="list-decimal space-y-1 ps-4 text-xs text-muted-foreground">
+        <li>{t("In TradingView, open the Trading Panel and its History tab, then the Filled list.")}</li>
+        <li>{t("Scroll it so every trade you want is on screen.")}</li>
+        <li>{t("Open your browser console (F12 → Console), paste the line below and press Enter — it only reads that table and copies it to your clipboard.")}</li>
+        <li>{t("Paste the result in the box below.")}</li>
+      </ol>
+      <CopyRow label={t("Copy-to-clipboard line")} value={tradingviewExportSnippet()} />
+      <form onSubmit={onSubmit} className="space-y-2">
+        <Textarea
+          dir="ltr"
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+          rows={5}
+          className="font-mono text-xs"
+          placeholder={t("Paste the copied rows here — keep the column headings")}
+        />
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-48 flex-1 space-y-1.5">
+            <Label className="text-xs text-muted-foreground">{t("Import into")}</Label>
+            {/* Base UI reads the label to display from `items`; without it
+                the trigger shows the raw value. */}
+            <Select
+              value={accountId}
+              onValueChange={(v) => v && setAccountId(v)}
+              items={{ auto: t("TradingView account (created if needed)"), ...Object.fromEntries(accounts.map((a) => [String(a.id), a.name])) }}
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t("TradingView account (created if needed)")}</SelectItem>
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button type="submit" disabled={pending || pasted.trim().length < 20}>
+            <ClipboardPaste className="size-4" /> {pending ? t("Importing…") : t("Import trades")}
+          </Button>
+        </div>
+      </form>
+      <p className="text-xs text-muted-foreground">
+        {t("Pasting the same range twice is safe — trades already journaled are skipped. A position still open is journaled once its closing fill is in the rows too.")}
+      </p>
+    </div>
+  )
+}
+
+export function TradingViewConnect({
+  connections,
+  accounts = [],
+  isPro = true,
+}: {
+  connections: TradingViewConnectionView[]
+  accounts?: { id: number; name: string }[]
+  isPro?: boolean
+}) {
   const t = useT()
   const [open, setOpen] = useState(false)
 
   return (
-    <Card className="max-w-2xl space-y-4 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-medium">{t("TradingView (paper & live)")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("TradingView has no account API, so its alerts do the syncing: point one at the URL below and every fill it reports is journaled as it happens.")}
-          </p>
-        </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> {t("Connect")}</Button>} />
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t("Connect TradingView")}</DialogTitle>
-              <DialogDescription>{t("We'll create a webhook URL for this paper account. Nothing is sent to TradingView — you paste the URL into an alert yourself.")}</DialogDescription>
-            </DialogHeader>
-            <ConnectForm onDone={() => setOpen(false)} />
-          </DialogContent>
-        </Dialog>
+    <Card className="max-w-2xl space-y-5 p-5">
+      <div>
+        <h2 className="font-medium">{t("TradingView")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("TradingView has no account API a third party can read, and it keeps every automatic route behind a paid plan. So there are two ways in: paste your trades, which works on any plan, or point a TradingView alert here if you're on Essential or above.")}
+        </p>
       </div>
 
-      {connections.length === 0 ? (
-        <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
-          <Wifi className="size-6 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">{t("No TradingView webhooks yet.")}</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} />
-          ))}
-        </div>
-      )}
+      <PasteImport accounts={accounts} />
 
-      <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">{t("Setting up the alert in TradingView")}</p>
-        <ol className="list-decimal space-y-1 ps-4">
-          <li>{t("Open your strategy on a chart, then Add alert on <strategy> — an alert made from the chart instead of the strategy can't report fills.")}</li>
-          <li>{t("Under Settings, set the trigger to Order fills only.")}</li>
-          <li>{t("Paste the alert message above into the Message box, exactly as it is.")}</li>
-          <li>{t("On the Notifications tab, tick Webhook URL and paste the webhook URL above.")}</li>
-          <li>{t("Save. Every fill from then on lands in this account.")}</li>
-        </ol>
-        <p>{t("TradingView sends webhooks on its Essential plan and above, and asks for two-factor authentication on your TradingView account. Trades you take by hand in the paper account don't fire alerts — export them from the Trading Panel and upload the file under File Upload instead.")}</p>
+      <div className="space-y-3 border-t pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-medium">{t("Automatic sync")}</h3>
+            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--chart-4)]/40 bg-[var(--chart-4)]/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[var(--chart-4)] uppercase">
+              <Lock className="size-2.5" /> {t("Needs TradingView Essential")}
+            </span>
+          </div>
+          {isPro && (
+            <Dialog open={open} onOpenChange={setOpen}>
+              <DialogTrigger render={<Button size="sm" variant="outline"><Plus className="size-4" /> {t("Connect")}</Button>} />
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{t("Connect TradingView")}</DialogTitle>
+                  <DialogDescription>{t("We'll create a webhook URL for this paper account. Nothing is sent to TradingView — you paste the URL into an alert yourself.")}</DialogDescription>
+                </DialogHeader>
+                <ConnectForm onDone={() => setOpen(false)} />
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {t("On TradingView's Essential plan and above, an alert on your strategy can post every fill here as it happens. The free plan allows neither webhooks nor strategy alerts, so paste is the route there.")}
+        </p>
+
+        {connections.length === 0 ? (
+          <div className="flex h-24 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
+            <Wifi className="size-5 text-muted-foreground/50" />
+            <p className="text-sm text-muted-foreground">{t("No TradingView webhooks yet.")}</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {connections.map((c) => (
+              <ConnectionRow key={c.id} connection={c} />
+            ))}
+          </div>
+        )}
+
+        {connections.length > 0 && (
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">{t("Setting up the alert in TradingView")}</p>
+            <ol className="list-decimal space-y-1 ps-4">
+              <li>{t("Open your strategy on a chart, then Add alert on <strategy> — an alert made from the chart instead of the strategy can't report fills.")}</li>
+              <li>{t("Under Settings, set the trigger to Order fills only.")}</li>
+              <li>{t("Paste the alert message above into the Message box, exactly as it is.")}</li>
+              <li>{t("On the Notifications tab, tick Webhook URL and paste the webhook URL above.")}</li>
+              <li>{t("Save. Every fill from then on lands in this account.")}</li>
+            </ol>
+            <p>{t("Webhook alerts also ask for two-factor authentication on your TradingView account.")}</p>
+          </div>
+        )}
       </div>
     </Card>
   )

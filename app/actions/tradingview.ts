@@ -2,13 +2,18 @@
 
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { tradingviewConnections, tradingviewFills, tradingAccounts } from "@/lib/db/schema"
-import { and, eq } from "drizzle-orm"
+import { tradingviewConnections, tradingviewFills, tradingAccounts, trades } from "@/lib/db/schema"
+import { and, eq, inArray, isNotNull } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { randomBytes } from "node:crypto"
 import { requirePro } from "@/lib/subscription"
 import { isPro } from "@/lib/subscription"
+import { parseTradingViewCsv } from "@/lib/tradingview-csv"
+import { reconstructTrades as reconstructFills } from "@/lib/fill-reconstruction"
+import { TRADINGVIEW_DEFAULT_ACCOUNT } from "@/lib/trade-importer"
+import { computePnl, contractMultiplierForSymbol, type Market } from "@/lib/calc"
+import { regenerateJournalForDay } from "@/app/actions/trades"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -149,4 +154,144 @@ export async function disconnectTradingView(connectionId: number): Promise<void>
   await db.delete(tradingviewConnections).where(eq(tradingviewConnections.id, connection.id))
   revalidatePath("/add-trade")
   revalidatePath("/settings")
+}
+
+export interface PasteImportResult {
+  imported: number
+  duplicates: number
+  skippedRows: number
+  accountName: string
+}
+
+// Imports the paper-trading history a trader copied out of TradingView.
+//
+// This is the route that works on a free TradingView plan, where every
+// automatic one is shut: webhooks and strategy alerts are paid, and so is
+// the Trading Panel's own Export data… button. What's left is the rows on
+// screen, so they copy them (lib/tradingview-export-snippet.ts) and paste
+// them here. Tab-separated from the clipboard or comma-separated from a paid
+// export both parse the same way.
+//
+// Re-pasting an overlapping range is safe: fills rebuild into the same
+// trades with the same ids, and ones already journaled are skipped.
+export async function importTradingViewPaste(pasted: string, accountId: number | null): Promise<PasteImportResult> {
+  const userId = await getUserId()
+
+  const text = pasted.trim()
+  if (text.length < 20) throw new Error("Paste the rows copied from TradingView's History tab first.")
+
+  const account = accountId != null ? await ownedAccount(userId, accountId) : await defaultTradingViewAccount(userId)
+  const parsed = parseTradingViewCsv(text, account.name)
+  if (parsed.fills.length === 0) {
+    throw new Error(
+      "No filled trades in what was pasted — copy the History tab's Filled rows, with their column headings included.",
+    )
+  }
+
+  const imported = reconstructFills(parsed.fills, "tradingview-csv")
+  if (imported.length === 0) {
+    throw new Error("Those rows only open positions — a trade is journaled once its closing fill is in the history too.")
+  }
+
+  const existing = await db
+    .select({ externalId: trades.externalId })
+    .from(trades)
+    .where(
+      and(
+        eq(trades.userId, userId),
+        isNotNull(trades.externalId),
+        inArray(
+          trades.externalId,
+          imported.map((t) => t.externalId),
+        ),
+      ),
+    )
+  const seen = new Set(existing.map((r) => r.externalId))
+  const toImport = imported.filter((t) => !seen.has(t.externalId))
+
+  const market = (account.market ?? "stocks") as Market
+  const affectedDays = new Set<string>()
+  for (const t of toImport) {
+    const contractMultiplier = market === "futures" || market === "future_option" ? contractMultiplierForSymbol(t.symbol) : 1
+    const pnl = t.pnl ?? computePnl({ side: t.side, quantity: t.quantity, entryPrice: t.entryPrice, exitPrice: t.exitPrice, fees: t.fees, contractMultiplier })
+    await db.insert(trades).values({
+      userId,
+      accountId: account.id,
+      symbol: t.symbol,
+      market,
+      side: t.side,
+      status: "closed",
+      quantity: String(t.quantity),
+      entryPrice: String(t.entryPrice),
+      exitPrice: String(t.exitPrice),
+      fees: String(t.fees),
+      pnl: String(pnl),
+      contractMultiplier: String(contractMultiplier),
+      entryTime: new Date(t.entryTime),
+      exitTime: new Date(t.exitTime),
+      externalId: t.externalId,
+    })
+    affectedDays.add(t.exitTime.slice(0, 10))
+  }
+
+  for (const day of affectedDays) {
+    await regenerateJournalForDay(userId, day)
+  }
+
+  revalidatePath("/add-trade")
+  revalidatePath("/trades")
+  revalidatePath("/dashboard")
+  revalidatePath("/journal")
+
+  return {
+    imported: toImport.length,
+    duplicates: imported.length - toImport.length,
+    skippedRows: parsed.skippedRows,
+    accountName: account.name,
+  }
+}
+
+// The account pasted rows land in, and the market that decides their
+// contract multiplier. A TradingView connection's own account is preferred
+// so the webhook and the paste agree; otherwise the account an upload would
+// have created.
+async function defaultTradingViewAccount(userId: string): Promise<{ id: number; name: string; market: string | null }> {
+  const [connected] = await db
+    .select({ id: tradingAccounts.id, name: tradingAccounts.name, market: tradingviewConnections.market })
+    .from(tradingviewConnections)
+    .innerJoin(tradingAccounts, eq(tradingAccounts.id, tradingviewConnections.accountId))
+    .where(eq(tradingviewConnections.userId, userId))
+  if (connected) return connected
+
+  const [existing] = await db
+    .select({ id: tradingAccounts.id, name: tradingAccounts.name })
+    .from(tradingAccounts)
+    .where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.name, TRADINGVIEW_DEFAULT_ACCOUNT)))
+  if (existing) return { ...existing, market: null }
+
+  if (!(await isPro(userId))) {
+    const owned = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(eq(tradingAccounts.userId, userId))
+    if (owned.length >= 1) {
+      throw new Error("You've reached the maximum number of accounts for your plan (1) — upgrade to Pro at /pricing to connect more.")
+    }
+  }
+
+  const [created] = await db
+    .insert(tradingAccounts)
+    .values({ userId, name: TRADINGVIEW_DEFAULT_ACCOUNT, broker: "TradingView", currency: "USD" })
+    .returning({ id: tradingAccounts.id, name: tradingAccounts.name })
+  return { ...created, market: null }
+}
+
+async function ownedAccount(userId: string, accountId: number): Promise<{ id: number; name: string; market: string | null }> {
+  const [account] = await db
+    .select({ id: tradingAccounts.id, name: tradingAccounts.name })
+    .from(tradingAccounts)
+    .where(and(eq(tradingAccounts.id, accountId), eq(tradingAccounts.userId, userId)))
+  if (!account) throw new Error("Account not found")
+  const [connection] = await db
+    .select({ market: tradingviewConnections.market })
+    .from(tradingviewConnections)
+    .where(and(eq(tradingviewConnections.userId, userId), eq(tradingviewConnections.accountId, accountId)))
+  return { ...account, market: connection?.market ?? null }
 }

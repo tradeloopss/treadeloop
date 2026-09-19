@@ -1,14 +1,19 @@
 import Papa from "papaparse"
 import type { ParsedFill } from "@/lib/fill-reconstruction"
 
-// Parses the CSV TradingView's Trading Panel exports (Export data… → Order
-// history / History → Filled). Which columns are in the file is chosen by
-// the trader in that dialog's column picker, so nothing here assumes a fixed
-// header row: every field is looked up across the names TradingView and the
-// journaling guides for it use, and a file missing something essential is
-// reported rather than half-imported.
+// Parses TradingView's paper-trading history, however the trader got it out.
 //
-// This covers the paper trades taken by hand in TradingView, which fire no
+// Two shapes arrive here and both are tabular with a header row, so both go
+// through the same reader: the CSV a paid plan's Export data… button
+// produces, and the tab-separated rows a free plan has to copy off the
+// screen (lib/tradingview-export-snippet.ts) — Papa detects which delimiter
+// it's looking at. Either way the columns present depend on what the trader
+// had visible in TradingView's own column picker, so nothing here assumes a
+// fixed header row: every field is looked up across the names TradingView
+// and the journaling guides for it use, and a row missing something
+// essential is counted as skipped rather than half-imported.
+//
+// This is also the only route for paper trades taken by hand, which fire no
 // alert and so never reach the webhook (app/api/tradingview/[token]).
 
 export type ParseResult = {
