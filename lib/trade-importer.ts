@@ -5,6 +5,8 @@ import { importEvents, trades, tradingAccounts } from "@/lib/db/schema"
 import { isTradovateCsv, parseTradovateOrdersCsv, reconstructTrades } from "@/lib/tradovate-csv"
 import { isNinjaTraderCsv, parseNinjaTraderTradesCsv } from "@/lib/ninjatrader-csv"
 import { isMetaTraderReport, parseMetaTraderReport } from "@/lib/metatrader-report"
+import { isTradingViewCsv, parseTradingViewCsv } from "@/lib/tradingview-csv"
+import { reconstructTrades as reconstructFills } from "@/lib/fill-reconstruction"
 import type { ImportedTrade } from "@/lib/trade-import"
 import { computePnl, contractMultiplierForSymbol } from "@/lib/calc"
 import { regenerateJournalForDay } from "@/app/actions/trades"
@@ -16,6 +18,7 @@ export function detectSource(csvText: string): string | null {
   const headerRow = Papa.parse<string[]>(csvText, { preview: 1 }).data[0] ?? []
   if (isTradovateCsv(headerRow)) return "Tradovate"
   if (isNinjaTraderCsv(headerRow)) return "NinjaTrader"
+  if (isTradingViewCsv(headerRow)) return "TradingView"
   if (isMetaTraderReport(csvText)) return "MetaTrader"
   return null
 }
@@ -61,6 +64,17 @@ export async function importCsvText(userId: string, csvText: string, fixedAccoun
     skippedRows = parsed.skippedRows
     source = "NinjaTrader"
     market = "futures"
+  } else if (isTradingViewCsv(headerRow)) {
+    const parsed = parseTradingViewCsv(csvText)
+    imported = reconstructFills(parsed.fills, "tradingview-csv")
+    totalRows = parsed.totalRows
+    skippedRows = parsed.skippedRows
+    source = "TradingView"
+    // A TradingView export carries no market column, so the symbol decides:
+    // a futures root gets its contract multiplier, anything else counts one
+    // unit per contract (importCsvText's own market is only the filing
+    // label, and futures is the sane default for a symbol we recognise).
+    market = "futures"
   } else if (isMetaTraderReport(csvText)) {
     const parsed = parseMetaTraderReport(csvText)
     if (!parsed.format) {
@@ -73,7 +87,7 @@ export async function importCsvText(userId: string, csvText: string, fixedAccoun
     market = "forex"
   } else {
     throw new Error(
-      "Unrecognized file — export from Tradovate's Reports → Orders, NinjaTrader's Trade Performance → Trades tab, or MetaTrader's Account History → Save as Report"
+      "Unrecognized file — export from Tradovate's Reports → Orders, NinjaTrader's Trade Performance → Trades tab, TradingView's Trading Panel → Export data, or MetaTrader's Account History → Save as Report"
     )
   }
 

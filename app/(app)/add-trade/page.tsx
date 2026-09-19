@@ -5,9 +5,11 @@ import { getAccounts, getManualEntryLockedAccountIds } from "@/app/actions/accou
 import { getPlaybooks } from "@/app/actions/playbooks"
 import { getMetaTraderConnections } from "@/app/actions/metatrader"
 import { getRithmicConnections } from "@/app/actions/rithmic"
+import { getTradingViewConnections } from "@/app/actions/tradingview"
 import { PageHeader } from "@/components/page-header"
 import { BrokerImport } from "@/components/broker-import"
 import { MetaTraderConnect } from "@/components/metatrader-connect"
+import { TradingViewConnect } from "@/components/tradingview-connect"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
 import { PropFirmSync } from "@/components/prop-firm-sync"
 import { ManualTradeForm } from "@/components/manual-trade-form"
@@ -19,11 +21,12 @@ import { getT } from "@/lib/i18n/server"
 export default async function AddTradePage() {
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, playbooks, mtConnections, rithmicConnections, pro, lockedAccountIds] = await Promise.all([
+  const [accounts, playbooks, mtConnections, rithmicConnections, tvConnections, pro, lockedAccountIds] = await Promise.all([
     getAccounts(),
     getPlaybooks(),
     getMetaTraderConnections(),
     getRithmicConnections(),
+    getTradingViewConnections(),
     session?.user ? isPro(session.user.id) : Promise.resolve(false),
     getManualEntryLockedAccountIds(),
   ])
@@ -85,11 +88,14 @@ export default async function AddTradePage() {
               {t("Connect your personal broker account — trades sync automatically, no file exports needed.")}
             </p>
             {pro ? (
-              <MetaTraderConnect connections={mtConnections} />
+              <>
+                <TradingViewConnect connections={tvConnections} />
+                <MetaTraderConnect connections={mtConnections} />
+              </>
             ) : (
               <LiveSyncUpgradeBanner
-                title={t("MetaTrader Connection")}
-                description={t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")}
+                title={t("TradingView & MetaTrader Connection")}
+                description={t("Connect TradingView or your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")}
               />
             )}
           </TabsContent>
@@ -99,6 +105,7 @@ export default async function AddTradePage() {
               accounts={accounts.map((a) => ({ id: a.id, name: a.name }))}
               mtConnections={mtConnections}
               rithmicConnections={rithmicConnections}
+              tradingviewConnections={tvConnections}
               isPro={pro}
             />
           </TabsContent>

@@ -7,11 +7,13 @@ import { Card } from "@/components/ui/card"
 import { BrokerImport } from "@/components/broker-import"
 import { MetaTraderConnect, type Connection } from "@/components/metatrader-connect"
 import { RithmicConnect, type RithmicConnection } from "@/components/rithmic-connect"
+import { TradingViewConnect } from "@/components/tradingview-connect"
+import type { TradingViewConnectionView } from "@/app/actions/tradingview"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
 import { Star, Search, Check } from "lucide-react"
 import { useT } from "@/components/locale-provider"
 
-type Platform = "rithmic" | "metatrader" | "other"
+type Platform = "rithmic" | "tradingview" | "metatrader" | "other"
 
 function PlatformCard({
   active,
@@ -75,11 +77,13 @@ export function PropFirmSync({
   accounts,
   mtConnections,
   rithmicConnections,
+  tradingviewConnections = [],
   isPro,
 }: {
   accounts: { id: number; name: string }[]
   mtConnections: Connection[]
   rithmicConnections: RithmicConnection[]
+  tradingviewConnections?: TradingViewConnectionView[]
   isPro: boolean
 }) {
   const t = useT()
@@ -89,11 +93,13 @@ export function PropFirmSync({
     <div className="space-y-5">
       {!isPro && platform !== "other" && (
         <LiveSyncUpgradeBanner
-          title={platform === "rithmic" ? t("Rithmic Connection") : t("MetaTrader Connection")}
+          title={platform === "rithmic" ? t("Rithmic Connection") : platform === "tradingview" ? t("TradingView Connection") : t("MetaTrader Connection")}
           description={
             platform === "rithmic"
               ? t("Connect your prop firm and every trade lands in your journal automatically — no CSV needed. Rithmic sync into the journal is included with Pro.")
-              : t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")
+              : platform === "tradingview"
+                ? t("Point a TradingView alert at your journal and every fill it reports is logged as it happens. Included with Pro.")
+                : t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")
           }
         />
       )}
@@ -118,6 +124,15 @@ export function PropFirmSync({
             description={t("Live sync — auto-imports every trade")}
           />
           <PlatformCard
+            active={platform === "tradingview"}
+            onClick={() => setPlatform("tradingview")}
+            logo="TV"
+            logoClassName="bg-[#2962ff]"
+            activeClassName="border-[#2962ff] bg-[#2962ff]/10 text-[#2962ff]"
+            name="TradingView"
+            description={t("Alert webhooks — paper and live fills as they happen")}
+          />
+          <PlatformCard
             active={platform === "metatrader"}
             onClick={() => setPlatform("metatrader")}
             logo="MT"
@@ -140,6 +155,7 @@ export function PropFirmSync({
       </Card>
 
       {platform === "rithmic" && isPro && <RithmicConnect connections={rithmicConnections} />}
+      {platform === "tradingview" && isPro && <TradingViewConnect connections={tradingviewConnections} />}
       {platform === "metatrader" && isPro && <MetaTraderConnect connections={mtConnections} />}
       {platform === "other" && <BrokerImport accounts={accounts} />}
     </div>

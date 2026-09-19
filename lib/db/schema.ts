@@ -101,6 +101,10 @@ export const tradingAccounts = pgTable("trading_accounts", {
   // reports one — the prop firm's own trailing-drawdown line, straight from
   // the source. Null when unknown.
   brokerDrawdownFloor: numeric("brokerDrawdownFloor", { precision: 18, scale: 2 }),
+  // True while startingBalance is our own guess, worked back from the
+  // broker's balance (lib/broker-balance.ts). Each balance refresh re-does
+  // the guess until the user types a size themselves, which clears this.
+  startingBalanceInferred: boolean("startingBalanceInferred").notNull().default(false),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 
@@ -265,6 +269,50 @@ export const rithmicConnections = pgTable("rithmic_connections", {
   lastSyncCount: integer("lastSyncCount"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
+
+// TradingView has no account API a third party can read — its paper trading
+// account lives inside TradingView. What it does have is alert webhooks, so
+// a connection here is a URL we mint: the trader points a TradingView alert
+// at it and every fill that alert reports lands in the journal. The token in
+// that URL is the whole credential, so it's unguessable and revocable by
+// deleting the row.
+export const tradingviewConnections = pgTable("tradingview_connections", {
+  id: serial("id").primaryKey(),
+  userId: text("userId").notNull(),
+  accountId: integer("accountId").notNull(), // links to trading_accounts
+  name: text("name").notNull(),
+  // What TradingView symbols on this connection are: decides the contract
+  // multiplier and how the trade is filed. One connection = one market, so
+  // a futures paper account and a crypto one are separate connections.
+  market: text("market").notNull().default("stocks"),
+  webhookToken: text("webhookToken").notNull().unique(),
+  lastEventAt: timestamp("lastEventAt"),
+  lastStatus: text("lastStatus"), // ok | error
+  lastError: text("lastError"),
+  eventCount: integer("eventCount").notNull().default(0),
+  tradeCount: integer("tradeCount").notNull().default(0),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+// Every fill a TradingView alert has reported, kept as the raw stream so
+// round-trip trades can be rebuilt from scratch on each delivery (the same
+// approach as a Rithmic re-sync). An alert that fires twice carries the same
+// eventId, which the unique index drops.
+export const tradingviewFills = pgTable(
+  "tradingview_fills",
+  {
+    id: serial("id").primaryKey(),
+    connectionId: integer("connectionId").notNull(),
+    eventId: text("eventId").notNull(),
+    symbol: text("symbol").notNull(),
+    action: text("action").notNull(), // Buy | Sell
+    quantity: numeric("quantity", { precision: 18, scale: 8 }).notNull(),
+    price: numeric("price", { precision: 18, scale: 8 }).notNull(),
+    filledAt: timestamp("filledAt").notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("tradingview_fills_event_unique").on(table.connectionId, table.eventId)],
+)
 
 // Playbooks are named strategies with a checklist of rules.
 export const playbooks = pgTable("playbooks", {
