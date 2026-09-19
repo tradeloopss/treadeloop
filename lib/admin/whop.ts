@@ -52,6 +52,19 @@ export async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
 
 // --- Reads --------------------------------------------------------------------
 
+// Whop returns money as { currency, amount: "44.00", decimals } objects (older
+// records and some endpoints use a bare number); this reads either form.
+export function money(value: unknown): number | null {
+  if (value == null) return null
+  if (typeof value === "number") return Number.isFinite(value) ? value : null
+  if (typeof value === "string") {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+  if (typeof value === "object" && "amount" in (value as object)) return money((value as { amount: unknown }).amount)
+  return null
+}
+
 export type WhopPayment = {
   id: string
   createdAt: string
@@ -95,20 +108,22 @@ export async function listPayments(opts: { status?: PaymentStatus; limit?: numbe
     createdAt: p.created_at,
     paidAt: p.paid_at ?? null,
     status: p.status ?? null,
-    substatus: p.substatus,
-    amount: p.subtotal ?? p.total ?? null,
-    amountAfterFees: p.amount_after_fees,
-    currency: p.currency,
-    refundedAmount: p.refunded_amount ?? null,
+    substatus: String(p.substatus ?? p.status ?? "unknown"),
+    amount: money(p.total) ?? money(p.subtotal),
+    amountAfterFees: money(p.amount_after_fees) ?? 0,
+    currency: String(p.currency ?? "usd"),
+    refundedAmount: money(p.refunded_amount),
     refundable: !!p.refundable,
     retryable: !!p.retryable,
     failureMessage: p.failure_message ?? null,
     declineCode: p.decline_code ?? null,
     nextAttempt: p.next_payment_attempt ?? null,
     attemptsFailed: p.payments_failed ?? null,
-    email: p.member?.email ?? p.member?.user?.email ?? p.user?.email ?? null,
-    membershipId: p.membership?.id ?? null,
-    planTitle: p.plan?.title ?? p.product?.title ?? null,
+    // The buyer's email lives on customer_email; the user object carries only
+    // the Whop username and name.
+    email: p.customer_email ?? p.member?.email ?? p.member?.user?.email ?? p.user?.email ?? p.user?.username ?? null,
+    membershipId: p.membership?.id ?? p.membership_id ?? null,
+    planTitle: p.plan?.title ?? p.product?.title ?? (p.billing_reason === "subscription_create" ? "New subscription" : null),
     billingReason: p.billing_reason ?? null,
     promoCode: p.promo_code?.code ?? null,
   }))
@@ -136,13 +151,13 @@ export async function listPromoCodes(): Promise<WhopPromoCode[]> {
   return (page as { data: Record<string, any>[] }).data.map((c) => ({
     id: c.id,
     code: c.code ?? null,
-    promoType: c.promo_type,
-    amountOff: c.amount_off,
-    currency: c.currency,
+    promoType: String(c.promo_type ?? "percentage"),
+    amountOff: money(c.amount_off) ?? 0,
+    currency: String(c.currency ?? "usd"),
     durationMonths: c.promo_duration_months ?? null,
-    status: c.status,
-    uses: c.uses,
-    stock: c.stock,
+    status: String(c.status ?? "unknown"),
+    uses: Number(c.uses ?? 0),
+    stock: Number(c.stock ?? 0),
     unlimitedStock: !!c.unlimited_stock,
     newUsersOnly: !!c.new_users_only,
     expiresAt: c.expires_at ?? null,
@@ -171,11 +186,11 @@ export async function listAffiliates(): Promise<WhopAffiliate[]> {
     name: a.user?.name ?? a.user?.username ?? null,
     email: a.user?.email ?? null,
     status: a.status ?? null,
-    referrals: a.total_referrals_count ?? 0,
-    activeMembers: a.active_members_count ?? 0,
-    revenueUsd: Number(a.total_revenue_usd ?? 0),
-    earningsUsd: Number(a.total_referral_earnings_usd ?? 0),
-    mrrUsd: Number(a.monthly_recurring_revenue_usd ?? 0),
+    referrals: Number(a.total_referrals_count ?? 0),
+    activeMembers: Number(a.active_members_count ?? 0),
+    revenueUsd: money(a.total_revenue_usd) ?? 0,
+    earningsUsd: money(a.total_referral_earnings_usd) ?? 0,
+    mrrUsd: money(a.monthly_recurring_revenue_usd) ?? 0,
     createdAt: a.created_at,
   }))
 }

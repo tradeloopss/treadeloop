@@ -128,6 +128,7 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
                       <td className="py-2.5 pr-3 text-right tabular-nums">
                         {p.amount == null ? "—" : `${p.amount.toFixed(2)} ${p.currency.toUpperCase()}`}
                         {p.refundedAmount ? <span className="block text-xs text-muted-foreground">−{p.refundedAmount.toFixed(2)} refunded</span> : null}
+                        {p.amount === 0 && p.billingReason === "subscription_create" && <span className="block text-xs text-muted-foreground">trial started</span>}
                       </td>
                       <td className="py-2.5 pr-3">
                         <span className="capitalize">{p.substatus.replaceAll("_", " ")}</span>
