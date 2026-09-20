@@ -78,7 +78,13 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
         if (result.ok) {
           const acct = result.accounts === 1 ? t("Rithmic connected — 1 account") : t("Rithmic connected — {n} accounts", { n: result.accounts })
           const trades = result.trades === 0 ? t("no past trades found in the last 2 years") : result.trades === 1 ? t("1 past trade imported") : t("{n} past trades imported", { n: result.trades })
-          toast.success(`${acct}, ${trades}`)
+          if (result.trades === 0 && result.diagnostic) {
+            // No history came in — show what Rithmic actually returned so it
+            // can be reported. Stays until dismissed.
+            toast.warning(`${acct}, ${trades}`, { description: `Rithmic fills — ${result.diagnostic}`, duration: Infinity })
+          } else {
+            toast.success(`${acct}, ${trades}`)
+          }
           onDone()
         } else {
           toast.error(t(result.error))

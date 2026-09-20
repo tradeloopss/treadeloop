@@ -587,7 +587,9 @@ async function fetchFillsInSession(
       })
     }
   }
-  console.log(`[rithmic] account ${account.accountId}: ${raw} raw fill row(s) → ${byId.size} kept, over ${windows} window(s) from ${toDateInt(start)} (last rp_code ${lastRp.join(",") || "none"})`)
+  const diag = `${account.accountId}: ${raw} rows→${byId.size} kept, rp=${lastRp.join(",") || "none"}, fcm=${account.fcmId ? "y" : "n"}, ib=${account.ibId ? "y" : "n"}, ${windows}w from ${toDateInt(start)}`
+  console.log(`[rithmic] ${diag}`)
+  rithmicFillDiagnostics.push(diag)
   return [...byId.values()]
 }
 
@@ -627,6 +629,17 @@ export async function fetchRithmicFillsAndRms(
 // testing listRithmicAccounts followed immediately by fetchRithmicFills,
 // which failed on the second login with rp_code ["13", "permission denied"].
 // Running both steps inside a single withSession avoids that entirely.
+// A short, human-readable trail of what the last fill-history fetch actually
+// got from Rithmic (row counts, rp_code, whether fcm/ib were present) — read
+// once by the connect action so the trader can report it when history is
+// empty and there are no server logs to hand.
+let rithmicFillDiagnostics: string[] = []
+export function takeRithmicFillDiagnostics(): string[] {
+  const d = rithmicFillDiagnostics
+  rithmicFillDiagnostics = []
+  return d
+}
+
 export async function discoverAccountsAndFills(
   user: string,
   password: string,
@@ -634,8 +647,10 @@ export async function discoverAccountsAndFills(
   gatewayUri: string,
   since: Date,
 ): Promise<{ accounts: RithmicAccount[]; fillsByAccountId: Map<string, ParsedFill[]>; rmsByAccountId: Map<string, RithmicAccountRms> }> {
+  rithmicFillDiagnostics = []
   return withSession(user, password, systemName, gatewayUri, async (ws, root) => {
     const loginInfo = await fetchLoginInfo(ws, root)
+    console.log(`[rithmic] loginInfo fcm=${loginInfo.fcmId || "(empty)"} ib=${loginInfo.ibId || "(empty)"} userType=${loginInfo.userType}`)
     const accounts = await listAccountsInSession(ws, root, loginInfo)
     // Risk limits are informational — a login that can list accounts but
     // not read RMS shouldn't fail the whole connect over it.

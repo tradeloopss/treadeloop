@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
-import { discoverAccountsAndFills, fetchAccountSnapshots, listRithmicSystems, type RithmicAccountSnapshot } from "@/lib/rithmic-client"
+import { discoverAccountsAndFills, fetchAccountSnapshots, listRithmicSystems, takeRithmicFillDiagnostics, type RithmicAccountSnapshot } from "@/lib/rithmic-client"
 import { applyBrokerSnapshot, importFillsForConnection, syncRithmicConnection } from "@/lib/rithmic-sync"
 import { recordSyncRun } from "@/lib/sync-runs"
 import { requirePro } from "@/lib/subscription"
@@ -76,7 +76,7 @@ export async function getRithmicConnections() {
   }))
 }
 
-export type ConnectRithmicResult = { ok: true; accounts: number; trades: number } | { ok: false; error: string }
+export type ConnectRithmicResult = { ok: true; accounts: number; trades: number; diagnostic?: string } | { ok: false; error: string }
 
 // Turns whatever the R|Protocol client threw into a message worth showing.
 // The client's own messages are already user-facing, but the two most common
@@ -130,6 +130,7 @@ async function runConnectRithmic(
   // so account discovery and the first sync must share a single session.
   const since = new Date(0)
   const { accounts, fillsByAccountId, rmsByAccountId } = await discoverAccountsAndFills(login, password, systemName, gatewayUri, since)
+  const fillDiagnostic = takeRithmicFillDiagnostics().join(" | ")
   if (accounts.length === 0) {
     return {
       ok: false,
@@ -271,7 +272,7 @@ async function runConnectRithmic(
   revalidatePath("/settings")
   revalidatePath("/add-trade")
   revalidatePath("/propfirm")
-  return { ok: true, accounts: accounts.length, trades: importedTrades }
+  return { ok: true, accounts: accounts.length, trades: importedTrades, diagnostic: fillDiagnostic || undefined }
 }
 
 export async function disconnectRithmic(connectionId: number) {
