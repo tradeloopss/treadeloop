@@ -10,7 +10,7 @@ import { RithmicConnect, type RithmicConnection } from "@/components/rithmic-con
 import { TradingViewConnect } from "@/components/tradingview-connect"
 import type { TradingViewConnectionView, TradingViewPairingView } from "@/app/actions/tradingview"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
-import { Star, Search, Check } from "lucide-react"
+import { Star, Search, Check, Info } from "lucide-react"
 import { useT } from "@/components/locale-provider"
 
 type Platform = "rithmic" | "tradingview" | "metatrader" | "other"
@@ -24,6 +24,7 @@ function PlatformCard({
   name,
   recommended,
   comingSoon,
+  paperOnly,
   description,
 }: {
   active: boolean
@@ -34,6 +35,7 @@ function PlatformCard({
   name: string
   recommended?: boolean
   comingSoon?: boolean
+  paperOnly?: boolean
   description: string
 }) {
   const t = useT()
@@ -62,6 +64,11 @@ function PlatformCard({
             {comingSoon && (
               <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
                 {t("Coming soon")}
+              </span>
+            )}
+            {paperOnly && (
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-600 uppercase dark:text-amber-400">
+                {t("Paper only")}
               </span>
             )}
           </div>
@@ -133,6 +140,7 @@ export function PropFirmSync({
             logoClassName="bg-[#2962ff]"
             activeClassName="border-[#2962ff] bg-[#2962ff]/10 text-[#2962ff]"
             name="TradingView"
+            paperOnly
             description={t("Auto-sync paper trades through the TradeLoop extension")}
           />
           <PlatformCard
@@ -158,7 +166,17 @@ export function PropFirmSync({
       </Card>
 
       {platform === "rithmic" && isPro && <RithmicConnect connections={rithmicConnections} />}
-      {platform === "tradingview" && <TradingViewConnect connections={tradingviewConnections} pairings={tradingviewPairings} accounts={accounts} isPro={isPro} />}
+      {platform === "tradingview" && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+            <Info className="mt-0.5 size-4 shrink-0" />
+            <p>
+              {t("TradingView sync is for paper-trading accounts only. For a funded or live prop-firm account, connect it through Rithmic — that reads your real fills and account balance.")}
+            </p>
+          </div>
+          <TradingViewConnect connections={tradingviewConnections} pairings={tradingviewPairings} accounts={accounts} isPro={isPro} />
+        </div>
+      )}
       {platform === "metatrader" && isPro && <MetaTraderConnect connections={mtConnections} />}
       {platform === "other" && <BrokerImport accounts={accounts} />}
     </div>

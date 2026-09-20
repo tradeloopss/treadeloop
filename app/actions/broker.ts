@@ -19,12 +19,19 @@ export async function importTradeCsv(formData: FormData) {
   const accountIdRaw = formData.get("accountId")
   const fixedAccountId = accountIdRaw && String(accountIdRaw) !== "" ? Number(accountIdRaw) : null
 
+  // Only used when this import creates a new account (auto mode); ignored when
+  // filing into an account that already has a balance.
+  const startingBalanceRaw = formData.get("startingBalance")
+  const startingBalance =
+    fixedAccountId == null && startingBalanceRaw != null && String(startingBalanceRaw).trim() !== "" ? Number(startingBalanceRaw) : null
+  const newAccountStartingBalance = startingBalance != null && Number.isFinite(startingBalance) && startingBalance > 0 ? startingBalance : null
+
   const csvText = await file.text()
   // Every attempt is logged (lib/trade-importer.ts), failures with the file,
   // so a broker changing its export format shows up in the admin panel.
   let result
   try {
-    result = await importCsvText(userId, csvText, fixedAccountId)
+    result = await importCsvText(userId, csvText, fixedAccountId, newAccountStartingBalance)
   } catch (err) {
     await logImport({ userId, fileName: file.name, csvText, accountId: fixedAccountId, error: err })
     throw err

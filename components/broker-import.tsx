@@ -5,6 +5,7 @@ import { useRef, useState, useTransition } from "react"
 import { importTradeCsv } from "@/app/actions/broker"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -22,6 +23,7 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
   const [pending, startTransition] = useTransition()
   const [fileName, setFileName] = useState<string | null>(null)
   const [accountId, setAccountId] = useState<string>("auto")
+  const [startingBalance, setStartingBalance] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -32,6 +34,7 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
     formData.set("accountId", accountId === "auto" ? "" : accountId)
+    formData.set("startingBalance", accountId === "auto" ? startingBalance : "")
     startTransition(async () => {
       try {
         const result = await importTradeCsv(formData)
@@ -91,6 +94,26 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
               : t("Every trade in this file will be filed under this one account, regardless of what its Account column says.")}
           </p>
         </div>
+
+        {/* Only a newly created account needs a starting balance — an existing
+            one already has one. So it's asked only in auto mode. */}
+        {accountId === "auto" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="import-balance">{t("Starting balance for a new account")}</Label>
+            <Input
+              id="import-balance"
+              type="number"
+              step="any"
+              inputMode="decimal"
+              placeholder={t("e.g. 50000")}
+              value={startingBalance}
+              onChange={(e) => setStartingBalance(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("If this file creates a new account, this is the balance it starts from — so your equity and drawdown are right. Leave blank to start from 0 (just the sum of the trades). An account that already exists keeps its balance.")}
+            </p>
+          </div>
+        )}
         <label
           htmlFor="csv-file"
           className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground hover:bg-accent/30"

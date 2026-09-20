@@ -39,7 +39,15 @@ export function detectSource(csvText: string): string | null {
 // Parses a broker export and inserts its trades for the user. Throws with a
 // message meant for the user when the file can't be imported. Shared by the
 // user's upload (app/actions/broker.ts) and an admin re-run of a failed one.
-export async function importCsvText(userId: string, csvText: string, fixedAccountId: number | null): Promise<ImportResult> {
+export async function importCsvText(
+  userId: string,
+  csvText: string,
+  fixedAccountId: number | null,
+  // Applied as the starting balance to any account this import creates (auto
+  // mode). Existing accounts keep the balance they already have. Null/0 leaves
+  // a new account at 0, where its balance is just the sum of its trades' P&L.
+  newAccountStartingBalance: number | null = null,
+): Promise<ImportResult> {
   if (fixedAccountId != null) {
     const [owned] = await db
       .select()
@@ -125,9 +133,10 @@ export async function importCsvText(userId: string, csvText: string, fixedAccoun
       if (existingAccount.length) {
         accountIdByName.set(t.account, existingAccount[0].id)
       } else {
+        const startingBalance = newAccountStartingBalance != null && newAccountStartingBalance > 0 ? String(newAccountStartingBalance) : "0"
         const [inserted] = await db
           .insert(tradingAccounts)
-          .values({ userId, name: t.account, broker: source })
+          .values({ userId, name: t.account, broker: source, startingBalance })
           .returning({ id: tradingAccounts.id })
         accountIdByName.set(t.account, inserted.id)
       }
