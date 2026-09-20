@@ -6,7 +6,7 @@ import { getTradingViewPairingStatus } from "@/app/actions/tradingview"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { CheckCircle2, Copy, Download, ExternalLink, Loader2, Puzzle } from "lucide-react"
+import { CheckCircle2, Copy, Download, ExternalLink, Loader2, Puzzle, Smartphone } from "lucide-react"
 import { toast } from "sonner"
 import { useT } from "@/components/locale-provider"
 
@@ -53,16 +53,19 @@ export function TradingViewPair({
   token,
   storeUrl,
   downloadPath,
+  bookmarklet,
 }: {
   pairingId: number
   token: string
   storeUrl: string | null
   downloadPath: string
+  bookmarklet: string
 }) {
   const t = useT()
   const [paired, setPaired] = useState(false)
   const [label, setLabel] = useState<string | null>(null)
   const [showCode, setShowCode] = useState(false)
+  const [showPhone, setShowPhone] = useState(false)
   // Every Chromium browser runs the extension, but each keeps its extensions
   // page at its own address and likes being called by its own name. Resolved
   // on the client, so the server render stays the same for everyone.
@@ -205,6 +208,69 @@ export function TradingViewPair({
           </div>
         )}
       </Step>
+
+      {/* Phones and tablets can't run an extension. This does the same read
+          from inside the trader's own logged-in TradingView tab, on a tap —
+          no install, no password. */}
+      <div className="border-t pt-5">
+        <button
+          type="button"
+          onClick={() => setShowPhone((v) => !v)}
+          className="flex items-center gap-2 text-sm font-medium text-foreground"
+          aria-expanded={showPhone}
+        >
+          <Smartphone className="size-4 text-muted-foreground" />
+          {t("On a phone or tablet? No install needed")}
+        </button>
+        {showPhone && (
+          <div className="mt-3 space-y-3 text-sm text-muted-foreground">
+            <p>
+              {t("Phone browsers can't run extensions, so instead you save a one-tap bookmark. It reads your paper trades from inside TradingView, where you're already signed in — your password never leaves your phone — and sends them here.")}
+            </p>
+            <ol className="list-decimal space-y-2 ps-4">
+              <li>
+                {/* The bookmarklet is never navigated to — it's dragged or
+                    long-pressed into the bookmarks bar — so the href is inert
+                    and the button copies it for a phone that can't drag. */}
+                {t("Copy the bookmark below, then in your browser add a new bookmark and paste it as the address.")}
+                <div className="mt-2 flex gap-2">
+                  <pre dir="ltr" className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted/50 px-3 py-2 text-start font-mono text-[11px]">
+                    {bookmarklet.slice(0, 48)}…
+                  </pre>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label={t("Copy")}
+                    onClick={() =>
+                      navigator.clipboard.writeText(bookmarklet).then(
+                        () => toast.success(t("Bookmark copied — paste it as a new bookmark's address")),
+                        () => toast.error(t("Could not copy — copy it manually")),
+                      )
+                    }
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+                <p className="mt-1 text-xs">
+                  {t("On a computer you can drag this straight to the bookmarks bar:")}{" "}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                  <a href={bookmarklet} onClick={(e) => e.preventDefault()} className="font-medium text-primary underline-offset-2 hover:underline">
+                    {t("TradeLoop sync")}
+                  </a>
+                </p>
+              </li>
+              <li>{t("Name it \"TradeLoop sync\" and save.")}</li>
+              <li>{t("Open TradingView, sign in, and place your trades as usual.")}</li>
+              <li>{t("Tap the bookmark whenever you want your journal caught up — it takes a second and tells you what it added.")}</li>
+            </ol>
+            <p className="text-xs">
+              {t("This is the whole reason there's no \"connect with your TradingView password\" here: TradingView has no way to read a paper account from our servers, so the reading has to happen in your own signed-in browser. The bookmark does exactly that and nothing else.")}
+            </p>
+          </div>
+        )}
+      </div>
     </Card>
   )
 }

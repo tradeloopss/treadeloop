@@ -9,6 +9,20 @@ import { tradingviewPairings } from "@/lib/db/schema"
 export const EXTENSION_STORE_URL = process.env.NEXT_PUBLIC_TRADELOOP_EXTENSION_URL ?? null
 export const EXTENSION_DOWNLOAD_PATH = "/extension/tradeloop-tradingview.zip"
 
+// The origin the bookmarklet and pairing page post to — the app's own URL,
+// mirroring resolveBaseUrl in app/actions/tradingview.ts so a pairing minted
+// on a preview deployment posts back to that deployment.
+export function pairingBaseUrl(): string {
+  return (
+    process.env.BETTER_AUTH_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "http://localhost:3000")
+  )
+}
+
 // The pairing page hands the extension a code by rendering it into the page
 // for the extension's content script to read. A code is single-use in the
 // sense that its first check-in claims it (lastSeenAt set); one unclaimed
