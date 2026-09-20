@@ -168,7 +168,7 @@ export function PropFirmSync({
       {platform === "rithmic" && isPro && <RithmicConnect connections={rithmicConnections} />}
       {platform === "tradingview" && (
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+          <div className="flex max-w-2xl items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
             <Info className="mt-0.5 size-4 shrink-0" />
             <p>
               {t("TradingView sync is for paper-trading accounts only. For a funded or live prop-firm account, connect it through Rithmic — that reads your real fills and account balance.")}
