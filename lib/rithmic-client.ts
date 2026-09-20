@@ -257,21 +257,40 @@ async function fetchLoginInfo(ws: WebSocket, root: protobuf.Root): Promise<{ fcm
   return decode(root, "ResponseLoginInfo", await waitForOne(ws))
 }
 
+// user_type enum from the R|Protocol proto (admin=0, fcm=1, ib=2, trader=3).
+const USER_TYPE_TRADER = 3
+
 async function listAccountsInSession(ws: WebSocket, root: protobuf.Root, loginInfo?: { fcmId: string; ibId: string; userType: number }): Promise<RithmicAccount[]> {
   loginInfo ??= await fetchLoginInfo(ws, root)
 
-  ws.send(
-    encode(root, "RequestAccountList", {
-      templateId: 302,
-      fcmId: loginInfo.fcmId,
-      ibId: loginInfo.ibId,
-      userType: loginInfo.userType,
-    }),
-  )
-  const { list } = await collectUntilRpCode(root, ws, "ResponseAccountList")
-  return list
-    .filter((a) => a.accountId)
-    .map((a) => ({ fcmId: a.fcmId, ibId: a.ibId, accountId: a.accountId, accountName: a.accountName || a.accountId }))
+  const requestWith = async (userType: number) => {
+    ws.send(
+      encode(root, "RequestAccountList", {
+        templateId: 302,
+        fcmId: loginInfo.fcmId,
+        ibId: loginInfo.ibId,
+        userType,
+      }),
+    )
+    const { list, terminal } = await collectUntilRpCode(root, ws, "ResponseAccountList")
+    const accounts = list
+      .filter((a) => a.accountId)
+      .map((a) => ({ fcmId: a.fcmId, ibId: a.ibId, accountId: a.accountId, accountName: a.accountName || a.accountId }))
+    return { accounts, terminal, raw: list.length }
+  }
+
+  let { accounts, terminal, raw } = await requestWith(loginInfo.userType)
+  // A login can report a user_type that doesn't return the trader's own
+  // accounts (some test/demo logins come back as admin); asking again as a
+  // trader is harmless when the first answer already had them.
+  if (accounts.length === 0 && loginInfo.userType !== USER_TYPE_TRADER) {
+    console.warn(`[rithmic] account list empty for user_type ${loginInfo.userType} (rp_code ${terminal?.rpCode?.join?.(",")}, ${raw} rows); retrying as trader`)
+    ;({ accounts, terminal, raw } = await requestWith(USER_TYPE_TRADER))
+  }
+  if (accounts.length === 0) {
+    console.warn(`[rithmic] no accounts returned (fcm ${loginInfo.fcmId}, ib ${loginInfo.ibId}, user_type ${loginInfo.userType}, rp_code ${terminal?.rpCode?.join?.(",")}, ${raw} rows)`)
+  }
+  return accounts
 }
 
 // Rithmic sends absent numeric fields as 0/"" — for a threshold that's

@@ -105,7 +105,10 @@ async function runConnectRithmic(
   const since = new Date(0)
   const { accounts, fillsByAccountId, rmsByAccountId } = await discoverAccountsAndFills(login, password, systemName, gatewayUri, since)
   if (accounts.length === 0) {
-    return { ok: false, error: "Connected to Rithmic, but no accounts were found for that login." }
+    return {
+      ok: false,
+      error: `The login worked, but Rithmic returned no tradeable account on the "${systemName}" system. Two things to check: the system name must be exactly the one your account lives under (as in your prop firm's connection_params.txt — a plain "Rithmic Test" login usually has no tradeable account), and the account needs API (R|Protocol) access enabled. Fix either with your prop firm and try again.`,
+    }
   }
   // Balances live on a different Rithmic plant, so they're a second session.
   // Not fatal if it fails — the account still connects, just without a
