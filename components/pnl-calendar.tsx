@@ -190,7 +190,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
             </div>
           ))}
           {cells.map((cell, i) => {
-            if (!cell) return <div key={`empty-${i}`} className="min-h-16 rounded-lg border border-border/50 bg-muted/10 sm:min-h-28 sm:rounded-xl" />
+            if (!cell) return <div key={`empty-${i}`} className="min-h-20 rounded-lg border border-border bg-muted/30 sm:min-h-28 sm:rounded-xl" />
             const day = Number(cell.date.slice(8))
             const has = cell.trades > 0
             const win = cell.pnl > 0
@@ -207,24 +207,22 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
               <div
                 key={cell.date}
                 className={cn(
-                  "flex min-h-16 min-w-0 flex-col justify-between overflow-hidden rounded-lg border p-1.5 transition-colors sm:min-h-28 sm:rounded-xl sm:p-2.5",
-                  !has && "bg-muted/20",
+                  "flex min-h-20 min-w-0 flex-col justify-between overflow-hidden rounded-lg border p-1.5 transition-colors sm:min-h-28 sm:rounded-xl sm:p-2.5",
+                  !has && "border-border bg-muted/30",
                 )}
                 style={fill ? { backgroundColor: fill.bg, borderColor: fill.border } : undefined}
               >
                 <div className="flex items-start justify-between">
-                  {cell.hasNote ? <NotebookPen className="size-3 text-foreground/60 sm:size-3.5" /> : <span />}
-                  <span className={cn("text-xs tabular-nums sm:text-sm", has ? "text-foreground/60" : "text-muted-foreground")}>{day}</span>
+                  {cell.hasNote ? <NotebookPen className="size-3 text-foreground/70 sm:size-3.5" /> : <span />}
+                  <span className={cn("text-xs font-medium tabular-nums sm:text-sm", has ? "text-foreground/80" : "text-muted-foreground")}>{day}</span>
                 </div>
                 {has && (
-                  <div className="min-w-0">
-                    {/* Phones only have room for the number; the trade count and
-                        win rate appear from sm up. */}
-                    <p className="truncate text-[11px] font-bold tabular-nums text-foreground sm:text-lg">{compact(Math.round(cell.pnl))}</p>
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="truncate text-[11px] font-bold leading-tight tabular-nums text-foreground sm:text-lg">{compact(Math.round(cell.pnl))}</p>
                     {options.trades && (
-                      <p className="hidden text-xs text-muted-foreground sm:block">{cell.trades === 1 ? t("1 trade") : t("{n} trades", { n: cell.trades })}</p>
+                      <p className="truncate text-[9px] leading-tight text-foreground/70 sm:text-xs">{cell.trades === 1 ? t("1 trade") : t("{n} trades", { n: cell.trades })}</p>
                     )}
-                    {options.winRate && <p className="hidden text-xs text-muted-foreground sm:block">{winRateLabel(winRate)}</p>}
+                    {options.winRate && <p className="text-[9px] leading-tight text-foreground/70 sm:text-xs">{winRateLabel(winRate)}</p>}
                   </div>
                 )}
               </div>
