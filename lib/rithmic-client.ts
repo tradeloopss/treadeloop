@@ -355,7 +355,16 @@ async function listAccountsInSession(ws: WebSocket, root: protobuf.Root, loginIn
     const { list, terminal } = await collectUntilRpCode(root, ws, "ResponseAccountList")
     const accounts = list
       .filter((a) => a.accountId)
-      .map((a) => ({ fcmId: a.fcmId, ibId: a.ibId, accountId: a.accountId, accountName: a.accountName || a.accountId }))
+      // Rithmic returns fcm_id/ib_id at the login level and often leaves them
+      // off each account row — but the fill-history request needs them, so
+      // fall back to the login's when an account row omits them (an empty
+      // fcm/ib is what makes Rithmic answer fill history with "no data").
+      .map((a) => ({
+        fcmId: a.fcmId || loginInfo.fcmId,
+        ibId: a.ibId || loginInfo.ibId,
+        accountId: a.accountId,
+        accountName: a.accountName || a.accountId,
+      }))
     return { accounts, terminal, raw: list.length }
   }
 
@@ -513,27 +522,43 @@ async function fetchFillsInSession(
   let windows = 0
   let raw = 0
   let lastRp: string[] = ["0"]
-  for (let winStart = new Date(start); winStart.getTime() <= today.getTime(); winStart = new Date(winStart.getTime() + FILL_WINDOW_DAYS * DAY_MS)) {
-    const winEnd = new Date(Math.min(winStart.getTime() + (FILL_WINDOW_DAYS - 1) * DAY_MS, today.getTime()))
-    windows++
+  const requestWindow = async (indexFormat: "trade_date" | "ssboe", startIndex: number, finishIndex: number) => {
     ws.send(
       encode(root, "RequestShowFillHistory", {
         templateId: 3512,
         fcmId: account.fcmId,
         ibId: account.ibId,
         accountId: account.accountId,
-        indexFormat: "trade_date",
-        startIndex: toDateInt(winStart),
-        finishIndex: toDateInt(winEnd),
+        indexFormat,
+        startIndex,
+        finishIndex,
         maxRecordCount: 10000,
       }),
     )
     const { fills, terminal } = await collectFills(root, ws, 30000)
-    lastRp = terminal.rpCode ?? []
-    // rp_code "7" is Rithmic's "no data" for that window — not an error.
-    if (lastRp.length > 0 && lastRp[0] !== "0" && lastRp[0] !== "7") {
-      throw new Error(`Fill history request failed: ${lastRp.join(", ")}`)
+    const rp = terminal.rpCode ?? []
+    if (rp.length > 0 && rp[0] !== "0" && rp[0] !== "7") {
+      throw new Error(`Fill history request failed: ${rp.join(", ")}`)
     }
+    return { fills, rp }
+  }
+
+  for (let winStart = new Date(start); winStart.getTime() <= today.getTime(); winStart = new Date(winStart.getTime() + FILL_WINDOW_DAYS * DAY_MS)) {
+    const winEnd = new Date(Math.min(winStart.getTime() + (FILL_WINDOW_DAYS - 1) * DAY_MS, today.getTime()))
+    windows++
+    let { fills, rp } = await requestWindow("trade_date", toDateInt(winStart), toDateInt(winEnd))
+    // Some Rithmic deployments honour only the seconds-since-epoch index — so
+    // if trade_date came back empty, try the same window as ssboe.
+    if (fills.length === 0) {
+      const ssStart = Math.floor(winStart.getTime() / 1000)
+      const ssEnd = Math.floor((winEnd.getTime() + DAY_MS - 1) / 1000)
+      const alt = await requestWindow("ssboe", ssStart, ssEnd)
+      if (alt.fills.length > 0) {
+        fills = alt.fills
+        rp = alt.rp
+      }
+    }
+    lastRp = rp
     raw += fills.length
     for (const f of fills) {
       // Rithmic puts the executed price in fill_price, but some feeds only
