@@ -25,9 +25,32 @@ async function getUserId() {
 // instead of assuming one — every prop firm/broker on Rithmic is provisioned
 // onto its own gateway address (from that firm's own connection_params.txt)
 // and can host more than one system on it.
+// Systems kept out of the firm dropdown — retired firms and internal/test
+// systems that a trader shouldn't pick. Matched case-insensitively against
+// the names Rithmic returns.
+const HIDDEN_RITHMIC_SYSTEMS = new Set(
+  [
+    "4proptrader",
+    "Bulenox",
+    "Elevatefutures",
+    "Halcyontrader",
+    "Legendstrading",
+    "Mes capital",
+    "Propshoptrader",
+    "Tradefunddd",
+    "Tradefundrr",
+    "Tradeify-test",
+    "Tradesea",
+    "Tradesea-test",
+    "Tradesea-c",
+    "Tradesea-d",
+  ].map((s) => s.trim().toLowerCase()),
+)
+
 export async function listAvailableRithmicSystems(gatewayUri: string): Promise<string[]> {
   await getUserId()
-  return listRithmicSystems(gatewayUri)
+  const systems = await listRithmicSystems(gatewayUri)
+  return systems.filter((s) => !HIDDEN_RITHMIC_SYSTEMS.has(s.trim().toLowerCase()))
 }
 
 // A user can connect multiple Rithmic accounts — every lookup here is scoped
