@@ -499,6 +499,31 @@ export async function listRithmicAccounts(
 // generic ParsedFill shape shared with Tradovate's CSV import, so both feed
 // the same reconstructTrades() logic. Does not open its own session — the
 // caller must already be inside one (see withSession).
+// Reshapes one raw Rithmic fill row into the shared ParsedFill, reading the
+// price/size/time across the several fields Rithmic may populate, and adds it
+// to the dedupe map. Skips a row that carries no usable price, size, or time.
+function addParsedFill(byId: Map<string, ParsedFill>, accountId: string, f: any): void {
+  const price = f.fillPrice ?? f.avgFillPrice ?? f.price
+  const size = f.fillSize ?? f.totalFillSize
+  const timestamp =
+    f.fillDate && f.fillTime
+      ? `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`
+      : f.ssboe != null
+        ? new Date(Number(f.ssboe) * 1000).toISOString()
+        : null
+  if (!(f.symbol && price != null && size != null && Number(size) > 0 && timestamp)) return
+  const externalId = f.fillId || `${f.symbol}:${timestamp}:${price}:${size}`
+  byId.set(externalId, {
+    externalId,
+    account: accountId,
+    symbol: f.symbol,
+    timestamp,
+    action: f.transactionType?.toUpperCase().startsWith("B") ? "Buy" : "Sell",
+    qty: Number(size),
+    price: Number(price),
+  })
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 // Rithmic answers a fill-history request over a bounded trade-date range, and
 // a single very wide range (e.g. since the epoch) comes back empty. So the
@@ -560,33 +585,24 @@ async function fetchFillsInSession(
     }
     lastRp = rp
     raw += fills.length
-    for (const f of fills) {
-      // Rithmic puts the executed price in fill_price, but some feeds only
-      // fill avg_fill_price or price, and the size in total_fill_size instead
-      // of fill_size — read across all of them so a real fill isn't dropped.
-      const price = f.fillPrice ?? f.avgFillPrice ?? f.price
-      const size = f.fillSize ?? f.totalFillSize
-      // fill_date/fill_time (CCYYMMDD / HH:MM:SS, UTC) when present, otherwise
-      // ssboe (seconds since epoch).
-      const timestamp =
-        f.fillDate && f.fillTime
-          ? `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`
-          : f.ssboe != null
-            ? new Date(Number(f.ssboe) * 1000).toISOString()
-            : null
-      if (!(f.symbol && price != null && size != null && Number(size) > 0 && timestamp)) continue
-      const externalId = f.fillId || `${f.symbol}:${timestamp}:${price}:${size}`
-      byId.set(externalId, {
-        externalId,
-        account: account.accountId,
-        symbol: f.symbol,
-        timestamp,
-        action: f.transactionType?.toUpperCase().startsWith("B") ? "Buy" : "Sell",
-        qty: Number(size),
-        price: Number(price),
-      })
+    for (const f of fills) addParsedFill(byId, account.accountId, f)
+  }
+
+  // Last resort: some Rithmic setups return "no data" for any bounded range
+  // but answer an unfiltered request (no index/dates) with everything. Only
+  // tried when the windowed pulls all came back empty.
+  if (byId.size === 0) {
+    windows++
+    ws.send(encode(root, "RequestShowFillHistory", { templateId: 3512, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId, maxRecordCount: 10000 }))
+    const { fills, terminal } = await collectFills(root, ws, 30000)
+    const rp = terminal.rpCode ?? []
+    if (!(rp.length > 0 && rp[0] !== "0" && rp[0] !== "7")) {
+      lastRp = rp
+      raw += fills.length
+      for (const f of fills) addParsedFill(byId, account.accountId, f)
     }
   }
+
   const diag = `${account.accountId}: ${raw} rows→${byId.size} kept, rp=${lastRp.join(",") || "none"}, fcm=${account.fcmId ? "y" : "n"}, ib=${account.ibId ? "y" : "n"}, ${windows}w from ${toDateInt(start)}`
   console.log(`[rithmic] ${diag}`)
   rithmicFillDiagnostics.push(diag)
