@@ -355,16 +355,7 @@ async function listAccountsInSession(ws: WebSocket, root: protobuf.Root, loginIn
     const { list, terminal } = await collectUntilRpCode(root, ws, "ResponseAccountList")
     const accounts = list
       .filter((a) => a.accountId)
-      // Rithmic returns fcm_id/ib_id at the login level and often leaves them
-      // off each account row — but the fill-history request needs them, so
-      // fall back to the login's when an account row omits them (an empty
-      // fcm/ib is what makes Rithmic answer fill history with "no data").
-      .map((a) => ({
-        fcmId: a.fcmId || loginInfo.fcmId,
-        ibId: a.ibId || loginInfo.ibId,
-        accountId: a.accountId,
-        accountName: a.accountName || a.accountId,
-      }))
+      .map((a) => ({ fcmId: a.fcmId, ibId: a.ibId, accountId: a.accountId, accountName: a.accountName || a.accountId }))
     return { accounts, terminal, raw: list.length }
   }
 
