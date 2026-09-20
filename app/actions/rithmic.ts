@@ -60,6 +60,9 @@ export type ConnectRithmicResult = { ok: true; accounts: number } | { ok: false;
 // setup failures deserve a nudge toward the fix.
 function rithmicConnectError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
+  if (/TLS|ECONNRESET|socket disconnected|socket hang ?up|before secure|closed the connection before|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|connecting to the Rithmic gateway/i.test(msg)) {
+    return "Couldn't reach the Rithmic gateway — the connection dropped before it was ready. Check the gateway address and port are exactly the ones from your prop firm's connection_params.txt, and that the gateway is reachable. This can be intermittent, so trying again in a moment often works."
+  }
   if (/timed out|timeout/i.test(msg)) {
     return "Rithmic didn't respond in time. Check the gateway address is exactly the one your prop firm gave you (from connection_params.txt), that the system name matches, and that this account has API (R|Protocol) access enabled — then try again."
   }

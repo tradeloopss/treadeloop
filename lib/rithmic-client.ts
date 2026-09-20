@@ -147,13 +147,68 @@ export interface RithmicAccountSnapshot {
   at: Date
 }
 
-async function connect(uri: string): Promise<WebSocket> {
-  const ws = new WebSocket(uri, { rejectUnauthorized: false })
-  await new Promise<void>((resolve, reject) => {
-    ws.once("open", () => resolve())
-    ws.once("error", reject)
+function openSocket(uri: string): Promise<WebSocket> {
+  return new Promise<WebSocket>((resolve, reject) => {
+    // handshakeTimeout bounds the TLS/HTTP upgrade; the outer timer covers a
+    // socket that connects but then stalls before "open".
+    const ws = new WebSocket(uri, { rejectUnauthorized: false, handshakeTimeout: 12000 })
+    const cleanup = () => {
+      clearTimeout(timer)
+      ws.off("open", onOpen)
+      ws.off("error", onError)
+      ws.off("close", onClose)
+    }
+    const onOpen = () => {
+      cleanup()
+      resolve(ws)
+    }
+    const onError = (err: Error) => {
+      cleanup()
+      try {
+        ws.terminate()
+      } catch {
+        // already closing
+      }
+      reject(err)
+    }
+    const onClose = () => {
+      cleanup()
+      reject(new Error("Rithmic closed the connection before it was ready"))
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      try {
+        ws.terminate()
+      } catch {
+        // already closing
+      }
+      reject(new Error("Timed out connecting to the Rithmic gateway"))
+    }, 15000)
+    ws.once("open", onOpen)
+    ws.once("error", onError)
+    ws.once("close", onClose)
   })
-  return ws
+}
+
+// The connection to a Rithmic gateway from a cloud host can drop during the
+// TLS handshake (a reset, a socket hang up) transiently, so a failed connect
+// is retried a couple of times with a short backoff before giving up. A bad
+// address fails the same way every time and just exhausts the attempts.
+async function connect(uri: string, attempts = 3): Promise<WebSocket> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await openSocket(uri)
+    } catch (err) {
+      lastError = err
+      const message = err instanceof Error ? err.message : String(err)
+      const transient = /TLS|ECONNRESET|socket disconnected|socket hang ?up|ETIMEDOUT|EAI_AGAIN|before secure|closed the connection before|Timed out connecting/i.test(message)
+      if (!transient || attempt === attempts) break
+      console.warn(`[rithmic] connect attempt ${attempt} to ${uri} failed (${message}); retrying`)
+      await new Promise((resolve) => setTimeout(resolve, 600 * attempt))
+    }
+  }
+  throw lastError
 }
 
 // Lists the systems reachable from a given gateway, with no login required
