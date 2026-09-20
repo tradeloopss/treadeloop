@@ -116,6 +116,31 @@ function collectUntilRpCode(root: protobuf.Root, ws: WebSocket, typeName: string
   })
 }
 
+// Collects a fill-history response. Unlike the generic list collector, a
+// message is treated as a fill whenever it carries a symbol — including the
+// terminating message (Rithmic marks the last part of a response with
+// rp_code, and a single-fill response can carry its one fill on that same
+// message, which the generic collector would discard).
+function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Promise<{ fills: any[]; terminal: any }> {
+  return new Promise((resolve, reject) => {
+    const fills: any[] = []
+    const timeout = setTimeout(() => {
+      ws.off("message", onMessage)
+      reject(new Error("Timed out waiting for ResponseShowFillHistory"))
+    }, timeoutMs)
+    const onMessage = (data: WebSocket.RawData) => {
+      const msg = decode(root, "ResponseShowFillHistory", data)
+      if (msg.symbol) fills.push(msg)
+      if (msg.rpCode && msg.rpCode.length > 0) {
+        clearTimeout(timeout)
+        ws.off("message", onMessage)
+        resolve({ fills, terminal: msg })
+      }
+    }
+    ws.on("message", onMessage)
+  })
+}
+
 export interface RithmicAccount {
   fcmId: string
   ibId: string
@@ -486,6 +511,7 @@ async function fetchFillsInSession(
 
   const byId = new Map<string, ParsedFill>()
   let windows = 0
+  let raw = 0
   let lastRp: string[] = ["0"]
   for (let winStart = new Date(start); winStart.getTime() <= today.getTime(); winStart = new Date(winStart.getTime() + FILL_WINDOW_DAYS * DAY_MS)) {
     const winEnd = new Date(Math.min(winStart.getTime() + (FILL_WINDOW_DAYS - 1) * DAY_MS, today.getTime()))
@@ -502,28 +528,41 @@ async function fetchFillsInSession(
         maxRecordCount: 10000,
       }),
     )
-    const { list, terminal } = await collectUntilRpCode(root, ws, "ResponseShowFillHistory", 30000)
+    const { fills, terminal } = await collectFills(root, ws, 30000)
     lastRp = terminal.rpCode ?? []
     // rp_code "7" is Rithmic's "no data" for that window — not an error.
     if (lastRp.length > 0 && lastRp[0] !== "0" && lastRp[0] !== "7") {
       throw new Error(`Fill history request failed: ${lastRp.join(", ")}`)
     }
-    for (const f of list) {
-      if (!(f.symbol && f.fillPrice != null && f.fillSize != null && f.fillTime && f.fillDate)) continue
-      const externalId = f.fillId || `${f.symbol}:${f.fillDate}:${f.fillTime}:${f.fillPrice}:${f.fillSize}`
+    raw += fills.length
+    for (const f of fills) {
+      // Rithmic puts the executed price in fill_price, but some feeds only
+      // fill avg_fill_price or price, and the size in total_fill_size instead
+      // of fill_size — read across all of them so a real fill isn't dropped.
+      const price = f.fillPrice ?? f.avgFillPrice ?? f.price
+      const size = f.fillSize ?? f.totalFillSize
+      // fill_date/fill_time (CCYYMMDD / HH:MM:SS, UTC) when present, otherwise
+      // ssboe (seconds since epoch).
+      const timestamp =
+        f.fillDate && f.fillTime
+          ? `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`
+          : f.ssboe != null
+            ? new Date(Number(f.ssboe) * 1000).toISOString()
+            : null
+      if (!(f.symbol && price != null && size != null && Number(size) > 0 && timestamp)) continue
+      const externalId = f.fillId || `${f.symbol}:${timestamp}:${price}:${size}`
       byId.set(externalId, {
         externalId,
         account: account.accountId,
         symbol: f.symbol,
-        // fill_date is CCYYMMDD, fill_time is HH:MM:SS — both UTC per Rithmic's docs.
-        timestamp: `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`,
+        timestamp,
         action: f.transactionType?.toUpperCase().startsWith("B") ? "Buy" : "Sell",
-        qty: Number(f.fillSize),
-        price: Number(f.fillPrice),
+        qty: Number(size),
+        price: Number(price),
       })
     }
   }
-  console.log(`[rithmic] account ${account.accountId}: ${byId.size} fills over ${windows} window(s) from ${toDateInt(start)} (last rp_code ${lastRp.join(",") || "none"})`)
+  console.log(`[rithmic] account ${account.accountId}: ${raw} raw fill row(s) → ${byId.size} kept, over ${windows} window(s) from ${toDateInt(start)} (last rp_code ${lastRp.join(",") || "none"})`)
   return [...byId.values()]
 }
 
