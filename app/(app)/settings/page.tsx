@@ -14,7 +14,7 @@ export default async function SettingsPage() {
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const [accounts, subscription, owner, pro, credential] = await Promise.all([
-    getAccounts(),
+    getAccounts(true),
     getMySubscription(),
     session?.user ? isOwner(session.user.id) : Promise.resolve(false),
     session?.user ? isPro(session.user.id) : Promise.resolve(false),
@@ -36,6 +36,8 @@ export default async function SettingsPage() {
             currentBalance: a.currentBalance,
             currency: a.currency,
             isLiveSynced: a.isLiveSynced,
+            canSync: a.canSync,
+            archived: a.archived,
             lastSyncedAt: a.lastSyncedAt,
             lastSyncStatus: a.lastSyncStatus,
           }))}

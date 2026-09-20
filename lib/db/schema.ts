@@ -105,6 +105,9 @@ export const tradingAccounts = pgTable("trading_accounts", {
   // broker's balance (lib/broker-balance.ts). Each balance refresh re-does
   // the guess until the user types a size themselves, which clears this.
   startingBalanceInferred: boolean("startingBalanceInferred").notNull().default(false),
+  // Hidden from active views (dashboard, selectors) but kept, with its trades,
+  // so it can be brought back. Deleting is the permanent option.
+  archived: boolean("archived").notNull().default(false),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 

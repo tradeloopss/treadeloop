@@ -283,6 +283,26 @@ export async function disconnectRithmic(connectionId: number) {
   revalidatePath("/add-trade")
 }
 
+// Sync now from the account row's own menu, which knows the account id rather
+// than the connection id.
+export async function syncRithmicAccount(accountId: number): Promise<{ imported: number }> {
+  const userId = await getUserId()
+  const [connection] = await db
+    .select()
+    .from(rithmicConnections)
+    .where(and(eq(rithmicConnections.accountId, accountId), eq(rithmicConnections.userId, userId)))
+  if (!connection) throw new Error("This account isn't connected to Rithmic.")
+  const result = await syncRithmicConnection(connection, "manual")
+  revalidatePath("/dashboard")
+  revalidatePath("/trades")
+  revalidatePath("/journal")
+  revalidatePath("/calendar")
+  revalidatePath("/reports")
+  revalidatePath("/settings")
+  revalidatePath("/add-trade")
+  return result
+}
+
 export async function syncRithmic(connectionId: number) {
   const userId = await getUserId()
   const [connection] = await db

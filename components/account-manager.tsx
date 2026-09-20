@@ -3,7 +3,8 @@
 import type React from "react"
 import { useState, useTransition } from "react"
 import Link from "next/link"
-import { createAccount, deleteAccount } from "@/app/actions/accounts"
+import { createAccount, deleteAccount, updateAccount, setAccountArchived } from "@/app/actions/accounts"
+import { syncRithmicAccount } from "@/app/actions/rithmic"
 import { formatCurrency } from "@/lib/calc"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -26,7 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Trash2, Wallet, MoreVertical, ExternalLink } from "lucide-react"
+import { Plus, Trash2, Wallet, MoreVertical, ExternalLink, Pencil, Upload, PenLine, SlidersHorizontal, Archive, ArchiveRestore, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
@@ -55,6 +56,8 @@ export interface AccountCard {
   currentBalance: string | null
   currency: string
   isLiveSynced: boolean
+  canSync?: boolean
+  archived?: boolean
   lastSyncedAt: Date | null
   lastSyncStatus: string | null
 }
@@ -79,6 +82,8 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
     })
   }
 
+  const [editing, setEditing] = useState<{ account: AccountCard; mode: "edit" | "balance" } | null>(null)
+
   function onDelete(id: number, name: string) {
     startTransition(async () => {
       try {
@@ -86,6 +91,48 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
         toast.success(t("Removed {name}", { name }))
       } catch {
         toast.error(t("Could not remove account"))
+      }
+    })
+  }
+
+  function onArchive(a: AccountCard) {
+    startTransition(async () => {
+      try {
+        await setAccountArchived(a.id, !a.archived)
+        toast.success(a.archived ? t("{name} restored", { name: a.name }) : t("{name} archived", { name: a.name }))
+      } catch {
+        toast.error(t("Could not update account"))
+      }
+    })
+  }
+
+  function onSync(a: AccountCard) {
+    startTransition(async () => {
+      try {
+        const result = await syncRithmicAccount(a.id)
+        toast.success(result.imported > 0 ? (result.imported === 1 ? t("Synced — 1 new trade") : t("Synced — {n} new trades", { n: result.imported })) : t("Already up to date"))
+      } catch (err) {
+        toast.error(err instanceof Error ? t(err.message) : t("Sync failed"))
+      }
+    })
+  }
+
+  function onEditSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!editing) return
+    const fd = new FormData(e.currentTarget)
+    const id = editing.account.id
+    startTransition(async () => {
+      try {
+        if (editing.mode === "balance") {
+          await updateAccount(id, { startingBalance: Number(fd.get("startingBalance")), currency: String(fd.get("currency") ?? "") })
+        } else {
+          await updateAccount(id, { name: String(fd.get("name") ?? ""), broker: String(fd.get("broker") ?? "") })
+        }
+        toast.success(t("Account updated"))
+        setEditing(null)
+      } catch {
+        toast.error(t("Could not update account"))
       }
     })
   }
@@ -168,9 +215,12 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
               {accounts.map((a) => {
                 const balance = a.currentBalance != null ? Number(a.currentBalance) : Number(a.startingBalance)
                 return (
-                  <TableRow key={a.id}>
+                  <TableRow key={a.id} className={cn(a.archived && "opacity-55")}>
                     <TableCell className="py-3.5 font-medium">
-                      <Link href={`/accounts/${a.id}`} className="hover:underline">{a.name}</Link>
+                      <span className="flex items-center gap-2">
+                        <Link href={`/accounts/${a.id}`} className="hover:underline">{a.name}</Link>
+                        {a.archived && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">{t("Archived")}</span>}
+                      </span>
                     </TableCell>
                     <TableCell className="py-3.5">
                       {a.broker ? (
@@ -222,10 +272,30 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
                             </Button>
                           }
                         />
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => setEditing({ account: a, mode: "edit" })}>
+                            <Pencil className="size-4" /> {t("Edit")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem render={<Link href="/add-trade" />}>
+                            <Upload className="size-4" /> {t("File Upload")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem render={<Link href="/add-trade" />}>
+                            <PenLine className="size-4" /> {t("Manual Upload")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setEditing({ account: a, mode: "balance" })}>
+                            <SlidersHorizontal className="size-4" /> {t("Edit Balance")}
+                          </DropdownMenuItem>
+                          {a.canSync && (
+                            <DropdownMenuItem onClick={() => onSync(a)} disabled={pending}>
+                              <RefreshCw className="size-4" /> {t("Auto Sync")}
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => onArchive(a)} disabled={pending}>
+                            {a.archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
+                            {a.archived ? t("Restore Account") : t("Archive Account")}
+                          </DropdownMenuItem>
                           <DropdownMenuItem variant="destructive" onClick={() => onDelete(a.id, a.name)} disabled={pending}>
-                            <Trash2 className="size-4" />
-                            {t("Delete account")}
+                            <Trash2 className="size-4" /> {t("Delete Account")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -237,6 +307,53 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
           </Table>
         </div>
       )}
+
+      <Dialog open={editing != null} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          {editing && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{editing.mode === "balance" ? t("Edit balance") : t("Edit account")}</DialogTitle>
+                <DialogDescription>
+                  {editing.mode === "balance"
+                    ? t("Set the account's starting balance — your equity and drawdown are measured from it.")
+                    : t("Rename the account or change its broker label.")}
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={onEditSubmit} className="space-y-4">
+                {editing.mode === "balance" ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="edit-balance">{t("Starting balance")}</Label>
+                      <Input id="edit-balance" name="startingBalance" type="number" step="0.01" defaultValue={editing.account.startingBalance} />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="edit-currency">{t("Currency")}</Label>
+                      <Input id="edit-currency" name="currency" defaultValue={editing.account.currency} maxLength={3} className="uppercase" />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="edit-name">{t("Name")}</Label>
+                      <Input id="edit-name" name="name" defaultValue={editing.account.name} required />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="edit-broker">{t("Broker / prop firm")}</Label>
+                      <Input id="edit-broker" name="broker" defaultValue={editing.account.broker ?? ""} placeholder={t("Tradovate, NinjaTrader, Apex, TopStep…")} />
+                    </div>
+                  </>
+                )}
+                <DialogFooter>
+                  <Button type="submit" disabled={pending} className="w-full">
+                    {pending ? t("Saving…") : t("Save")}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

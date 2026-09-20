@@ -47,10 +47,14 @@ export async function setActiveAccounts(accountIds: number[] | null) {
   revalidatePath("/playbooks")
 }
 
-export async function getAccounts() {
+export async function getAccounts(includeArchived = false) {
   const userId = await getUserId()
   const [rows, mtRows, rithmicRows] = await Promise.all([
-    db.select().from(tradingAccounts).where(eq(tradingAccounts.userId, userId)).orderBy(desc(tradingAccounts.createdAt)),
+    db
+      .select()
+      .from(tradingAccounts)
+      .where(includeArchived ? eq(tradingAccounts.userId, userId) : and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false)))
+      .orderBy(desc(tradingAccounts.createdAt)),
     db
       .select({ accountId: metatraderConnections.accountId, lastSyncedAt: metatraderConnections.lastSyncedAt, lastSyncStatus: metatraderConnections.lastSyncStatus })
       .from(metatraderConnections)
@@ -65,16 +69,48 @@ export async function getAccounts() {
   for (const r of [...mtRows, ...rithmicRows]) {
     if (r.accountId != null) syncByAccountId.set(r.accountId, { lastSyncedAt: r.lastSyncedAt, lastSyncStatus: r.lastSyncStatus })
   }
+  const rithmicByAccount = new Set(rithmicRows.map((r) => r.accountId).filter((id): id is number => id != null))
 
   return rows.map((a) => {
     const sync = syncByAccountId.get(a.id)
     return {
       ...a,
       isLiveSynced: sync != null,
+      canSync: rithmicByAccount.has(a.id),
       lastSyncedAt: sync?.lastSyncedAt ?? null,
       lastSyncStatus: sync?.lastSyncStatus ?? null,
     }
   })
+}
+
+// Edit an account's own details. Broker-linked accounts keep their trades
+// from the broker, so only the label/size are editable here.
+export async function updateAccount(id: number, data: { name?: string; broker?: string | null; startingBalance?: number; currency?: string }) {
+  const userId = await getUserId()
+  const patch: Partial<typeof tradingAccounts.$inferInsert> = {}
+  if (data.name != null && data.name.trim() !== "") patch.name = data.name.trim()
+  if (data.broker !== undefined) patch.broker = data.broker && data.broker.trim() !== "" ? data.broker.trim() : null
+  if (data.currency != null && data.currency.trim() !== "") patch.currency = data.currency.trim().toUpperCase().slice(0, 3)
+  if (data.startingBalance != null && Number.isFinite(data.startingBalance)) {
+    // A hand-set size is authoritative — stop the inference from overwriting it.
+    patch.startingBalance = String(data.startingBalance)
+    patch.startingBalanceInferred = false
+  }
+  if (Object.keys(patch).length === 0) return
+  await db.update(tradingAccounts).set(patch).where(and(eq(tradingAccounts.id, id), eq(tradingAccounts.userId, userId)))
+  revalidatePath("/settings")
+  revalidatePath("/dashboard")
+  revalidatePath("/add-trade")
+}
+
+// Hide an account from active views without losing it (or bring it back).
+export async function setAccountArchived(id: number, archived: boolean) {
+  const userId = await getUserId()
+  await db.update(tradingAccounts).set({ archived }).where(and(eq(tradingAccounts.id, id), eq(tradingAccounts.userId, userId)))
+  revalidatePath("/settings")
+  revalidatePath("/dashboard")
+  revalidatePath("/add-trade")
+  revalidatePath("/trades")
 }
 
 export async function getAccount(id: number) {
