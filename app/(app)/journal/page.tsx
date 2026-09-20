@@ -3,6 +3,7 @@ import { getJournalEntries } from "@/app/actions/journal"
 import { getAccounts, getActiveAccountIds } from "@/app/actions/accounts"
 import { formatCurrency } from "@/lib/calc"
 import { PageHeader } from "@/components/page-header"
+import { AccountCustomizer } from "@/components/account-customizer"
 import { JournalList, type JournalTrade, type JournalDayEntry } from "@/components/journal-list"
 import { StatCard } from "@/components/stat-card"
 import { recordRequestTiming } from "@/lib/telemetry"
@@ -47,6 +48,7 @@ export default async function JournalPage() {
       <PageHeader
         title={t("Journal")}
         description={t("Automated daily summaries generated from your trades, plus your own reflections")}
+        action={<AccountCustomizer accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} activeAccountIds={activeAccountIds} />}
       />
       <div className="space-y-5 p-4 sm:p-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">

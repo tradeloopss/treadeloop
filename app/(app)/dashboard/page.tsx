@@ -349,7 +349,6 @@ export default async function DashboardPage() {
       <PageHeader
         sticky
         title={t("Dashboard")}
-        description={t("Your trading performance at a glance")}
         action={
           <DashboardHeaderActions
             account={{

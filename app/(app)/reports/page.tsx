@@ -1,9 +1,11 @@
 import { auth } from "@/lib/auth"
 import { headers } from "next/headers"
 import { getTrades } from "@/app/actions/trades"
+import { getAccounts, getActiveAccountIds } from "@/app/actions/accounts"
 import { analyze, formatCurrency, type TradeStat } from "@/lib/calc"
 import { isPro } from "@/lib/subscription"
 import { PageHeader } from "@/components/page-header"
+import { AccountCustomizer } from "@/components/account-customizer"
 import { PnlBarChart, CountBarChart, type BarDatum } from "@/components/reports-charts"
 import { PeriodInsights, type ReportTrade } from "@/components/period-insights"
 import { CrossAnalysis } from "@/components/cross-analysis"
@@ -30,7 +32,7 @@ export default async function ReportsPage() {
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
   const pro = session?.user ? await isPro(session.user.id) : false
-  const rows = await getTrades()
+  const [rows, accounts, activeAccountIds] = await Promise.all([getTrades(), getAccounts(), getActiveAccountIds()])
   const closed = rows.filter((t) => t.status === "closed")
 
   const stats: TradeStat[] = rows.map((t) => ({
@@ -99,7 +101,11 @@ export default async function ReportsPage() {
   void recordRequestTiming("/reports", Date.now() - startedAt)
   return (
     <div>
-      <PageHeader title={t("Reports")} description={t("Deep-dive analytics across markets, timing, and risk")} />
+      <PageHeader
+        title={t("Reports")}
+        description={t("Deep-dive analytics across markets, timing, and risk")}
+        action={<AccountCustomizer accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} activeAccountIds={activeAccountIds} />}
+      />
       <div className="space-y-6 p-4 sm:p-6">
         {pro ? <PeriodInsights trades={reportTrades} /> : <UpgradePrompt feature={t("Period insights")} />}
 

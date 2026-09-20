@@ -43,23 +43,27 @@ export function DashboardHeaderActions({
   )
 
   return (
-    <div className="flex items-center gap-2">
-      <AccountCustomizer {...account} />
+    <>
+      {/* Wide screens: account picker and actions inline. */}
+      <div className="hidden items-center gap-2 sm:flex">
+        <AccountCustomizer {...account} />
+        {secondary}
+      </div>
 
-      <div className="hidden items-center gap-2 sm:flex">{secondary}</div>
-
+      {/* Phone: the account picker and every action live behind one menu. */}
       <Popover>
         <PopoverTrigger
           render={
-            <Button variant="outline" size="icon" className="sm:hidden" aria-label={t("More actions")}>
+            <Button variant="outline" size="icon" className="sm:hidden" aria-label={t("Menu")}>
               <MoreHorizontal className="size-4" />
             </Button>
           }
         />
-        <PopoverContent align="end" className="flex w-56 flex-col gap-2 p-2">
+        <PopoverContent align="end" className="flex w-60 flex-col gap-2 p-2">
+          <AccountCustomizer {...account} />
           {secondary}
         </PopoverContent>
       </Popover>
-    </div>
+    </>
   )
 }
