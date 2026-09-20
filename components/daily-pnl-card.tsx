@@ -10,6 +10,7 @@ import { chipColor, initials } from "@/lib/ui-chips"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { FitToWidth } from "@/components/fit-to-width"
 import { Copy, Download, Printer, Share2, TrendingUp, BadgeCheck, Loader2 } from "lucide-react"
 import { ChevronGlow } from "@/components/chevron-glow"
 import { toast } from "sonner"
@@ -266,7 +267,7 @@ export function DailyPnlShareDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex justify-center py-2">
+        <FitToWidth width={400} className="py-2">
           <div ref={cardRef}>
             <DailyPnlCard
               data={data}
@@ -277,7 +278,7 @@ export function DailyPnlShareDialog({
               generatedAt={generatedAt}
             />
           </div>
-        </div>
+        </FitToWidth>
 
         {loading && (
           <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import type { PayoutSummary } from "@/lib/payout-period"
 import { formatCurrency } from "@/lib/calc"
 import { chipColor, initials } from "@/lib/ui-chips"
 import { Button } from "@/components/ui/button"
+import { FitToWidth } from "@/components/fit-to-width"
 import { BadgeCheck, Copy, Download, Loader2, Printer, Share2 } from "lucide-react"
 import { toast } from "sonner"
 import { useT } from "@/components/locale-provider"
@@ -120,11 +121,11 @@ export function PayoutCertificate({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-center">
-        <div ref={cardRef} className="max-w-full">
+      <FitToWidth width={720}>
+        <div ref={cardRef}>
           <div
             id="payout-certificate"
-            className="relative w-[720px] max-w-full overflow-hidden rounded-[24px] text-white shadow-2xl ring-1 ring-white/10"
+            className="relative w-[720px] overflow-hidden rounded-[24px] text-white shadow-2xl ring-1 ring-white/10"
             style={{ background: "radial-gradient(120% 120% at 80% 30%, #06140c 0%, #050706 45%, #030403 100%)" }}
           >
             <ArrowGlow tone={tone} />
@@ -251,7 +252,7 @@ export function PayoutCertificate({
             </div>
           </div>
         </div>
-      </div>
+      </FitToWidth>
 
       <div className="mx-auto w-full max-w-[720px] space-y-2">
         {!fixedShareUrl && (

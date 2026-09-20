@@ -45,7 +45,7 @@ function PlatformCard({
       onClick={comingSoon ? undefined : onClick}
       disabled={comingSoon}
       className={cn(
-        "flex items-center justify-between gap-3 rounded-xl border p-4 text-start transition-colors",
+        "flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border p-4 text-start transition-colors",
         comingSoon ? "cursor-not-allowed opacity-60" : active ? activeClassName : "border-border hover:bg-accent/40"
       )}
     >
@@ -72,7 +72,7 @@ function PlatformCard({
               </span>
             )}
           </div>
-          <p className="truncate text-sm text-muted-foreground">{description}</p>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </div>
       </div>
       {active && !comingSoon && <Check className="size-5 shrink-0" />}
