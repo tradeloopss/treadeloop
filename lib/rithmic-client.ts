@@ -40,6 +40,12 @@ const PROTO_FILES = [
   "response_account_list.proto",
   "request_show_fill_history.proto",
   "response_show_fill_history.proto",
+  // ReplayExecutions (3509/3510) is the executions-replay path used when the
+  // fill-history request comes back empty; it streams the historical fills as
+  // ExchangeOrderNotification (352) messages rather than in the response.
+  "request_replay_executions.proto",
+  "response_replay_executions.proto",
+  "exchange_order_notification.proto",
   "request_logout.proto",
   "request_rithmic_system_info.proto",
   "response_rithmic_system_info.proto",
@@ -60,6 +66,17 @@ const PROTO_FILES = [
 const ORDER_PLANT = 2
 const HISTORY_PLANT = 3
 const PNL_PLANT = 4
+
+// RequestReplayExecutions (3509) replies not in its own response body but by
+// streaming the historical fills as ExchangeOrderNotification (352) messages,
+// then a ResponseReplayExecutions (3510) with rp_code to mark the end. A fill
+// is an ExchangeOrderNotification whose notify_type is FILL (5); its side is
+// the numeric TransactionType enum (BUY=1). All four come straight from the
+// SDK's exchange_order_notification.proto / the Reference_Guide template table.
+const EXCHANGE_ORDER_NOTIFICATION_TEMPLATE = 352
+const REPLAY_EXECUTIONS_RESPONSE_TEMPLATE = 3510
+const NOTIFY_TYPE_FILL = 5
+const TRANSACTION_TYPE_BUY = 1
 
 let cachedRoot: protobuf.Root | null = null
 function getRoot(): protobuf.Root {
@@ -135,6 +152,39 @@ function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Pr
         clearTimeout(timeout)
         ws.off("message", onMessage)
         resolve({ fills, terminal: msg })
+      }
+    }
+    ws.on("message", onMessage)
+  })
+}
+
+// Collects a ReplayExecutions stream. The fills arrive as ExchangeOrderNotification
+// (352) messages — dispatched by template_id off the Base header, since several
+// message types share the socket — and ResponseReplayExecutions (3510) is the
+// terminator carrying rp_code. Only FILL notifications with a price and size are
+// kept; order-status chatter for the same orders is ignored. On timeout it
+// resolves with whatever it has (terminal null) rather than rejecting, so a
+// missing terminator never discards fills that already streamed in.
+function collectExecutions(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Promise<{ fills: any[]; terminal: any | null }> {
+  const Base = root.lookupType("Base")
+  return new Promise((resolve) => {
+    const fills: any[] = []
+    const finish = (terminal: any | null) => {
+      clearTimeout(timeout)
+      ws.off("message", onMessage)
+      resolve({ fills, terminal })
+    }
+    const timeout = setTimeout(() => finish(null), timeoutMs)
+    const onMessage = (data: WebSocket.RawData) => {
+      const templateId = (Base.decode(data as Buffer) as unknown as { templateId: number }).templateId
+      if (templateId === EXCHANGE_ORDER_NOTIFICATION_TEMPLATE) {
+        const msg = decode(root, "ExchangeOrderNotification", data)
+        // A real fill carries a price and size; order-status chatter doesn't.
+        // notify_type isn't always populated on a replayed row, so it only has
+        // to NOT be some other (non-fill) notification, rather than == FILL.
+        if (msg.fillPrice != null && msg.fillSize != null && (msg.notifyType == null || msg.notifyType === NOTIFY_TYPE_FILL)) fills.push(msg)
+      } else if (templateId === REPLAY_EXECUTIONS_RESPONSE_TEMPLATE) {
+        finish(decode(root, "ResponseReplayExecutions", data))
       }
     }
     ws.on("message", onMessage)
@@ -515,6 +565,74 @@ function addParsedFill(byId: Map<string, ParsedFill>, accountId: string, f: any)
   })
 }
 
+// Reshapes one ExchangeOrderNotification FILL (from a ReplayExecutions stream)
+// into the shared ParsedFill. Unlike a fill-history row, its transaction_type
+// is the numeric TransactionType enum (BUY=1) and its time is ssboe/usecs
+// (seconds+microseconds since epoch), not fill_date/fill_time strings.
+function addExecutionFill(byId: Map<string, ParsedFill>, accountId: string, m: any): void {
+  const price = m.fillPrice ?? m.avgFillPrice
+  const size = m.fillSize ?? m.totalFillSize
+  if (!(m.symbol && price != null && size != null && Number(size) > 0 && m.ssboe != null)) return
+  const timestamp = new Date(Number(m.ssboe) * 1000 + Math.floor(Number(m.usecs || 0) / 1000)).toISOString()
+  // exchange_order_id can repeat across an order's partial fills, so the id
+  // also carries the time and price to stay unique per execution.
+  const externalId = `${m.exchangeOrderId || m.symbol}:${m.ssboe}:${m.usecs || 0}:${price}:${size}`
+  byId.set(externalId, {
+    externalId,
+    account: accountId,
+    symbol: m.symbol,
+    timestamp,
+    action: m.transactionType === TRANSACTION_TYPE_BUY ? "Buy" : "Sell",
+    qty: Number(size),
+    price: Number(price),
+  })
+}
+
+// Pulls fills via RequestReplayExecutions (3509) — the executions-replay path,
+// which streams historical fills as ExchangeOrderNotification messages. This is
+// a different endpoint than RequestShowFillHistory, and returns data for
+// accounts whose fill-history request comes back empty. start/finish_index are
+// seconds-since-epoch (ssboe); the range is capped to MAX_FILL_LOOKBACK_MS.
+async function fetchExecutionsInSession(
+  ws: WebSocket,
+  root: protobuf.Root,
+  account: Pick<RithmicAccount, "fcmId" | "ibId" | "accountId">,
+  since: Date,
+): Promise<ParsedFill[]> {
+  const today = new Date()
+  const start = new Date(Math.max(since.getTime(), today.getTime() - MAX_FILL_LOOKBACK_MS))
+  const startIndex = Math.floor(start.getTime() / 1000)
+  const finishIndex = Math.floor(today.getTime() / 1000)
+
+  const request = async (fields: Record<string, unknown>) => {
+    const collected = collectExecutions(root, ws, 40000)
+    ws.send(encode(root, "RequestReplayExecutions", { templateId: 3509, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId, ...fields }))
+    const { fills, terminal } = await collected
+    const rp: string[] = terminal?.rpCode ?? []
+    if (rp.length > 0 && rp[0] !== "0" && rp[0] !== "7") {
+      throw new Error(`Replay executions request failed: ${rp.join(", ")}`)
+    }
+    return { fills, rp, terminal }
+  }
+
+  let { fills, rp, terminal } = await request({ startIndex, finishIndex })
+  // If the seconds-since-epoch range came back empty, some deployments answer
+  // an unfiltered replay (no indices) with the account's whole execution
+  // history — the same "bounded range is empty, unfiltered isn't" quirk the
+  // fill-history path hits.
+  if (fills.length === 0) {
+    const alt = await request({})
+    if (alt.fills.length > 0) ({ fills, rp, terminal } = alt)
+  }
+
+  const byId = new Map<string, ParsedFill>()
+  for (const m of fills) addExecutionFill(byId, account.accountId, m)
+  const diag = `${account.accountId}: replay ${fills.length} exec→${byId.size} kept, rp=${rp.join(",") || (terminal ? "none" : "timeout")}, from ${startIndex}`
+  console.log(`[rithmic] ${diag}`)
+  rithmicFillDiagnostics.push(diag)
+  return [...byId.values()]
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 // Rithmic answers a fill-history request over a bounded trade-date range, and
 // a single very wide range (e.g. since the epoch) comes back empty. So the
@@ -530,6 +648,18 @@ async function fetchFillsInSession(
   account: Pick<RithmicAccount, "fcmId" | "ibId" | "accountId">,
   since: Date,
 ): Promise<ParsedFill[]> {
+  // Prefer the executions-replay endpoint: for accounts whose fill-history
+  // request returns "no data", it's the path that actually carries the trades.
+  // The fill-history windows below stay as a fallback for setups where replay
+  // is the empty one. A replay error (not just "no data") shouldn't sink the
+  // whole sync, so it falls through to the history request too.
+  try {
+    const replay = await fetchExecutionsInSession(ws, root, account, since)
+    if (replay.length > 0) return replay
+  } catch (err) {
+    console.warn(`[rithmic] replay executions failed for ${account.accountId}, falling back to fill history:`, err instanceof Error ? err.message : err)
+  }
+
   const toDateInt = (d: Date) => Number(d.toISOString().slice(0, 10).replace(/-/g, ""))
   const today = new Date()
   const start = new Date(Math.max(since.getTime(), today.getTime() - MAX_FILL_LOOKBACK_MS))
