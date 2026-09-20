@@ -225,8 +225,19 @@ export function TradingViewPair({
         {showPhone && (
           <div className="mt-3 space-y-3 text-sm text-muted-foreground">
             <p>
-              {t("Phone browsers can't run extensions, so instead you save a one-tap bookmark. It reads your paper trades from inside TradingView, where you're already signed in — your password never leaves your phone — and sends them here.")}
+              {t("Trades you place in the TradingView phone app are saved on TradingView's servers, so a browser signed into your account can pull them in — the app itself can't be read (phones don't let one app see another), but its trades aren't stuck there.")}
             </p>
+            <div className="rounded-md border bg-muted/30 p-3">
+              <p className="font-medium text-foreground">{t("Automatic, on the phone itself")}</p>
+              <p className="mt-1 text-xs">
+                {t("A few phone browsers run extensions. Install the TradeLoop extension in one, open TradingView in it, and it syncs on its own — including everything you trade in the app.")}
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 ps-4 text-xs">
+                <li>{t("Android: Kiwi Browser or Firefox")}</li>
+                <li>{t("iPhone: Orion browser (installs Chrome & Firefox extensions)")}</li>
+              </ul>
+            </div>
+            <p className="text-xs font-medium text-foreground">{t("Or, no install — the one-tap bookmark:")}</p>
             <ol className="list-decimal space-y-2 ps-4">
               <li>
                 {/* The bookmarklet is never navigated to — it's dragged or

@@ -55,7 +55,10 @@ Firefox and Safari users have the paste route, which needs nothing installed.
 
 ## Phones
 
-Phone browsers don't run extensions, and they don't have to. TradingView's paper account is server-side, so a fill placed in the mobile app is in the same `trading/get_trades/{accountId}` history the extension reads. Any paired browser picks it up the next time it opens TradingView — one paired computer covers every device the trader uses. The e2e suite proves this: it shuts every TradingView tab, adds fills as a phone would, checks that nothing is read while no tab is open, then reopens one and checks the trade is journaled.
+TradingView's paper account is server-side, so a fill placed in the mobile **app** is in the same `trading/get_trades/{accountId}` history the extension reads — the app can't be read directly (the OS isolates apps), but its trades aren't stuck in it. Any browser running the extension picks them up:
+
+- **A computer** with the extension covers every device the trader uses — open TradingView on it and the phone-app trades sync (the e2e proves this: it shuts every TradingView tab, adds fills as a phone would, checks nothing is read while no tab is open, then reopens one and checks the trade is journaled).
+- **On the phone itself**, a browser that runs extensions: **Kiwi Browser** or **Firefox** on Android, **Orion** on iOS (it installs Chrome/Firefox extensions). Kiwi and Orion are Chromium/Chrome-extension compatible, so this same MV3 build loads; Firefox needs the port noted above. This is the only way to sync app trades from the phone alone without tapping the bookmark.
 
 A phone-only trader (never any computer) has one more option that needs nothing installed: a **bookmarklet**. The pairing page generates one carrying the pairing token; saved as a bookmark and tapped while TradingView is open, it runs the same two reads from inside the trader's own logged-in tab and posts the fills here. `lib/tradingview-bookmarklet.ts` builds it, and the e2e proves it journals a paper account that only the bookmark touched.
 
