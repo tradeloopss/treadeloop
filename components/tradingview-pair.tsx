@@ -148,7 +148,7 @@ export function TradingViewPair({
               </li>
               <li>{t("Click Load unpacked and pick that folder.")}</li>
             </ol>
-            <p className="text-xs">{t("Works in Chrome, Brave, Edge, Opera and Vivaldi. Safari and Firefox aren't supported yet — the paste route covers those.")}</p>
+            <p className="text-xs">{t("Works in Chrome, Brave, Edge, Opera and Vivaldi. Phones don't run extensions, but they don't need to: pair one computer and the trades you place on your phone are picked up there.")}</p>
           </div>
         )}
       </Step>
@@ -158,7 +158,7 @@ export function TradingViewPair({
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {label ? t("{browser} is now syncing your TradingView paper trades.", { browser: label }) : t("This browser is now syncing your TradingView paper trades.")}{" "}
-              {t("Open TradingView and trade as usual — fills reach the journal within a minute, and anything you traded before pairing is brought in the first time TradingView is open.")}
+              {t("Open TradingView and trade as usual — fills reach the journal within a minute. Trades placed on your phone, or before you paired, are brought in the next time TradingView is open in this browser, so you only need one paired browser anywhere.")}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button render={<a href="https://www.tradingview.com/chart/" target="_blank" rel="noreferrer" />} size="sm">

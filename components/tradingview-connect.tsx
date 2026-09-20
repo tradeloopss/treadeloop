@@ -473,7 +473,7 @@ export function TradingViewConnect({
         )}
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          {t("Fills sync while TradingView is open in a paired browser and back-fill when it opens next; the account's size and balance are read from TradingView. Futures use the contract multiplier for the symbol.")}
+          {t("Trades you place on your phone or tablet count too — the paper account lives on TradingView's servers, so any paired browser picks them up the next time it's open. Fills sync live while TradingView is open; the account's size and balance are read from TradingView, and futures use the contract multiplier for the symbol.")}
         </p>
       </div>
 

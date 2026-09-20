@@ -52,3 +52,9 @@ Verified end to end (`BROWSER=chrome|brave|edge node dk/e2e-tv-extension.mjs`, 4
 The pairing page names the browser it's open in and points at that browser's own extensions page (`brave://extensions`, `edge://extensions`, …). Brave hides itself from the user agent, so it's detected through `navigator.brave` instead.
 
 Firefox and Safari users have the paste route, which needs nothing installed.
+
+## Phones
+
+Phone browsers don't run extensions, and they don't have to. TradingView's paper account is server-side, so a fill placed in the mobile app is in the same `trading/get_trades/{accountId}` history the extension reads. Any paired browser picks it up the next time it opens TradingView — one paired computer covers every device the trader uses. The e2e suite proves this: it shuts every TradingView tab, adds fills as a phone would, checks that nothing is read while no tab is open, then reopens one and checks the trade is journaled.
+
+There is no server-side alternative. TradingView has no third-party API for paper accounts on any plan, and their login is behind Cloudflare's captcha with 2FA and IP-bound sessions, so stored credentials cannot log in at all — quite apart from what holding them would mean for accounts with a live broker attached.
