@@ -126,13 +126,33 @@ export async function createAccount(formData: FormData) {
 
 export async function deleteAccount(id: number) {
   const userId = await getUserId()
-  // Unlink instead of blocking the delete — trades stay, just without an account tag.
-  await db
-    .update(trades)
-    .set({ accountId: null })
-    .where(and(eq(trades.accountId, id), eq(trades.userId, userId)))
+
+  // A broker-linked account (Rithmic today) is a clean reset: its trades come
+  // from the broker and can be re-synced, so drop the connection and those
+  // trades so reconnecting rebuilds a fresh account with its full history,
+  // rather than leaving a zombie connection and orphaned trades that block
+  // the re-import. A manual/CSV account keeps its trades (they can't be
+  // re-fetched) — they're just unlinked from the account tag.
+  const [rithmic] = await db
+    .select({ id: rithmicConnections.id })
+    .from(rithmicConnections)
+    .where(and(eq(rithmicConnections.accountId, id), eq(rithmicConnections.userId, userId)))
+
+  if (rithmic) {
+    await db.delete(rithmicConnections).where(and(eq(rithmicConnections.accountId, id), eq(rithmicConnections.userId, userId)))
+    await db.delete(trades).where(and(eq(trades.accountId, id), eq(trades.userId, userId)))
+  } else {
+    await db
+      .update(trades)
+      .set({ accountId: null })
+      .where(and(eq(trades.accountId, id), eq(trades.userId, userId)))
+  }
+
+  await db.delete(propFirmRules).where(and(eq(propFirmRules.accountId, id), eq(propFirmRules.userId, userId)))
   await db.delete(tradingAccounts).where(and(eq(tradingAccounts.id, id), eq(tradingAccounts.userId, userId)))
   revalidatePath("/dashboard")
   revalidatePath("/trades")
   revalidatePath("/settings")
+  revalidatePath("/add-trade")
+  revalidatePath("/propfirm")
 }

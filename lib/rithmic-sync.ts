@@ -30,6 +30,10 @@ export async function importFillsForConnection(
         .where(
           and(
             eq(trades.userId, userId),
+            // Scoped to this account so re-importing into a freshly created
+            // account (e.g. after the old one was deleted) isn't blocked by
+            // orphaned trades that carry the same broker fill ids.
+            eq(trades.accountId, accountId),
             isNotNull(trades.externalId),
             inArray(
               trades.externalId,
