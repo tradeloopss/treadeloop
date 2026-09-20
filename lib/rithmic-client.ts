@@ -162,19 +162,35 @@ function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Pr
 // (352) messages — dispatched by template_id off the Base header, since several
 // message types share the socket — and ResponseReplayExecutions (3510) is the
 // terminator carrying rp_code. Only FILL notifications with a price and size are
-// kept; order-status chatter for the same orders is ignored. On timeout it
-// resolves with whatever it has (terminal null) rather than rejecting, so a
-// missing terminator never discards fills that already streamed in.
-function collectExecutions(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Promise<{ fills: any[]; terminal: any | null }> {
+// kept; order-status chatter for the same orders is ignored.
+//
+// The connect flow runs on a 60s budget, so this must never sit on a fixed
+// long timeout: it resolves the instant the terminator arrives, and otherwise
+// on quiet — a short wait if nothing ever comes (the terminator isn't sent, or
+// the account simply has no executions), extended each time a message does, so
+// a long run of fills is followed to its end while an unanswered request gives
+// up fast. Resolving (never rejecting) means a missing terminator can't discard
+// fills that already streamed in.
+const REPLAY_FIRST_MSG_MS = 7000
+const REPLAY_IDLE_MS = 3000
+const REPLAY_HARD_CAP_MS = 25000
+function collectExecutions(root: protobuf.Root, ws: WebSocket): Promise<{ fills: any[]; terminal: any | null }> {
   const Base = root.lookupType("Base")
   return new Promise((resolve) => {
     const fills: any[] = []
+    let idle: ReturnType<typeof setTimeout>
     const finish = (terminal: any | null) => {
-      clearTimeout(timeout)
+      clearTimeout(hardCap)
+      clearTimeout(idle)
       ws.off("message", onMessage)
       resolve({ fills, terminal })
     }
-    const timeout = setTimeout(() => finish(null), timeoutMs)
+    const bumpIdle = (ms: number) => {
+      clearTimeout(idle)
+      idle = setTimeout(() => finish(null), ms)
+    }
+    const hardCap = setTimeout(() => finish(null), REPLAY_HARD_CAP_MS)
+    bumpIdle(REPLAY_FIRST_MSG_MS)
     const onMessage = (data: WebSocket.RawData) => {
       const templateId = (Base.decode(data as Buffer) as unknown as { templateId: number }).templateId
       if (templateId === EXCHANGE_ORDER_NOTIFICATION_TEMPLATE) {
@@ -183,8 +199,13 @@ function collectExecutions(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000
         // notify_type isn't always populated on a replayed row, so it only has
         // to NOT be some other (non-fill) notification, rather than == FILL.
         if (msg.fillPrice != null && msg.fillSize != null && (msg.notifyType == null || msg.notifyType === NOTIFY_TYPE_FILL)) fills.push(msg)
+        bumpIdle(REPLAY_IDLE_MS)
       } else if (templateId === REPLAY_EXECUTIONS_RESPONSE_TEMPLATE) {
         finish(decode(root, "ResponseReplayExecutions", data))
+      } else {
+        // An unrelated message on the socket still means it's alive — keep
+        // waiting a little, but don't let stray traffic hold the hard cap.
+        bumpIdle(REPLAY_IDLE_MS)
       }
     }
     ws.on("message", onMessage)
@@ -339,6 +360,58 @@ function queueSession<T>(fn: () => Promise<T>): Promise<T> {
   return run
 }
 
+// Opens a socket and logs it in, returning the live socket. Rithmic allows one
+// session per login, so a login attempted while another session for the same
+// login is still up — a background auto-sync, or a previous connect attempt
+// that hasn't fully closed — is refused with rp_code ["13", "permission
+// denied"]. That collision clears on its own within a second or two, so it's
+// retried a few times before being surfaced (which is a real "API access not
+// enabled" only once the retries are exhausted). Bad credentials fail with a
+// different code and aren't retried.
+async function openLoggedInSession(
+  root: protobuf.Root,
+  user: string,
+  password: string,
+  systemName: string,
+  gatewayUri: string,
+  infraType: number,
+): Promise<WebSocket> {
+  const maxAttempts = 4
+  let lastMessage = ""
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const ws = await connect(gatewayUri)
+    ws.send(
+      encode(root, "RequestLogin", {
+        templateId: 10,
+        templateVersion: TEMPLATE_VERSION,
+        user,
+        password,
+        appName: APP_NAME,
+        appVersion: APP_VERSION,
+        systemName,
+        infraType,
+      }),
+    )
+    const loginResp = decode(root, "ResponseLogin", await waitForOne(ws))
+    if (loginResp.rpCode.length === 1 && loginResp.rpCode[0] === "0") return ws
+
+    const [code, message] = loginResp.rpCode
+    lastMessage = message ?? ""
+    try {
+      ws.send(encode(root, "RequestLogout", { templateId: 12 }))
+    } catch {
+      // best-effort — the socket may already be closing
+    }
+    ws.close()
+
+    const concurrent = code === "13" || /permission denied/i.test(lastMessage)
+    if (!(concurrent && attempt < maxAttempts)) break
+    console.warn(`[rithmic] login attempt ${attempt} refused (${code} ${lastMessage}) — another session may hold this login; retrying`)
+    await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
+  }
+  throw new Error(lastMessage ? `Rithmic login failed: ${lastMessage}` : "Rithmic login failed — check your username and password")
+}
+
 async function withSession<T>(
   user: string,
   password: string,
@@ -349,27 +422,9 @@ async function withSession<T>(
 ): Promise<T> {
   return queueSession(async () => {
     const root = getRoot()
-    const ws = await connect(gatewayUri)
+    const ws = await openLoggedInSession(root, user, password, systemName, gatewayUri, infraType)
 
     try {
-      ws.send(
-        encode(root, "RequestLogin", {
-          templateId: 10,
-          templateVersion: TEMPLATE_VERSION,
-          user,
-          password,
-          appName: APP_NAME,
-          appVersion: APP_VERSION,
-          systemName,
-          infraType,
-        }),
-      )
-      const loginResp = decode(root, "ResponseLogin", await waitForOne(ws))
-      if (!(loginResp.rpCode.length === 1 && loginResp.rpCode[0] === "0")) {
-        const [, message] = loginResp.rpCode
-        throw new Error(message ? `Rithmic login failed: ${message}` : "Rithmic login failed — check your username and password")
-      }
-
       return await work(ws, root)
     } finally {
       try {

@@ -17,6 +17,15 @@ import { rithmicConnections } from "@/lib/db/schema"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
 
 const SYNC_INTERVAL_MS = 60_000
+// A connection synced within this window is skipped. register() (and the
+// runAllConnections it fires) runs on every server boot, so on a platform
+// that spins up a fresh instance per request each cold start would otherwise
+// re-sync every connection immediately — piling concurrent logins onto the
+// same account (Rithmic allows only one session per login, so the extras are
+// refused with "permission denied") and, worse, colliding with a user who's
+// actively connecting that same login right then. Skipping the recently-synced
+// keeps auto-sync to roughly its interval regardless of how often it's kicked.
+const MIN_RESYNC_GAP_MS = 45_000
 
 // Guards against starting more than one interval — instrumentation.ts's
 // register() is documented to run once per server instance, but this is
@@ -25,9 +34,11 @@ let started = false
 
 async function runAllConnections() {
   const connections = await db.select().from(rithmicConnections)
-  if (connections.length === 0) return
+  const now = Date.now()
+  const due = connections.filter((c) => !c.lastSyncedAt || now - c.lastSyncedAt.getTime() >= MIN_RESYNC_GAP_MS)
+  if (due.length === 0) return
   const results = await Promise.allSettled(
-    connections.map((connection) =>
+    due.map((connection) =>
       syncRithmicConnection(connection).catch((err) => {
         console.error(`[rithmic-auto-sync] connection ${connection.id} (${connection.login}) failed:`, err instanceof Error ? err.message : err)
         throw err
@@ -36,7 +47,7 @@ async function runAllConnections() {
   )
   const failed = results.filter((r) => r.status === "rejected").length
   if (failed > 0) {
-    console.log(`[rithmic-auto-sync] synced ${connections.length - failed}/${connections.length} connections (${failed} failed)`)
+    console.log(`[rithmic-auto-sync] synced ${due.length - failed}/${due.length} due connections (${failed} failed)`)
   }
 }
 
