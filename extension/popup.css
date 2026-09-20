@@ -1,0 +1,149 @@
+:root {
+  color-scheme: light dark;
+  --fg: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #2563eb;
+  --ok: #16a34a;
+  --error: #dc2626;
+  --bg: #ffffff;
+  --bg-2: #f3f4f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #374151;
+    --bg: #111827;
+    --bg-2: #1f2937;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  width: 320px;
+  padding: 14px 16px 16px;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+h1 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+p {
+  margin: 0 0 8px;
+}
+.lead {
+  font-weight: 500;
+}
+.muted {
+  color: var(--muted);
+}
+.error {
+  color: var(--error);
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-inline-end: 6px;
+  background: var(--muted);
+}
+.dot.ok {
+  background: var(--ok);
+}
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 8px 0 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.button {
+  display: inline-block;
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.button.secondary {
+  background: transparent;
+  color: var(--accent);
+}
+.button[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+details {
+  margin-top: 10px;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+form {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}

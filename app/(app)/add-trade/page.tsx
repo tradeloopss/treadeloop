@@ -5,7 +5,7 @@ import { getAccounts, getManualEntryLockedAccountIds } from "@/app/actions/accou
 import { getPlaybooks } from "@/app/actions/playbooks"
 import { getMetaTraderConnections } from "@/app/actions/metatrader"
 import { getRithmicConnections } from "@/app/actions/rithmic"
-import { getTradingViewConnections } from "@/app/actions/tradingview"
+import { getTradingViewConnections, getTradingViewPairings } from "@/app/actions/tradingview"
 import { PageHeader } from "@/components/page-header"
 import { BrokerImport } from "@/components/broker-import"
 import { MetaTraderConnect } from "@/components/metatrader-connect"
@@ -21,12 +21,13 @@ import { getT } from "@/lib/i18n/server"
 export default async function AddTradePage() {
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, playbooks, mtConnections, rithmicConnections, tvConnections, pro, lockedAccountIds] = await Promise.all([
+  const [accounts, playbooks, mtConnections, rithmicConnections, tvConnections, tvPairings, pro, lockedAccountIds] = await Promise.all([
     getAccounts(),
     getPlaybooks(),
     getMetaTraderConnections(),
     getRithmicConnections(),
     getTradingViewConnections(),
+    getTradingViewPairings(),
     session?.user ? isPro(session.user.id) : Promise.resolve(false),
     getManualEntryLockedAccountIds(),
   ])
@@ -89,7 +90,7 @@ export default async function AddTradePage() {
             </p>
             {/* The TradingView card carries the paste route, which every plan
                 can use, so it shows whether or not they're on Pro. */}
-            <TradingViewConnect connections={tvConnections} accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} isPro={pro} />
+            <TradingViewConnect connections={tvConnections} pairings={tvPairings} accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} isPro={pro} />
             {pro ? (
               <MetaTraderConnect connections={mtConnections} />
             ) : (
@@ -106,6 +107,7 @@ export default async function AddTradePage() {
               mtConnections={mtConnections}
               rithmicConnections={rithmicConnections}
               tradingviewConnections={tvConnections}
+              tradingviewPairings={tvPairings}
               isPro={pro}
             />
           </TabsContent>

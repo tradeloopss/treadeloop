@@ -8,7 +8,7 @@ import { BrokerImport } from "@/components/broker-import"
 import { MetaTraderConnect, type Connection } from "@/components/metatrader-connect"
 import { RithmicConnect, type RithmicConnection } from "@/components/rithmic-connect"
 import { TradingViewConnect } from "@/components/tradingview-connect"
-import type { TradingViewConnectionView } from "@/app/actions/tradingview"
+import type { TradingViewConnectionView, TradingViewPairingView } from "@/app/actions/tradingview"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
 import { Star, Search, Check } from "lucide-react"
 import { useT } from "@/components/locale-provider"
@@ -78,12 +78,14 @@ export function PropFirmSync({
   mtConnections,
   rithmicConnections,
   tradingviewConnections = [],
+  tradingviewPairings = [],
   isPro,
 }: {
   accounts: { id: number; name: string }[]
   mtConnections: Connection[]
   rithmicConnections: RithmicConnection[]
   tradingviewConnections?: TradingViewConnectionView[]
+  tradingviewPairings?: TradingViewPairingView[]
   isPro: boolean
 }) {
   const t = useT()
@@ -131,7 +133,7 @@ export function PropFirmSync({
             logoClassName="bg-[#2962ff]"
             activeClassName="border-[#2962ff] bg-[#2962ff]/10 text-[#2962ff]"
             name="TradingView"
-            description={t("Paste your paper trades, or auto-sync on a paid TradingView plan")}
+            description={t("Auto-sync paper trades through the TradeLoop extension")}
           />
           <PlatformCard
             active={platform === "metatrader"}
@@ -156,7 +158,7 @@ export function PropFirmSync({
       </Card>
 
       {platform === "rithmic" && isPro && <RithmicConnect connections={rithmicConnections} />}
-      {platform === "tradingview" && <TradingViewConnect connections={tradingviewConnections} accounts={accounts} isPro={isPro} />}
+      {platform === "tradingview" && <TradingViewConnect connections={tradingviewConnections} pairings={tradingviewPairings} accounts={accounts} isPro={isPro} />}
       {platform === "metatrader" && isPro && <MetaTraderConnect connections={mtConnections} />}
       {platform === "other" && <BrokerImport accounts={accounts} />}
     </div>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TradeLoop for TradingView</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/32.png" alt="" width="20" height="20" />
+      <h1>TradeLoop for TradingView</h1>
+    </header>
+
+    <section id="unpaired" hidden>
+      <p class="lead">Not paired with a journal yet.</p>
+      <p id="unpaired-reason" class="error" hidden></p>
+      <p class="muted">
+        In TradeLoop open <strong>Add Trade → Broker Sync → TradingView</strong> and choose
+        <strong>Set up automatic sync</strong>. This extension picks the pairing up from that page by itself.
+      </p>
+      <a id="open-pair" class="button" target="_blank" rel="noreferrer">Open the pairing page</a>
+      <details>
+        <summary>Pair with a code instead</summary>
+        <form id="code-form">
+          <label>Pairing code<input id="code" name="code" autocomplete="off" spellcheck="false" required minlength="16" /></label>
+          <label>TradeLoop address<input id="base" name="base" type="url" required /></label>
+          <button type="submit" class="button">Pair</button>
+          <p id="code-error" class="error" hidden></p>
+        </form>
+      </details>
+    </section>
+
+    <section id="paired" hidden>
+      <p class="lead"><span class="dot ok"></span> Paired with <span id="journal-host"></span></p>
+      <dl>
+        <dt>Last sync</dt>
+        <dd id="last-sync">—</dd>
+        <dt>Paper accounts</dt>
+        <dd id="accounts">—</dd>
+        <dt>Fills sent</dt>
+        <dd id="fills">0</dd>
+      </dl>
+      <p id="problem" class="error" hidden></p>
+      <p id="hint" class="muted"></p>
+      <div class="row">
+        <button id="sync-now" class="button" type="button">Sync now</button>
+        <a id="open-tv" class="button secondary" target="_blank" rel="noreferrer">Open TradingView</a>
+      </div>
+      <button id="unpair" class="link" type="button">Unpair this browser</button>
+    </section>
+
+    <script src="config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

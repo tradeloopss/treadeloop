@@ -8,6 +8,11 @@ import type { TradingViewFill } from "@/lib/tradingview-webhook"
 
 export type TradingViewConnectionRow = typeof tradingviewConnections.$inferSelect
 
+// How far apart two otherwise identical round trips may be and still be
+// taken for the same trade — the widest timezone offset either way, plus a
+// little. See the dedupe in importTradingViewTrades below.
+const TIMEZONE_SLACK_MS = 30 * 60 * 60 * 1000
+
 // Futures are the only market where a contract stands for more than one
 // unit, so the multiplier is only looked up for those.
 function multiplierFor(market: string, symbol: string): number {
@@ -24,22 +29,37 @@ function multiplierFor(market: string, symbol: string): number {
 // Returns how many new trades the fill completed (usually 0 or 1: an opening
 // fill completes nothing, a closing fill completes the round trip).
 export async function recordTradingViewFill(connection: TradingViewConnectionRow, fill: TradingViewFill): Promise<number> {
-  await db
-    .insert(tradingviewFills)
-    .values({
-      connectionId: connection.id,
-      eventId: fill.eventId,
-      symbol: fill.symbol,
-      action: fill.action,
-      quantity: String(fill.quantity),
-      price: String(fill.price),
-      filledAt: fill.filledAt,
-    })
-    // TradingView retries a delivery it thinks failed; the second copy of an
-    // event is not a second fill.
-    .onConflictDoNothing()
-
+  await storeTradingViewFills(connection, [fill])
   return importTradingViewTrades(connection)
+}
+
+// Stores fills without rebuilding trades — for a batch (the extension posts
+// every fill it hasn't been thanked for yet), which rebuilds once at the
+// end. Returns how many were new. A fill seen before is not a second fill:
+// TradingView retries webhook deliveries it thinks failed, and the extension
+// re-sends anything it isn't sure landed.
+export async function storeTradingViewFills(
+  connection: TradingViewConnectionRow,
+  fills: (TradingViewFill & { market?: Market })[],
+): Promise<number> {
+  if (fills.length === 0) return 0
+  const inserted = await db
+    .insert(tradingviewFills)
+    .values(
+      fills.map((fill) => ({
+        connectionId: connection.id,
+        eventId: fill.eventId,
+        symbol: fill.symbol,
+        action: fill.action,
+        quantity: String(fill.quantity),
+        price: String(fill.price),
+        filledAt: fill.filledAt,
+        market: fill.market ?? null,
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ id: tradingviewFills.id })
+  return inserted.length
 }
 
 export async function importTradingViewTrades(connection: TradingViewConnectionRow): Promise<number> {
@@ -61,6 +81,11 @@ export async function importTradingViewTrades(connection: TradingViewConnectionR
     qty: Number(row.quantity),
     price: Number(row.price),
   }))
+  // A fill that named its own market (extension fills do, from the exchange
+  // prefix) decides the market of any trade it closes; the rest take the
+  // connection's. One symbol trades on one market, so the last word wins.
+  const marketBySymbol = new Map<string, Market>()
+  for (const row of stored) if (row.market) marketBySymbol.set(row.symbol, row.market as Market)
 
   const imported = reconstructTrades(parsed, "tradingview")
   if (imported.length === 0) return 0
@@ -79,13 +104,48 @@ export async function importTradingViewTrades(connection: TradingViewConnectionR
       ),
     )
   const seen = new Set(existing.map((r) => r.externalId))
-  const toImport = imported.filter((t) => !seen.has(t.externalId))
+  const unseen = imported.filter((t) => !seen.has(t.externalId))
+  if (unseen.length === 0) return 0
+
+  // The same round trip may already be in this account under another id —
+  // pasted from TradingView's History tab before the extension was paired,
+  // say. Ids differ between routes, so the last guard is the trade itself:
+  // same symbol, side, size and both prices, closed at about the same time.
+  // "About" is generous on purpose: the History tab prints its times in the
+  // chart's own timezone while the extension reports UTC, so one trade can
+  // look most of a day apart depending on where the trader is. Two round
+  // trips matching to six decimal places on both prices, the same size and
+  // the same side, inside the same day, are the same trade.
+  const alreadyJournaled = await db
+    .select({ symbol: trades.symbol, side: trades.side, quantity: trades.quantity, entryPrice: trades.entryPrice, exitPrice: trades.exitPrice, exitTime: trades.exitTime })
+    .from(trades)
+    .where(
+      and(
+        eq(trades.accountId, connection.accountId),
+        eq(trades.status, "closed"),
+        inArray(trades.symbol, [...new Set(unseen.map((t) => t.symbol))]),
+      ),
+    )
+  const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(1e-6, Math.abs(b) * 1e-6)
+  const toImport = unseen.filter(
+    (t) =>
+      !alreadyJournaled.some(
+        (j) =>
+          j.symbol === t.symbol &&
+          j.side === t.side &&
+          near(Number(j.quantity), t.quantity) &&
+          near(Number(j.entryPrice), t.entryPrice) &&
+          near(Number(j.exitPrice ?? NaN), t.exitPrice) &&
+          j.exitTime != null &&
+          Math.abs(j.exitTime.getTime() - new Date(t.exitTime).getTime()) <= TIMEZONE_SLACK_MS,
+      ),
+  )
   if (toImport.length === 0) return 0
 
-  const market = connection.market as Market
   const affectedDays = new Set<string>()
   for (const t of toImport) {
-    const contractMultiplier = multiplierFor(connection.market, t.symbol)
+    const market = marketBySymbol.get(t.symbol) ?? (connection.market as Market)
+    const contractMultiplier = multiplierFor(market, t.symbol)
     const pnl = t.pnl ?? computePnl({ side: t.side, quantity: t.quantity, entryPrice: t.entryPrice, exitPrice: t.exitPrice, fees: t.fees, contractMultiplier })
     await db.insert(trades).values({
       userId: connection.userId,

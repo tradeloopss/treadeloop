@@ -270,22 +270,47 @@ export const rithmicConnections = pgTable("rithmic_connections", {
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 
-// TradingView has no account API a third party can read — its paper trading
-// account lives inside TradingView. What it does have is alert webhooks, so
-// a connection here is a URL we mint: the trader points a TradingView alert
-// at it and every fill that alert reports lands in the journal. The token in
-// that URL is the whole credential, so it's unguessable and revocable by
-// deleting the row.
+// A browser the trader has paired the TradeLoop extension in. TradingView's
+// paper account lives on TradingView's servers and only the trader's own
+// logged-in browser may read it, so the extension does the reading there
+// and posts the fills here with this token. The token identifies the
+// browser, not the TradingView account — nothing of TradingView's login is
+// ever stored. lastSeenAt is null until the extension has checked in once,
+// which is how the pairing page tells a fresh code from a claimed one.
+export const tradingviewPairings = pgTable("tradingview_pairings", {
+  id: serial("id").primaryKey(),
+  userId: text("userId").notNull(),
+  token: text("token").notNull().unique(),
+  label: text("label"), // "Chrome on Windows" — reported by the extension
+  extensionVersion: text("extensionVersion"),
+  lastSeenAt: timestamp("lastSeenAt"),
+  lastSyncAt: timestamp("lastSyncAt"),
+  lastStatus: text("lastStatus"), // ok | error
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+// One TradingView paper account's link into the journal. Two kinds share
+// the table: "extension" rows are created by the paired browser extension,
+// one per paper account it finds, keyed by TradingView's own account id;
+// "webhook" rows are a URL we mint for a TradingView alert to post fills to
+// (a paid-plan route). For a webhook the token in the URL is the whole
+// credential, so it's unguessable and revocable by deleting the row; an
+// extension row carries a token too, only so the column stays uniform.
 export const tradingviewConnections = pgTable("tradingview_connections", {
   id: serial("id").primaryKey(),
   userId: text("userId").notNull(),
   accountId: integer("accountId").notNull(), // links to trading_accounts
   name: text("name").notNull(),
-  // What TradingView symbols on this connection are: decides the contract
-  // multiplier and how the trade is filed. One connection = one market, so
-  // a futures paper account and a crypto one are separate connections.
+  // What TradingView symbols on this connection are when a fill doesn't say
+  // itself: decides the contract multiplier and how the trade is filed. A
+  // webhook connection is one market; extension fills each carry their own
+  // (worked out from the exchange prefix) and fall back to this.
   market: text("market").notNull().default("stocks"),
   webhookToken: text("webhookToken").notNull().unique(),
+  kind: text("kind").notNull().default("webhook"), // webhook | extension
+  pairingId: integer("pairingId"), // the tradingview_pairings row that created an extension connection
+  externalAccountId: text("externalAccountId"), // TradingView's paper account id (extension connections)
   lastEventAt: timestamp("lastEventAt"),
   lastStatus: text("lastStatus"), // ok | error
   lastError: text("lastError"),
@@ -309,6 +334,10 @@ export const tradingviewFills = pgTable(
     quantity: numeric("quantity", { precision: 18, scale: 8 }).notNull(),
     price: numeric("price", { precision: 18, scale: 8 }).notNull(),
     filledAt: timestamp("filledAt").notNull(),
+    // The market this fill's symbol trades on, when the source said (the
+    // extension reads it off TradingView's exchange prefix). Null means
+    // the connection's market applies.
+    market: text("market"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
   },
   (table) => [uniqueIndex("tradingview_fills_event_unique").on(table.connectionId, table.eventId)],

@@ -64,6 +64,13 @@
       "when": 1789856571709,
       "tag": "0008_tradingview",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789863912091,
+      "tag": "0009_tradingview_extension",
+      "breakpoints": true
     }
   ]
 }

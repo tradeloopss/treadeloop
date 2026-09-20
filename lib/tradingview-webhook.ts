@@ -57,7 +57,7 @@ function parseTime(value: string | undefined): Date {
 
 // TradingView symbols arrive either bare ("MNQZ2026") or exchange-qualified
 // ("CME_MINI:MNQZ2026"); the journal keys trades on the bare symbol.
-function normalizeSymbol(raw: string): string {
+export function normalizeTradingViewSymbol(raw: string): string {
   const afterExchange = raw.includes(":") ? raw.slice(raw.lastIndexOf(":") + 1) : raw
   return afterExchange.trim().toUpperCase()
 }
@@ -103,7 +103,7 @@ export function parseTradingViewAlert(rawBody: string): TradingViewFill {
   const price = parseNumber(priceRaw)
   if (price == null || price <= 0) throw new TradingViewAlertError("The alert didn't carry a fill price.")
 
-  const symbol = normalizeSymbol(symbolRaw)
+  const symbol = normalizeTradingViewSymbol(symbolRaw)
   const filledAt = parseTime(pick(body, "time", "timenow", "timestamp"))
 
   // TradingView retries a delivery it thinks failed, and the same alert can

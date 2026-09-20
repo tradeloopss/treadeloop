@@ -2,8 +2,8 @@
 
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { tradingviewConnections, tradingviewFills, tradingAccounts, trades } from "@/lib/db/schema"
-import { and, eq, inArray, isNotNull } from "drizzle-orm"
+import { tradingviewConnections, tradingviewFills, tradingviewPairings, tradingAccounts, trades } from "@/lib/db/schema"
+import { and, desc, eq, inArray, isNotNull, isNull, not } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { randomBytes } from "node:crypto"
@@ -26,12 +26,28 @@ export interface TradingViewConnectionView {
   name: string
   market: string
   accountId: number
+  kind: "webhook" | "extension"
+  externalAccountId: string | null
+  currentBalance: number | null
+  currency: string
   webhookUrl: string
   lastEventAt: Date | null
   lastStatus: string | null
   lastError: string | null
   eventCount: number
   tradeCount: number
+}
+
+// A browser with the TradeLoop extension paired to this journal.
+export interface TradingViewPairingView {
+  id: number
+  label: string | null
+  extensionVersion: string | null
+  lastSeenAt: Date | null
+  lastSyncAt: Date | null
+  lastStatus: string | null
+  lastError: string | null
+  createdAt: Date
 }
 
 // The origin TradingView should post to. In production this is the app's own
@@ -49,13 +65,22 @@ function resolveBaseUrl(): string {
   )
 }
 
-function toView(row: typeof tradingviewConnections.$inferSelect): TradingViewConnectionView {
+function toView(
+  row: typeof tradingviewConnections.$inferSelect,
+  account?: { currentBalance: string | null; currency: string } | null,
+): TradingViewConnectionView {
   return {
     id: row.id,
     name: row.name,
     market: row.market,
     accountId: row.accountId,
-    webhookUrl: `${resolveBaseUrl()}/api/tradingview/${row.webhookToken}`,
+    kind: row.kind === "extension" ? "extension" : "webhook",
+    externalAccountId: row.externalAccountId,
+    currentBalance: account?.currentBalance != null ? Number(account.currentBalance) : null,
+    currency: account?.currency ?? "USD",
+    // An extension connection has a token only so the column stays uniform;
+    // nothing should ever post to it, so no URL is shown for one.
+    webhookUrl: row.kind === "extension" ? "" : `${resolveBaseUrl()}/api/tradingview/${row.webhookToken}`,
     lastEventAt: row.lastEventAt,
     lastStatus: row.lastStatus,
     lastError: row.lastError,
@@ -67,11 +92,54 @@ function toView(row: typeof tradingviewConnections.$inferSelect): TradingViewCon
 export async function getTradingViewConnections(): Promise<TradingViewConnectionView[]> {
   const userId = await getUserId()
   const rows = await db
-    .select()
+    .select({ connection: tradingviewConnections, account: { currentBalance: tradingAccounts.currentBalance, currency: tradingAccounts.currency } })
     .from(tradingviewConnections)
+    .leftJoin(tradingAccounts, eq(tradingAccounts.id, tradingviewConnections.accountId))
     .where(eq(tradingviewConnections.userId, userId))
     .orderBy(tradingviewConnections.createdAt)
-  return rows.map(toView)
+  return rows.map((r) => toView(r.connection, r.account))
+}
+
+// Browsers that have completed pairing. A code that was shown but never
+// picked up isn't a pairing yet, so it isn't listed.
+export async function getTradingViewPairings(): Promise<TradingViewPairingView[]> {
+  const userId = await getUserId()
+  const rows = await db
+    .select()
+    .from(tradingviewPairings)
+    .where(and(eq(tradingviewPairings.userId, userId), not(isNull(tradingviewPairings.lastSeenAt))))
+    .orderBy(desc(tradingviewPairings.lastSeenAt))
+  return rows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    extensionVersion: row.extensionVersion,
+    lastSeenAt: row.lastSeenAt,
+    lastSyncAt: row.lastSyncAt,
+    lastStatus: row.lastStatus,
+    lastError: row.lastError,
+    createdAt: row.createdAt,
+  }))
+}
+
+// Polled by the pairing page while it waits for the extension to pick the
+// code up and check in.
+export async function getTradingViewPairingStatus(pairingId: number): Promise<{ paired: boolean; label: string | null }> {
+  const userId = await getUserId()
+  const [row] = await db
+    .select({ lastSeenAt: tradingviewPairings.lastSeenAt, label: tradingviewPairings.label })
+    .from(tradingviewPairings)
+    .where(and(eq(tradingviewPairings.id, pairingId), eq(tradingviewPairings.userId, userId)))
+  return { paired: row?.lastSeenAt != null, label: row?.label ?? null }
+}
+
+// Forgets a browser. Its next check-in is answered "not paired", which makes
+// the extension drop the token; the paper accounts it created and their
+// trades stay in the journal.
+export async function unpairTradingView(pairingId: number): Promise<void> {
+  const userId = await getUserId()
+  await db.delete(tradingviewPairings).where(and(eq(tradingviewPairings.id, pairingId), eq(tradingviewPairings.userId, userId)))
+  revalidatePath("/add-trade")
+  revalidatePath("/settings")
 }
 
 // Mints the webhook URL and the trading account its fills land in. Nothing
@@ -261,6 +329,7 @@ async function defaultTradingViewAccount(userId: string): Promise<{ id: number; 
     .from(tradingviewConnections)
     .innerJoin(tradingAccounts, eq(tradingAccounts.id, tradingviewConnections.accountId))
     .where(eq(tradingviewConnections.userId, userId))
+    .orderBy(tradingviewConnections.createdAt)
   if (connected) return connected
 
   const [existing] = await db

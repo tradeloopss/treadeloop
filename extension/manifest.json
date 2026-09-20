@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "TradeLoop for TradingView",
+  "version": "1.0.0",
+  "description": "Syncs your TradingView paper-trading fills into your TradeLoop journal automatically while TradingView is open.",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["https://www.tradingview.com/*", "https://www.tradeloop.pro/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tradingview.com/*"],
+      "js": ["config.js", "tradingview.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.tradeloop.pro/*"],
+      "js": ["config.js", "pair.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "TradeLoop for TradingView",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png"
+    }
+  }
+}
