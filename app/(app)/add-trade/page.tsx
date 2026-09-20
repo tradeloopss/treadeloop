@@ -18,6 +18,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Upload, Wifi, Building2, PenLine } from "lucide-react"
 import { getT } from "@/lib/i18n/server"
 
+// Connecting a broker (Rithmic login + account list + fill history + balances,
+// each with its own R|Protocol round trips) can take longer than the default
+// function limit, so this route is given more room.
+export const maxDuration = 60
+
 export default async function AddTradePage() {
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })

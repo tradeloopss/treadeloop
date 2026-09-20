@@ -74,11 +74,19 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
     formData.set("systemName", systemName)
     startTransition(async () => {
       try {
-        await connectRithmic(formData)
-        toast.success(t("Rithmic connected"))
-        onDone()
-      } catch (err) {
-        toast.error(err instanceof Error ? t(err.message) : t("Could not connect"))
+        const result = await connectRithmic(formData)
+        if (result.ok) {
+          toast.success(
+            result.accounts === 1 ? t("Rithmic connected — 1 account synced") : t("Rithmic connected — {n} accounts synced", { n: result.accounts }),
+          )
+          onDone()
+        } else {
+          toast.error(t(result.error))
+        }
+      } catch {
+        // A rejected promise here means the request itself failed (e.g. it
+        // ran past the function's time limit) rather than a handled error.
+        toast.error(t("Connecting took too long — Rithmic may be slow or unreachable right now. Please try again in a moment."))
       }
     })
   }

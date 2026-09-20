@@ -53,25 +53,59 @@ export async function getRithmicConnections() {
   }))
 }
 
-export async function connectRithmic(formData: FormData) {
+export type ConnectRithmicResult = { ok: true; accounts: number } | { ok: false; error: string }
+
+// Turns whatever the R|Protocol client threw into a message worth showing.
+// The client's own messages are already user-facing, but the two most common
+// setup failures deserve a nudge toward the fix.
+function rithmicConnectError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (/timed out|timeout/i.test(msg)) {
+    return "Rithmic didn't respond in time. Check the gateway address is exactly the one your prop firm gave you (from connection_params.txt), that the system name matches, and that this account has API (R|Protocol) access enabled — then try again."
+  }
+  if (/permission denied|\b13\b|denied|not authoriz/i.test(msg)) {
+    return "Rithmic refused access for this login. Prop firms often need to enable API (R|Protocol) access on the account — ask them to turn it on, then try again."
+  }
+  return msg || "Could not connect to Rithmic. Check your details and try again."
+}
+
+// Server actions redact thrown errors in production, and a slow login can
+// outrun the function's time limit — so this returns a result the form can
+// show rather than throwing, and the page sets a longer maxDuration.
+export async function connectRithmic(formData: FormData): Promise<ConnectRithmicResult> {
   const userId = await getUserId()
-  await requirePro(userId, "Live broker & prop firm sync")
   const login = String(formData.get("login") ?? "").trim()
   const password = String(formData.get("password") ?? "").trim()
   const systemName = String(formData.get("systemName") ?? "").trim()
   const gatewayUri = String(formData.get("gatewayUri") ?? "").trim()
 
   if (!login || !password || !systemName || !gatewayUri) {
-    throw new Error("Gateway, system, username, and password are required")
+    return { ok: false, error: "Gateway, system, username, and password are all required." }
   }
 
+  try {
+    await requirePro(userId, "Live broker & prop firm sync")
+    return await runConnectRithmic(userId, login, password, systemName, gatewayUri)
+  } catch (err) {
+    console.error("[rithmic] connect failed", err)
+    return { ok: false, error: err instanceof Error && /Pro feature/.test(err.message) ? err.message : rithmicConnectError(err) }
+  }
+}
+
+async function runConnectRithmic(
+  userId: string,
+  login: string,
+  password: string,
+  systemName: string,
+  gatewayUri: string,
+): Promise<ConnectRithmicResult> {
   // One login pulls the account list AND the initial fill history together —
   // Rithmic rejects a second login attempted right after a prior one closes,
   // so account discovery and the first sync must share a single session.
   const since = new Date(0)
   const { accounts, fillsByAccountId, rmsByAccountId } = await discoverAccountsAndFills(login, password, systemName, gatewayUri, since)
   if (accounts.length === 0) {
-    throw new Error("No Rithmic accounts found for that login")
+    return { ok: false, error: "Connected to Rithmic, but no accounts were found for that login." }
   }
   // Balances live on a different Rithmic plant, so they're a second session.
   // Not fatal if it fails — the account still connects, just without a
@@ -204,6 +238,7 @@ export async function connectRithmic(formData: FormData) {
   revalidatePath("/settings")
   revalidatePath("/add-trade")
   revalidatePath("/propfirm")
+  return { ok: true, accounts: accounts.length }
 }
 
 export async function disconnectRithmic(connectionId: number) {
