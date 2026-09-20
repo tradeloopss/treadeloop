@@ -465,6 +465,15 @@ export async function listRithmicAccounts(
 // generic ParsedFill shape shared with Tradovate's CSV import, so both feed
 // the same reconstructTrades() logic. Does not open its own session — the
 // caller must already be inside one (see withSession).
+const DAY_MS = 24 * 60 * 60 * 1000
+// Rithmic answers a fill-history request over a bounded trade-date range, and
+// a single very wide range (e.g. since the epoch) comes back empty. So the
+// history is pulled in ~90-day windows, and a connect's "everything" is
+// capped at two years back — long enough for any prop-firm account's life,
+// short enough to stay within the login's time budget.
+const FILL_WINDOW_DAYS = 90
+const MAX_FILL_LOOKBACK_MS = 730 * DAY_MS
+
 async function fetchFillsInSession(
   ws: WebSocket,
   root: protobuf.Root,
@@ -472,39 +481,50 @@ async function fetchFillsInSession(
   since: Date,
 ): Promise<ParsedFill[]> {
   const toDateInt = (d: Date) => Number(d.toISOString().slice(0, 10).replace(/-/g, ""))
-  const startIndex = toDateInt(since)
-  const finishIndex = toDateInt(new Date())
+  const today = new Date()
+  const start = new Date(Math.max(since.getTime(), today.getTime() - MAX_FILL_LOOKBACK_MS))
 
-  ws.send(
-    encode(root, "RequestShowFillHistory", {
-      templateId: 3512,
-      fcmId: account.fcmId,
-      ibId: account.ibId,
-      accountId: account.accountId,
-      indexFormat: "trade_date",
-      startIndex,
-      finishIndex,
-      maxRecordCount: 10000,
-    }),
-  )
-  const { list, terminal } = await collectUntilRpCode(root, ws, "ResponseShowFillHistory", 30000)
-  // rp_code "7" is Rithmic's "no data" — not an error, just nothing in range.
-  if (terminal.rpCode.length > 0 && terminal.rpCode[0] !== "0" && terminal.rpCode[0] !== "7") {
-    throw new Error(`Fill history request failed: ${terminal.rpCode.join(", ")}`)
+  const byId = new Map<string, ParsedFill>()
+  let windows = 0
+  let lastRp: string[] = ["0"]
+  for (let winStart = new Date(start); winStart.getTime() <= today.getTime(); winStart = new Date(winStart.getTime() + FILL_WINDOW_DAYS * DAY_MS)) {
+    const winEnd = new Date(Math.min(winStart.getTime() + (FILL_WINDOW_DAYS - 1) * DAY_MS, today.getTime()))
+    windows++
+    ws.send(
+      encode(root, "RequestShowFillHistory", {
+        templateId: 3512,
+        fcmId: account.fcmId,
+        ibId: account.ibId,
+        accountId: account.accountId,
+        indexFormat: "trade_date",
+        startIndex: toDateInt(winStart),
+        finishIndex: toDateInt(winEnd),
+        maxRecordCount: 10000,
+      }),
+    )
+    const { list, terminal } = await collectUntilRpCode(root, ws, "ResponseShowFillHistory", 30000)
+    lastRp = terminal.rpCode ?? []
+    // rp_code "7" is Rithmic's "no data" for that window — not an error.
+    if (lastRp.length > 0 && lastRp[0] !== "0" && lastRp[0] !== "7") {
+      throw new Error(`Fill history request failed: ${lastRp.join(", ")}`)
+    }
+    for (const f of list) {
+      if (!(f.symbol && f.fillPrice != null && f.fillSize != null && f.fillTime && f.fillDate)) continue
+      const externalId = f.fillId || `${f.symbol}:${f.fillDate}:${f.fillTime}:${f.fillPrice}:${f.fillSize}`
+      byId.set(externalId, {
+        externalId,
+        account: account.accountId,
+        symbol: f.symbol,
+        // fill_date is CCYYMMDD, fill_time is HH:MM:SS — both UTC per Rithmic's docs.
+        timestamp: `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`,
+        action: f.transactionType?.toUpperCase().startsWith("B") ? "Buy" : "Sell",
+        qty: Number(f.fillSize),
+        price: Number(f.fillPrice),
+      })
+    }
   }
-
-  return list
-    .filter((f) => f.symbol && f.fillPrice != null && f.fillSize != null && f.fillTime && f.fillDate)
-    .map((f): ParsedFill => ({
-      externalId: f.fillId || `${f.symbol}:${f.fillDate}:${f.fillTime}:${f.fillPrice}:${f.fillSize}`,
-      account: account.accountId,
-      symbol: f.symbol,
-      // fill_date is CCYYMMDD, fill_time is HH:MM:SS — both UTC per Rithmic's docs.
-      timestamp: `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`,
-      action: f.transactionType?.toUpperCase().startsWith("B") ? "Buy" : "Sell",
-      qty: Number(f.fillSize),
-      price: Number(f.fillPrice),
-    }))
+  console.log(`[rithmic] account ${account.accountId}: ${byId.size} fills over ${windows} window(s) from ${toDateInt(start)} (last rp_code ${lastRp.join(",") || "none"})`)
+  return [...byId.values()]
 }
 
 export async function fetchRithmicFills(

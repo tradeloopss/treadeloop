@@ -76,7 +76,7 @@ export async function getRithmicConnections() {
   }))
 }
 
-export type ConnectRithmicResult = { ok: true; accounts: number } | { ok: false; error: string }
+export type ConnectRithmicResult = { ok: true; accounts: number; trades: number } | { ok: false; error: string }
 
 // Turns whatever the R|Protocol client threw into a message worth showing.
 // The client's own messages are already user-facing, but the two most common
@@ -145,6 +145,7 @@ async function runConnectRithmic(
   })
 
   const passwordEnc = encrypt(password)
+  let importedTrades = 0
 
   for (const account of accounts) {
     const accountName = `Rithmic ${account.accountName}`
@@ -216,7 +217,10 @@ async function runConnectRithmic(
 
     const startedAt = Date.now()
     await importFillsForConnection(userId, connectionId, accountId, fills).then(
-      (imported) => recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, imported }),
+      (imported) => {
+        importedTrades += imported
+        return recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, imported })
+      },
       (err) => {
         console.error("Rithmic initial import failed", err)
         return recordSyncRun({ broker: "rithmic", connectionId, userId, trigger: "connect", startedAt, error: err })
@@ -267,7 +271,7 @@ async function runConnectRithmic(
   revalidatePath("/settings")
   revalidatePath("/add-trade")
   revalidatePath("/propfirm")
-  return { ok: true, accounts: accounts.length }
+  return { ok: true, accounts: accounts.length, trades: importedTrades }
 }
 
 export async function disconnectRithmic(connectionId: number) {

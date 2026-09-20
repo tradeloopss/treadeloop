@@ -76,9 +76,9 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
       try {
         const result = await connectRithmic(formData)
         if (result.ok) {
-          toast.success(
-            result.accounts === 1 ? t("Rithmic connected — 1 account synced") : t("Rithmic connected — {n} accounts synced", { n: result.accounts }),
-          )
+          const acct = result.accounts === 1 ? t("Rithmic connected — 1 account") : t("Rithmic connected — {n} accounts", { n: result.accounts })
+          const trades = result.trades === 0 ? t("no past trades found in the last 2 years") : result.trades === 1 ? t("1 past trade imported") : t("{n} past trades imported", { n: result.trades })
+          toast.success(`${acct}, ${trades}`)
           onDone()
         } else {
           toast.error(t(result.error))
