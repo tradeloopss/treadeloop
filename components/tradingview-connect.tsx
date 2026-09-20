@@ -456,7 +456,7 @@ export function TradingViewConnect({
         ) : !hasAutoSync ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed px-4 py-6 text-center">
             <Puzzle className="size-5 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">{t("No browser paired yet. Setup takes about a minute: install the TradeLoop extension, pair it, and open TradingView.")}</p>
+            <p className="text-sm text-muted-foreground">{t("No browser paired yet. Setup takes about a minute: install the TradeLoop extension in Chrome, Brave, Edge, Opera or Vivaldi, pair it, and open TradingView.")}</p>
           </div>
         ) : (
           <div className="space-y-2">

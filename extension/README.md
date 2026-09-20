@@ -34,6 +34,21 @@ node scripts/build-extension.mjs --dev --out .extension-dev --base http://localh
 
 1. Bump `version` in `manifest.json`, rebuild the zip.
 2. Upload the zip at https://chrome.google.com/webstore/devconsole (one-time $5 developer registration). Category: Productivity. The permissions to justify: `storage` (the pairing token and sync status), `alarms` (the once-a-minute nudge), host access to `www.tradingview.com` (where the fills are read) and `www.tradeloop.pro` (where they're posted and where pairing happens).
-3. Once listed, set `NEXT_PUBLIC_TRADELOOP_EXTENSION_URL` to the store URL — the pairing page then shows "Add to Chrome" instead of the zip download.
+3. Once listed, set `NEXT_PUBLIC_TRADELOOP_EXTENSION_URL` to the store URL — the pairing page then shows "Add to <their browser>" instead of the zip download.
 
-Edge and Brave install Chrome Web Store extensions directly. Firefox needs a signed build (AMO) and `background.scripts` in place of `service_worker`; not done yet.
+## Browsers
+
+Verified end to end (`BROWSER=chrome|brave|edge node dk/e2e-tv-extension.mjs`, 42 checks each):
+
+| Browser | Status | Notes |
+| --- | --- | --- |
+| Chrome | ✅ tested | |
+| Brave | ✅ tested | Shields don't interfere — the TradingView call is first-party, and the TradeLoop call carries a bearer token, no cookies |
+| Edge | ✅ tested | |
+| Opera, Vivaldi | ✅ expected | Same Chromium Manifest V3; installs from the Chrome Web Store |
+| Firefox | ❌ not yet | Needs `background.scripts` in place of `service_worker`, a `browser_specific_settings.gecko.id`, and AMO signing (a temporary `about:debugging` load doesn't survive a restart) |
+| Safari | ❌ not yet | Needs an Xcode wrapper project and an Apple developer account |
+
+The pairing page names the browser it's open in and points at that browser's own extensions page (`brave://extensions`, `edge://extensions`, …). Brave hides itself from the user agent, so it's detected through `navigator.brave` instead.
+
+Firefox and Safari users have the paste route, which needs nothing installed.

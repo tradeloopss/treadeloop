@@ -16,6 +16,24 @@ import { useT } from "@/components/locale-provider"
 // waiting for the next poll.
 export const PAIRING_ELEMENT_ID = "tradeloop-pairing"
 
+// Which Chromium browser this is, for the name on the install button and the
+// address of its extensions page. Brave hides itself from the user agent, so
+// it's asked directly; the rest are in the brand list or the UA string.
+function detectBrowser(): { name: string; scheme: string } {
+  const nav = navigator as Navigator & {
+    brave?: { isBrave?: () => Promise<boolean> }
+    userAgentData?: { brands?: { brand: string }[] }
+  }
+  if (nav.brave) return { name: "Brave", scheme: "brave" }
+  const brands = nav.userAgentData?.brands?.map((b) => b.brand).join(" ") ?? ""
+  const ua = navigator.userAgent
+  const has = (needle: string) => brands.includes(needle) || ua.includes(needle)
+  if (has("Edg")) return { name: "Edge", scheme: "edge" }
+  if (has("Opera") || has("OPR")) return { name: "Opera", scheme: "opera" }
+  if (has("Vivaldi")) return { name: "Vivaldi", scheme: "vivaldi" }
+  return { name: "Chrome", scheme: "chrome" }
+}
+
 function Step({ n, title, done, children }: { n: number; title: string; done?: boolean; children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
@@ -45,6 +63,13 @@ export function TradingViewPair({
   const [paired, setPaired] = useState(false)
   const [label, setLabel] = useState<string | null>(null)
   const [showCode, setShowCode] = useState(false)
+  // Every Chromium browser runs the extension, but each keeps its extensions
+  // page at its own address and likes being called by its own name. Resolved
+  // on the client, so the server render stays the same for everyone.
+  const [browser, setBrowser] = useState<{ name: string; scheme: string }>({ name: "Chrome", scheme: "chrome" })
+  useEffect(() => setBrowser(detectBrowser()), [])
+  const browserName = browser.name
+  const extensionsUrl = `${browser.scheme}://extensions`
 
   useEffect(() => {
     if (paired) return
@@ -107,7 +132,7 @@ export function TradingViewPair({
       <Step n={1} title={t("Install the TradeLoop extension")} done={paired}>
         {storeUrl ? (
           <Button render={<a href={storeUrl} target="_blank" rel="noreferrer" />} variant="outline" size="sm">
-            <Puzzle className="size-4" /> {t("Add to Chrome")} <ExternalLink className="size-3.5" />
+            <Puzzle className="size-4" /> {t("Add to {browser}", { browser: browserName })} <ExternalLink className="size-3.5" />
           </Button>
         ) : (
           <div className="space-y-2 text-sm text-muted-foreground">
@@ -117,10 +142,13 @@ export function TradingViewPair({
             <ol className="list-decimal space-y-1 ps-4 text-xs">
               <li>{t("Unzip the download into a folder you'll keep.")}</li>
               <li>
-                {t("In Chrome, Edge or Brave open")} <code dir="ltr" className="rounded bg-muted px-1 font-mono">chrome://extensions</code> {t("and turn on Developer mode (top corner).")}
+                {t("Open your browser's extensions page —")}{" "}
+                <code dir="ltr" className="rounded bg-muted px-1 font-mono">{extensionsUrl}</code>{" "}
+                {t("— and turn on Developer mode (top corner).")}
               </li>
               <li>{t("Click Load unpacked and pick that folder.")}</li>
             </ol>
+            <p className="text-xs">{t("Works in Chrome, Brave, Edge, Opera and Vivaldi. Safari and Firefox aren't supported yet — the paste route covers those.")}</p>
           </div>
         )}
       </Step>
