@@ -66,9 +66,11 @@ export function AccountCustomizer({
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         render={
-          <Button variant="outline" disabled={pending}>
+          // Icon-only on a phone (a round button in the sticky header), the
+          // full labelled button from sm up.
+          <Button variant="outline" size="icon" disabled={pending} aria-label={label} className="sm:w-auto sm:gap-1.5 sm:px-2.5">
             <Wallet className="size-4" />
-            {label}
+            <span className="hidden sm:inline">{label}</span>
           </Button>
         }
       />

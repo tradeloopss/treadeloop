@@ -11,7 +11,7 @@ import { computeDayPnl } from "@/lib/day-pnl"
 import { computeDailyAccountPnl, computeAccountPnlInRange } from "@/lib/daily-account-pnl"
 import { resolvePnlPeriod } from "@/lib/pnl-period"
 import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
-import { PnlCertificateButton } from "@/components/pnl-certificate-button"
+import { DashboardHeaderActions } from "@/components/dashboard-header-actions"
 import { CurrentWeekCalendar } from "@/components/current-week-calendar"
 import { LastWeekReport } from "@/components/last-week-report"
 import type { ReportTrade } from "@/components/period-insights"
@@ -23,16 +23,13 @@ import { computeTradingScore } from "@/lib/trading-score"
 import { DailyPnlMini, type DailyPnlPoint } from "@/components/daily-pnl-mini"
 import { PerformanceSummaryCard } from "@/components/performance-summary"
 import { computePerformanceSummary } from "@/lib/performance-summary"
-import { AccountCustomizer } from "@/components/account-customizer"
 import { Suspense } from "react"
 import { DashboardCanvas } from "@/components/dashboard-canvas"
-import { DashboardTemplateMenu } from "@/components/dashboard-template-menu"
 import { getActiveTemplate, getTemplates } from "@/app/actions/dashboard-templates"
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { DollarSign, Percent, Scale, Activity, TrendingUp, ArrowRight, Wallet } from "lucide-react"
+import { DollarSign, Percent, Scale, Activity, TrendingUp, Wallet } from "lucide-react"
 import { recordRequestTiming } from "@/lib/telemetry"
 import { getLocale, getT } from "@/lib/i18n/server"
 import { intlLocale } from "@/lib/i18n"
@@ -350,44 +347,37 @@ export default async function DashboardPage() {
     <div>
       <AutoSyncBanner events={syncEvents} />
       <PageHeader
+        sticky
         title={t("Dashboard")}
         description={t("Your trading performance at a glance")}
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <AccountCustomizer
-              accounts={accounts.map((a) => ({ id: a.id, name: a.name }))}
-              activeAccountIds={activeAccountIds}
-            />
-            <DashboardTemplateMenu templates={templates} active={template} />
-            <PnlCertificateButton
-              accounts={dailyAccountRows}
-              weeklyAccounts={weeklyAccountRows}
-              allAccounts={{
+          <DashboardHeaderActions
+            account={{
+              accounts: accounts.map((a) => ({ id: a.id, name: a.name })),
+              activeAccountIds,
+            }}
+            template={{ templates, active: template }}
+            certificate={{
+              accounts: dailyAccountRows,
+              weeklyAccounts: weeklyAccountRows,
+              allAccounts: {
                 pnl: allAccountsPnl,
                 breakdown: allAccountsBreakdown,
                 currency: accounts[0]?.currency ?? "USD",
                 accountCount: accounts.length,
-              }}
-              allAccountsWeekly={{
+              },
+              allAccountsWeekly: {
                 pnl: weeklyPnl,
                 breakdown: weeklyBreakdown,
                 currency: accounts[0]?.currency ?? "USD",
                 accountCount: accounts.length,
-              }}
-              date={today}
-              traderName={session?.user.name ?? t("Trader")}
-              traderImage={session?.user.image}
-              isPro={pro}
-            />
-            <Button
-              nativeButton={false}
-              render={
-                <Link href="/trades">
-                  {t("Log a trade")} <ArrowRight className="size-4" />
-                </Link>
-              }
-            />
-          </div>
+              },
+              date: today,
+              traderName: session?.user.name ?? t("Trader"),
+              traderImage: session?.user.image,
+              isPro: pro,
+            }}
+          />
         }
       />
 
