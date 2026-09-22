@@ -42,22 +42,22 @@ function FirmTile({ name, custom, onClick }: { name: string; custom?: boolean; o
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col items-center gap-2 rounded-xl border p-4 text-center transition-colors hover:border-primary hover:bg-accent/40"
+      className="flex flex-col items-center gap-2.5 rounded-2xl border bg-card p-4 text-center transition-colors hover:border-primary hover:bg-accent/40"
     >
-      <div className="flex size-12 items-center justify-center overflow-hidden rounded-xl bg-muted">
+      <div className="flex size-14 items-center justify-center overflow-hidden rounded-2xl bg-muted">
         {custom ? (
-          <Plus className="size-5 text-muted-foreground" />
+          <Plus className="size-6 text-muted-foreground" />
         ) : logo ? (
-          <Image src={logo} alt="" width={48} height={48} className="size-full object-cover" />
+          <Image src={logo} alt="" width={56} height={56} className="size-full object-cover" />
         ) : (
-          <span className="text-lg font-bold text-muted-foreground">{name.charAt(0).toUpperCase()}</span>
+          <span className="text-xl font-bold text-muted-foreground">{name.charAt(0).toUpperCase()}</span>
         )}
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 space-y-0.5">
         <div className="truncate text-sm font-semibold">{custom ? t("Other") : name}</div>
         <div className="text-xs text-muted-foreground">{custom ? t("Custom gateway") : t("Auto Sync")}</div>
       </div>
-      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-600 uppercase dark:text-amber-400">
+      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-600 uppercase dark:text-amber-400">
         {t("Futures")}
       </span>
     </button>
@@ -150,7 +150,7 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
         {loadingSystems ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("Loading…")}</div>
         ) : (
-          <div className="grid max-h-[52vh] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+          <div className="grid max-h-[52vh] grid-cols-2 gap-2.5 overflow-y-auto p-0.5 sm:grid-cols-4">
             {filtered.map((s) => (
               <FirmTile key={s} name={s} onClick={() => selectFirm(s)} />
             ))}
@@ -311,7 +311,7 @@ export function RithmicConnect({ connections }: { connections: RithmicConnection
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> {t("Connect")}</Button>} />
-          <DialogContent className="sm:max-w-2xl">
+          <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>{t("Connect Rithmic")}</DialogTitle>
               <DialogDescription>
