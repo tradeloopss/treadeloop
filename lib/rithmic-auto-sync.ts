@@ -27,6 +27,19 @@ const SYNC_INTERVAL_MS = 60_000
 // keeps auto-sync to roughly its interval regardless of how often it's kicked.
 const MIN_RESYNC_GAP_MS = 45_000
 
+// Exponential backoff for a connection that keeps failing. Rithmic throttles
+// connections from cloud IPs, and retrying a throttled account every 60s only
+// feeds the throttle (and spams the sync log with identical timeouts). So each
+// consecutive failure pushes the next attempt further out — 2, 4, 8… minutes,
+// capped — which lets the throttle window clear and keeps a dead account from
+// drowning out the healthy ones. A single success resets it to the normal
+// cadence. State is in-memory, which is enough: it lives in the same long-
+// running process as the interval, and a process restart just means one
+// un-backed-off attempt, which is harmless.
+const BACKOFF_BASE_MS = 120_000
+const BACKOFF_MAX_MS = 30 * 60_000
+const backoff = new Map<number, { failures: number; nextAttempt: number }>()
+
 // Guards against starting more than one interval — instrumentation.ts's
 // register() is documented to run once per server instance, but this is
 // cheap insurance against dev-mode module re-evaluation stacking up timers.
@@ -35,15 +48,29 @@ let started = false
 async function runAllConnections() {
   const connections = await db.select().from(rithmicConnections)
   const now = Date.now()
-  const due = connections.filter((c) => !c.lastSyncedAt || now - c.lastSyncedAt.getTime() >= MIN_RESYNC_GAP_MS)
+  const due = connections.filter((c) => {
+    if (c.lastSyncedAt && now - c.lastSyncedAt.getTime() < MIN_RESYNC_GAP_MS) return false
+    const b = backoff.get(c.id)
+    return !b || now >= b.nextAttempt
+  })
+  // Drop backoff state for connections that no longer exist, so the map can't
+  // grow without bound as connections come and go.
+  const liveIds = new Set(connections.map((c) => c.id))
+  for (const id of backoff.keys()) if (!liveIds.has(id)) backoff.delete(id)
   if (due.length === 0) return
   const results = await Promise.allSettled(
-    due.map((connection) =>
-      syncRithmicConnection(connection).catch((err) => {
-        console.error(`[rithmic-auto-sync] connection ${connection.id} (${connection.login}) failed:`, err instanceof Error ? err.message : err)
+    due.map(async (connection) => {
+      try {
+        await syncRithmicConnection(connection)
+        backoff.delete(connection.id)
+      } catch (err) {
+        const failures = (backoff.get(connection.id)?.failures ?? 0) + 1
+        const delay = Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS)
+        backoff.set(connection.id, { failures, nextAttempt: Date.now() + delay })
+        console.error(`[rithmic-auto-sync] connection ${connection.id} (${connection.login}) failed (#${failures}, next try in ${Math.round(delay / 60_000)}m):`, err instanceof Error ? err.message : err)
         throw err
-      })
-    )
+      }
+    })
   )
   const failed = results.filter((r) => r.status === "rejected").length
   if (failed > 0) {

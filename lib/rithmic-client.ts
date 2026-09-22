@@ -138,7 +138,7 @@ function collectUntilRpCode(root: protobuf.Root, ws: WebSocket, typeName: string
 // terminating message (Rithmic marks the last part of a response with
 // rp_code, and a single-fill response can carry its one fill on that same
 // message, which the generic collector would discard).
-function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Promise<{ fills: any[]; terminal: any }> {
+function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 12000): Promise<{ fills: any[]; terminal: any }> {
   return new Promise((resolve, reject) => {
     const fills: any[] = []
     const timeout = setTimeout(() => {
@@ -171,9 +171,9 @@ function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 30000): Pr
 // a long run of fills is followed to its end while an unanswered request gives
 // up fast. Resolving (never rejecting) means a missing terminator can't discard
 // fills that already streamed in.
-const REPLAY_FIRST_MSG_MS = 7000
+const REPLAY_FIRST_MSG_MS = 6000
 const REPLAY_IDLE_MS = 3000
-const REPLAY_HARD_CAP_MS = 25000
+const REPLAY_HARD_CAP_MS = 12000
 function collectExecutions(root: protobuf.Root, ws: WebSocket): Promise<{ fills: any[]; terminal: any | null }> {
   const Base = root.lookupType("Base")
   return new Promise((resolve) => {
@@ -296,7 +296,7 @@ function openSocket(uri: string): Promise<WebSocket> {
 // backoff before giving up. That handshake-timeout case is the main thing the
 // background auto-sync trips on, and it usually clears within a retry or two.
 // A bad address fails the same way every time and just exhausts the attempts.
-async function connect(uri: string, attempts = 5): Promise<WebSocket> {
+async function connect(uri: string, attempts = 3): Promise<WebSocket> {
   let lastError: unknown
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
@@ -376,8 +376,8 @@ function queueSession<T>(fn: () => Promise<T>): Promise<T> {
 // this rides them out under a wall-clock budget rather than surfacing the first
 // blip. Only a real dead end stops it early: bad credentials / no API access
 // (a login refusal that isn't the concurrency one), which no retry can fix.
-const LOGIN_RESPONSE_TIMEOUT_MS = 9000
-const SESSION_OPEN_BUDGET_MS = 32000
+const LOGIN_RESPONSE_TIMEOUT_MS = 8000
+const SESSION_OPEN_BUDGET_MS = 14000
 async function openLoggedInSession(
   root: protobuf.Root,
   user: string,
@@ -697,7 +697,7 @@ async function fetchExecutionsInSession(
   const finishIndex = Math.floor(today.getTime() / 1000)
 
   const request = async (fields: Record<string, unknown>) => {
-    const collected = collectExecutions(root, ws, 40000)
+    const collected = collectExecutions(root, ws)
     ws.send(encode(root, "RequestReplayExecutions", { templateId: 3509, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId, ...fields }))
     const { fills, terminal } = await collected
     const rp: string[] = terminal?.rpCode ?? []
@@ -711,8 +711,10 @@ async function fetchExecutionsInSession(
   // If the seconds-since-epoch range came back empty, some deployments answer
   // an unfiltered replay (no indices) with the account's whole execution
   // history — the same "bounded range is empty, unfiltered isn't" quirk the
-  // fill-history path hits.
-  if (fills.length === 0) {
+  // fill-history path hits. Only worth a second request when Rithmic actually
+  // answered the first (a terminal arrived): a null terminal means the request
+  // timed out — the connection is throttled, so a retry just times out again.
+  if (fills.length === 0 && terminal) {
     const alt = await request({})
     if (alt.fills.length > 0) ({ fills, rp, terminal } = alt)
   }
@@ -733,6 +735,9 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // short enough to stay within the login's time budget.
 const FILL_WINDOW_DAYS = 90
 const MAX_FILL_LOOKBACK_MS = 730 * DAY_MS
+// Wall-clock ceiling for the windowed fill-history pull, so a throttled or
+// merely-slow connection can't stretch it across many windows into minutes.
+const FILL_HISTORY_BUDGET_MS = 25000
 
 async function fetchFillsInSession(
   ws: WebSocket,
@@ -760,6 +765,12 @@ async function fetchFillsInSession(
   let windows = 0
   let raw = 0
   let lastRp: string[] = ["0"]
+  // A hard ceiling on the whole windowed pull. A single hung request already
+  // aborts (collectFills rejects on timeout), but under mild throttle every
+  // window can answer slowly-but-not-quite-timing-out, and 9 windows × two
+  // index formats of that would still run for minutes — so once the budget is
+  // spent, stop with whatever's in hand rather than dragging the sync out.
+  const fetchDeadline = Date.now() + FILL_HISTORY_BUDGET_MS
   const requestWindow = async (indexFormat: "trade_date" | "ssboe", startIndex: number, finishIndex: number) => {
     ws.send(
       encode(root, "RequestShowFillHistory", {
@@ -773,7 +784,7 @@ async function fetchFillsInSession(
         maxRecordCount: 10000,
       }),
     )
-    const { fills, terminal } = await collectFills(root, ws, 30000)
+    const { fills, terminal } = await collectFills(root, ws, 12000)
     const rp = terminal.rpCode ?? []
     if (rp.length > 0 && rp[0] !== "0" && rp[0] !== "7") {
       throw new Error(`Fill history request failed: ${rp.join(", ")}`)
@@ -782,6 +793,10 @@ async function fetchFillsInSession(
   }
 
   for (let winStart = new Date(start); winStart.getTime() <= today.getTime(); winStart = new Date(winStart.getTime() + FILL_WINDOW_DAYS * DAY_MS)) {
+    if (Date.now() > fetchDeadline) {
+      console.warn(`[rithmic] fill-history budget spent for ${account.accountId} after ${windows} window(s); stopping`)
+      break
+    }
     const winEnd = new Date(Math.min(winStart.getTime() + (FILL_WINDOW_DAYS - 1) * DAY_MS, today.getTime()))
     windows++
     let { fills, rp } = await requestWindow("trade_date", toDateInt(winStart), toDateInt(winEnd))
@@ -807,7 +822,7 @@ async function fetchFillsInSession(
   if (byId.size === 0) {
     windows++
     ws.send(encode(root, "RequestShowFillHistory", { templateId: 3512, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId, maxRecordCount: 10000 }))
-    const { fills, terminal } = await collectFills(root, ws, 30000)
+    const { fills, terminal } = await collectFills(root, ws, 12000)
     const rp = terminal.rpCode ?? []
     if (!(rp.length > 0 && rp[0] !== "0" && rp[0] !== "7")) {
       lastRp = rp
