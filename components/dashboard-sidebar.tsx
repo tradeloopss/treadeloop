@@ -34,6 +34,7 @@ import {
   ChevronsRight,
   ShieldCheck,
   Banknote,
+  CandlestickChart,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -44,6 +45,7 @@ const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
   { href: "/journal", label: "Journal", icon: NotebookPen },
+  { href: "/backtest", label: "Backtesting", icon: CandlestickChart },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },

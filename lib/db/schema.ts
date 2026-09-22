@@ -430,6 +430,15 @@ export const trades = pgTable(
   // per account (not globally) — the same underlying broker fill can be
   // legitimately imported into more than one app account.
   externalId: text("externalId"),
+  // Where this trade came from: backtest | rithmic | tradovate | manual | csv.
+  // Null on rows created before this column existed. The whole point is that a
+  // backtested trade flows into the SAME trade log/analytics as a live one but
+  // stays distinguishable (and filterable) by its origin.
+  source: text("source"),
+  // Links a backtested trade back to the backtest_sessions row it was closed
+  // in, so the session's results view can pull exactly its own trades. Null
+  // for every non-backtest trade.
+  backtestSessionId: integer("backtestSessionId"),
   // Set when the user generates a public share link for this trade's P&L card.
   shareToken: text("shareToken").unique(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
@@ -448,6 +457,54 @@ export const journalEntries = pgTable("journal_entries", {
   notes: text("notes"),
   mood: text("mood"), // e.g. calm | anxious | confident | frustrated
   createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+// A manual historical backtest / replay session. The working state that only
+// matters while a replay is in progress — the open orders and the open
+// position — lives here as JSONB rather than in their own tables: they're
+// ephemeral, always read and written together, and never queried across
+// sessions. The moment a position closes it becomes a real row in `trades`
+// (source = "backtest", backtestSessionId = this id), so it flows into the
+// existing journal and analytics like any other trade; nothing about results
+// is duplicated here. accountId / propFirmRulesId are set only when the trader
+// runs the session against one of their real accounts' prop-firm rules.
+export const backtestSessions = pgTable("backtest_sessions", {
+  id: serial("id").primaryKey(),
+  userId: text("userId").notNull(),
+  name: text("name"),
+  symbol: text("symbol").notNull(), // provider symbol, e.g. "NQ=F", "BTC-USD"
+  market: text("market").notNull().default("futures"),
+  provider: text("provider").notNull().default("yahoo"),
+  timeframe: text("timeframe").notNull().default("5m"), // chart timeframe
+  // Execution timeframe — the (lower) resolution the fill engine steps at to
+  // resolve intrabar SL/TP order. Equal to `timeframe` for the MVP; kept as
+  // its own column so a 1m/tick execution layer can be added without a schema
+  // change.
+  executionTimeframe: text("executionTimeframe").notNull().default("5m"),
+  // The historical window this session replays, and how far the cursor has
+  // advanced through it (market time, never wall-clock).
+  rangeStart: timestamp("rangeStart").notNull(),
+  rangeEnd: timestamp("rangeEnd").notNull(),
+  currentTime: timestamp("currentTime").notNull(),
+  startingBalance: numeric("startingBalance", { precision: 18, scale: 2 }).notNull().default("50000"),
+  currentBalance: numeric("currentBalance", { precision: 18, scale: 2 }).notNull().default("50000"),
+  speed: integer("speed").notNull().default(1), // 1 | 2 | 5 | 10 | 20
+  status: text("status").notNull().default("active"), // active | paused | completed
+  // True for "random date" mode — the window was chosen for the trader and the
+  // dates stay hidden in the UI until the session ends.
+  randomMode: boolean("randomMode").notNull().default(false),
+  // Real account whose prop-firm rules to simulate, when the trader opts in.
+  accountId: integer("accountId"),
+  simulatePropRules: boolean("simulatePropRules").notNull().default(false),
+  // Working state — see the table comment. openOrders: pending limit/stop
+  // orders; openPosition: the single current position (one-position MVP).
+  openOrders: jsonb("openOrders").$type<unknown[]>().notNull().default([]),
+  openPosition: jsonb("openPosition").$type<unknown>(),
+  // Free-form UI settings (indicators, risk %, default qty) so the workspace
+  // reopens the way the trader left it.
+  settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
 })
 
 // Whop subscription state, kept in sync via the /api/webhooks/whop handler.
