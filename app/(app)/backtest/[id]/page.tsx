@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { BacktestWorkspace, type WorkspaceSession } from "@/components/backtest/backtest-workspace"
 import { BacktestResults, type ResultsData } from "@/components/backtest/backtest-results"
 import { analyze } from "@/lib/calc"
+import { getAdmin } from "@/lib/admin/guard"
 import { getT } from "@/lib/i18n/server"
 import { ChevronLeft } from "lucide-react"
 
@@ -13,6 +14,8 @@ const toSec = (d: Date) => Math.floor(new Date(d).getTime() / 1000)
 
 export default async function BacktestSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  // Admin-only while in progress (a non-admin has no sessions anyway).
+  if (!(await getAdmin())) notFound()
   const t = await getT()
   const session = await getBacktestSession(Number(id))
   if (!session) notFound()

@@ -1,19 +1,21 @@
 "use server"
 
-import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { backtestSessions, trades } from "@/lib/db/schema"
 import { and, desc, eq } from "drizzle-orm"
-import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { computePnl, computeRMultiple, contractMultiplierForSymbol } from "@/lib/calc"
 import { instrumentMarket, timeframeSeconds } from "@/lib/market-data"
 import { regenerateJournalForDay } from "@/app/actions/trades"
+import { getAdmin } from "@/lib/admin/guard"
 
+// Backtesting is admin-only while it's still in progress, so every action here
+// requires an admin — a non-admin who calls one directly is refused, not just
+// hidden from the nav.
 async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) throw new Error("Unauthorized")
-  return session.user.id
+  const admin = await getAdmin()
+  if (!admin) throw new Error("Backtesting isn't available on your account yet.")
+  return admin.id
 }
 
 export type BacktestSession = typeof backtestSessions.$inferSelect

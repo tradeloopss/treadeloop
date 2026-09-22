@@ -45,7 +45,9 @@ const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
   { href: "/journal", label: "Journal", icon: NotebookPen },
-  { href: "/backtest", label: "Backtesting", icon: CandlestickChart },
+  // Admin-only while it's still being built; everyone else sees a "Soon" badge
+  // and the page shows a coming-soon screen.
+  { href: "/backtest", label: "Backtesting", icon: CandlestickChart, soon: true },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },
@@ -177,6 +179,11 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                     >
                       <Icon className="size-4 shrink-0" />
                       <span className={cn(collapsed && "md:hidden")}>{t(link.label)}</span>
+                      {"soon" in link && link.soon && !isAdmin && (
+                        <span className={cn("ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground uppercase", collapsed && "md:hidden")}>
+                          {t("Soon")}
+                        </span>
+                      )}
                     </Link>
                   }
                 />

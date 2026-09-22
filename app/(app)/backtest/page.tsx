@@ -1,9 +1,16 @@
 import { getBacktestSessions } from "@/app/actions/backtest"
 import { PageHeader } from "@/components/page-header"
 import { BacktestManager, type BacktestSessionCard } from "@/components/backtest/backtest-manager"
+import { BacktestComingSoon } from "@/components/backtest/backtest-coming-soon"
+import { getAdmin } from "@/lib/admin/guard"
 import { getT } from "@/lib/i18n/server"
 
 export default async function BacktestPage() {
+  // Admin-only while the feature is still in progress; everyone else sees the
+  // coming-soon screen. Non-admins never reach the session server actions.
+  const admin = await getAdmin()
+  if (!admin) return <BacktestComingSoon />
+
   const t = await getT()
   const sessions = await getBacktestSessions()
 
