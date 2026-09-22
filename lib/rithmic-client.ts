@@ -366,14 +366,18 @@ function queueSession<T>(fn: () => Promise<T>): Promise<T> {
   return run
 }
 
-// Opens a socket and logs it in, returning the live socket. Rithmic allows one
-// session per login, so a login attempted while another session for the same
-// login is still up — a background auto-sync, or a previous connect attempt
-// that hasn't fully closed — is refused with rp_code ["13", "permission
-// denied"]. That collision clears on its own within a second or two, so it's
-// retried a few times before being surfaced (which is a real "API access not
-// enabled" only once the retries are exhausted). Bad credentials fail with a
-// different code and aren't retried.
+// Opens a socket and logs it in, returning the live socket — retrying the
+// whole connect+login as a unit, because from a cloud host every step of it
+// is flaky: the TLS handshake gets throttled ("Opening handshake has timed
+// out"), the login reply can be slow to arrive ("Timed out waiting for Rithmic
+// response"), and — since Rithmic allows one session per login — a login racing
+// a background auto-sync for the same account is refused with rp_code ["13",
+// "permission denied"]. All three clear on a retry within a second or two, so
+// this rides them out under a wall-clock budget rather than surfacing the first
+// blip. Only a real dead end stops it early: bad credentials / no API access
+// (a login refusal that isn't the concurrency one), which no retry can fix.
+const LOGIN_RESPONSE_TIMEOUT_MS = 9000
+const SESSION_OPEN_BUDGET_MS = 32000
 async function openLoggedInSession(
   root: protobuf.Root,
   user: string,
@@ -382,40 +386,72 @@ async function openLoggedInSession(
   gatewayUri: string,
   infraType: number,
 ): Promise<WebSocket> {
-  const maxAttempts = 4
-  let lastMessage = ""
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const ws = await connect(gatewayUri)
-    ws.send(
-      encode(root, "RequestLogin", {
-        templateId: 10,
-        templateVersion: TEMPLATE_VERSION,
-        user,
-        password,
-        appName: APP_NAME,
-        appVersion: APP_VERSION,
-        systemName,
-        infraType,
-      }),
-    )
-    const loginResp = decode(root, "ResponseLogin", await waitForOne(ws))
-    if (loginResp.rpCode.length === 1 && loginResp.rpCode[0] === "0") return ws
-
-    const [code, message] = loginResp.rpCode
-    lastMessage = message ?? ""
+  const deadline = Date.now() + SESSION_OPEN_BUDGET_MS
+  let attempt = 0
+  let lastError: unknown
+  while (Date.now() < deadline) {
+    attempt++
+    let ws: WebSocket | undefined
     try {
-      ws.send(encode(root, "RequestLogout", { templateId: 12 }))
-    } catch {
-      // best-effort — the socket may already be closing
-    }
-    ws.close()
+      // openSocket, not connect(): the retry lives here now, so there's a
+      // single retry layer over the whole handshake+login rather than two
+      // nested ones that could together outrun the request budget.
+      ws = await openSocket(gatewayUri)
+      ws.send(
+        encode(root, "RequestLogin", {
+          templateId: 10,
+          templateVersion: TEMPLATE_VERSION,
+          user,
+          password,
+          appName: APP_NAME,
+          appVersion: APP_VERSION,
+          systemName,
+          infraType,
+        }),
+      )
+      const loginResp = decode(root, "ResponseLogin", await waitForOne(ws, LOGIN_RESPONSE_TIMEOUT_MS))
+      if (loginResp.rpCode.length === 1 && loginResp.rpCode[0] === "0") return ws
 
-    const concurrent = code === "13" || /permission denied/i.test(lastMessage)
-    if (!(concurrent && attempt < maxAttempts)) break
-    console.warn(`[rithmic] login attempt ${attempt} refused (${code} ${lastMessage}) — another session may hold this login; retrying`)
-    await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
+      const [code, message] = loginResp.rpCode
+      closeQuietly(root, ws)
+      ws = undefined
+      const concurrent = code === "13" || /permission denied/i.test(message ?? "")
+      if (!concurrent) {
+        // A non-concurrency refusal is bad credentials or an account without
+        // API access — retrying can't help, so surface it immediately.
+        throw new Error(message ? `Rithmic login failed: ${message}` : "Rithmic login failed — check your username and password")
+      }
+      lastError = new Error(`Rithmic login failed: ${message ?? "permission denied"}`)
+      console.warn(`[rithmic] login attempt ${attempt} refused (${code} ${message}) — another session may hold this login; retrying`)
+    } catch (err) {
+      if (ws) closeQuietly(root, ws)
+      // A hard auth failure thrown just above must not be retried.
+      if (err instanceof Error && /login failed/i.test(err.message) && !/permission denied/i.test(err.message)) throw err
+      const message = err instanceof Error ? err.message : String(err)
+      const transient = /handshake|timed out|timeout|TLS|ECONNRESET|socket|closed the connection|before secure|EAI_AGAIN|ETIMEDOUT/i.test(message)
+      if (!transient) throw err
+      lastError = err
+      console.warn(`[rithmic] session open attempt ${attempt} failed (${message}); retrying`)
+    }
+    const backoff = Math.min(1200 * attempt, 3000)
+    if (Date.now() + backoff >= deadline) break
+    await new Promise((resolve) => setTimeout(resolve, backoff))
   }
-  throw new Error(lastMessage ? `Rithmic login failed: ${lastMessage}` : "Rithmic login failed — check your username and password")
+  throw lastError ?? new Error("Timed out connecting to Rithmic")
+}
+
+// Best-effort logout + close for a socket we're abandoning.
+function closeQuietly(root: protobuf.Root, ws: WebSocket): void {
+  try {
+    ws.send(encode(root, "RequestLogout", { templateId: 12 }))
+  } catch {
+    // the socket may already be closing
+  }
+  try {
+    ws.close()
+  } catch {
+    // already closed
+  }
 }
 
 async function withSession<T>(
@@ -433,12 +469,7 @@ async function withSession<T>(
     try {
       return await work(ws, root)
     } finally {
-      try {
-        ws.send(encode(root, "RequestLogout", { templateId: 12 }))
-      } catch {
-        // best-effort — the socket may already be closing
-      }
-      ws.close()
+      closeQuietly(root, ws)
     }
   })
 }
