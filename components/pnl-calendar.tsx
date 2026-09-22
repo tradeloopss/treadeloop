@@ -190,7 +190,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
             </div>
           ))}
           {cells.map((cell, i) => {
-            if (!cell) return <div key={`empty-${i}`} className="min-h-20 rounded-lg border border-border bg-muted/30 sm:min-h-28 sm:rounded-xl" />
+            if (!cell) return <div key={`empty-${i}`} className="min-h-28 rounded-lg border border-border bg-muted/30 sm:min-h-28 sm:rounded-xl" />
             const day = Number(cell.date.slice(8))
             const has = cell.trades > 0
             const win = cell.pnl > 0
@@ -207,7 +207,7 @@ export function PnlCalendar({ days }: { days: DayPnl[] }) {
               <div
                 key={cell.date}
                 className={cn(
-                  "flex min-h-20 min-w-0 flex-col justify-between overflow-hidden rounded-lg border p-1.5 transition-colors sm:min-h-28 sm:rounded-xl sm:p-2.5",
+                  "flex min-h-28 min-w-0 flex-col justify-between overflow-hidden rounded-lg border p-1.5 transition-colors sm:min-h-28 sm:rounded-xl sm:p-2.5",
                   !has && "border-border bg-muted/30",
                 )}
                 style={fill ? { backgroundColor: fill.bg, borderColor: fill.border } : undefined}
