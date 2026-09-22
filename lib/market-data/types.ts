@@ -49,6 +49,8 @@ export const TIMEFRAMES: Timeframe[] = [
   { id: "30m", label: "30 min", seconds: 1800 },
   { id: "1h", label: "1 hour", seconds: 3600 },
   { id: "1d", label: "1 day", seconds: 86400 },
+  { id: "1w", label: "1 week", seconds: 604800 },
+  { id: "1M", label: "1 month", seconds: 2592000 },
 ]
 
 export function timeframeSeconds(id: string): number {

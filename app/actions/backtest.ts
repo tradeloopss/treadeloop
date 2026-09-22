@@ -27,7 +27,7 @@ const CONTEXT_BARS = 120
 const REPLAY_BARS = 260
 // Rough ceiling on how far back each timeframe has intraday data on the free
 // provider, so random mode never anchors somewhere with no candles.
-const MAX_LOOKBACK_DAYS: Record<string, number> = { "1m": 6, "5m": 55, "15m": 55, "30m": 55, "1h": 700, "1d": 1800 }
+const MAX_LOOKBACK_DAYS: Record<string, number> = { "1m": 6, "5m": 55, "15m": 55, "30m": 55, "1h": 700, "1d": 1800, "1w": 3650, "1M": 7300 }
 
 function computeWindow(timeframe: string, anchorSec: number) {
   const tf = timeframeSeconds(timeframe)

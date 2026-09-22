@@ -6,13 +6,17 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { BacktestChart, type ChartMarker, type ChartPriceLine } from "@/components/backtest/backtest-chart"
+import { BacktestChart, type ChartMarker, type ChartPriceLine, type Drawing, type SeriesType } from "@/components/backtest/backtest-chart"
+import { BacktestChartToolbar } from "@/components/backtest/backtest-chart-toolbar"
+import { BacktestDrawingRail, type DrawingTool } from "@/components/backtest/backtest-drawing-rail"
 import type { Candle } from "@/lib/market-data/types"
 import type { OpenPosition, PendingOrder } from "@/lib/backtest/types"
 import { stepCandle, positionPnl } from "@/lib/backtest/execution-engine"
 import { visibleCandles, nextCandleTime, candleAt, isAtEnd } from "@/lib/backtest/replay-engine"
 import { instrumentSpec, sizeFromRisk, riskAmountFor } from "@/lib/backtest/sizing"
+import { computeIndicators, type IndicatorId } from "@/lib/backtest/indicators"
 import { contractMultiplierForSymbol } from "@/lib/calc"
+import { timeframeSeconds } from "@/lib/market-data"
 import { getBacktestCandles } from "@/app/actions/market-data"
 import { updateBacktestState, saveBacktestTrade, finishBacktest } from "@/app/actions/backtest"
 import { useT } from "@/components/locale-provider"
@@ -67,6 +71,20 @@ export function BacktestWorkspace({ session }: { session: WorkspaceSession }) {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(session.speed || 1)
 
+  // Chart view + drawing state.
+  const [viewTf, setViewTf] = useState(session.timeframe)
+  const [seriesType, setSeriesType] = useState<SeriesType>("candles")
+  const [indicators, setIndicators] = useState<IndicatorId[]>([])
+  const [activeTool, setActiveTool] = useState<DrawingTool>("cursor")
+  const [magnet, setMagnet] = useState(false)
+  const [showDrawings, setShowDrawings] = useState(true)
+  const [drawings, setDrawings] = useState<Drawing[]>([])
+  const [redoStack, setRedoStack] = useState<Drawing[]>([])
+  const pendingPoint = useRef<{ time: number; price: number } | null>(null)
+
+  const currentTimeRef = useRef(currentTime)
+  currentTimeRef.current = currentTime
+
   const [balance, setBalance] = useState(session.currentBalance)
   const [position, setPosition] = useState<OpenPosition | null>(null)
   const [orders] = useState<PendingOrder[]>([])
@@ -80,32 +98,106 @@ export function BacktestWorkspace({ session }: { session: WorkspaceSession }) {
   const [slInput, setSlInput] = useState("")
   const [tpInput, setTpInput] = useState("")
 
-  // Load the session's candle window once.
+  // Fetch the candle window. On the session's own timeframe it uses the stored
+  // replay window; switching timeframe fetches a fresh window around the
+  // current cursor (sized to that timeframe) so the replay stays sensible at
+  // any resolution. Never re-fetches per candle — the array is stepped in
+  // memory.
+  const loadWindow = useCallback(
+    async (tf: string, sessionRange: boolean, initial = false) => {
+      setLoading(true)
+      const tfSec = timeframeSeconds(tf)
+      const from = sessionRange ? session.rangeStart : currentTimeRef.current - 160 * tfSec
+      const to = sessionRange ? session.rangeEnd : currentTimeRef.current + 320 * tfSec
+      const res = await getBacktestCandles({ provider: session.provider, symbol: session.symbol, timeframe: tf, from, to })
+      setLoading(false)
+      if (res.ok) {
+        setCandles(res.candles)
+        setLoadError(null)
+        return true
+      }
+      // Only blank the screen if the very first load fails; a failed timeframe
+      // switch just warns and keeps the current view.
+      if (initial) setLoadError(res.error)
+      return false
+    },
+    [session.provider, session.symbol, session.rangeStart, session.rangeEnd],
+  )
+
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const res = await getBacktestCandles({
-        provider: session.provider,
-        symbol: session.symbol,
-        timeframe: session.timeframe,
-        from: session.rangeStart,
-        to: session.rangeEnd,
-      })
-      if (cancelled) return
-      if (!res.ok) {
-        setLoadError(res.error)
-        setLoading(false)
+    loadWindow(session.timeframe, true, true)
+  }, [loadWindow, session.timeframe])
+
+  async function onTimeframe(tf: string) {
+    if (tf === viewTf) return
+    setPlaying(false)
+    const prev = viewTf
+    setViewTf(tf)
+    const ok = await loadWindow(tf, tf === session.timeframe)
+    if (!ok) {
+      setViewTf(prev)
+      toast.error(t("That timeframe isn't available for this period on the free data feed."))
+    }
+  }
+
+  function toggleIndicator(id: IndicatorId) {
+    setIndicators((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  function pushDrawing(d: Drawing) {
+    setDrawings((prev) => [...prev, d])
+    setRedoStack([])
+  }
+  function undoDrawing() {
+    setDrawings((prev) => {
+      if (!prev.length) return prev
+      setRedoStack((r) => [...r, prev[prev.length - 1]])
+      return prev.slice(0, -1)
+    })
+  }
+  function redoDrawing() {
+    setRedoStack((prev) => {
+      if (!prev.length) return prev
+      setDrawings((d) => [...d, prev[prev.length - 1]])
+      return prev.slice(0, -1)
+    })
+  }
+
+  // The drawing-tool state machine: single-click tools place immediately;
+  // two-click tools (trend line, measure) capture an anchor first.
+  function onChartClick(pt: { time: number; price: number }) {
+    if (activeTool === "cursor") return
+    if (activeTool === "hline") {
+      pushDrawing({ id: crypto.randomUUID(), type: "hline", points: [pt], color: "#3b82f6" })
+      return
+    }
+    if (activeTool === "text") {
+      const text = window.prompt(t("Label text")) ?? ""
+      if (text.trim()) pushDrawing({ id: crypto.randomUUID(), type: "text", points: [pt], color: "#eab308", text: text.trim() })
+      return
+    }
+    if (activeTool === "trend" || activeTool === "measure") {
+      if (!pendingPoint.current) {
+        pendingPoint.current = pt
         return
       }
-      setCandles(res.candles)
-      setLoading(false)
-    })()
-    return () => {
-      cancelled = true
+      const a = pendingPoint.current
+      pendingPoint.current = null
+      if (activeTool === "trend") {
+        pushDrawing({ id: crypto.randomUUID(), type: "trend", points: [a, pt], color: "#3b82f6" })
+      } else {
+        const diff = pt.price - a.price
+        const pct = a.price ? (diff / a.price) * 100 : 0
+        const bars = Math.round(Math.abs(pt.time - a.time) / timeframeSeconds(viewTf))
+        toast(`${diff >= 0 ? "+" : ""}${diff.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%) · ${bars} ${t("bars")}`)
+      }
     }
-  }, [session.provider, session.symbol, session.timeframe, session.rangeStart, session.rangeEnd])
+  }
 
   const visible = useMemo(() => visibleCandles(candles, currentTime), [candles, currentTime])
+  // Indicators are computed on the VISIBLE candles only — they can't peek at
+  // bars the replay hasn't revealed.
+  const indicatorOutputs = useMemo(() => computeIndicators(visible, indicators), [visible, indicators])
   const currentCandle = visible.length ? visible[visible.length - 1] : null
   const price = currentCandle?.close ?? 0
   const atEnd = candles.length > 0 && isAtEnd(candles, currentTime)
@@ -320,18 +412,58 @@ export function BacktestWorkspace({ session }: { session: WorkspaceSession }) {
   return (
     <div className="flex h-[calc(100vh-8.5rem)] flex-col">
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_300px]">
-        {/* Chart */}
-        <div className="relative min-h-[320px] border-b lg:border-r lg:border-b-0">
-          <div className="pointer-events-none absolute top-2 left-2 z-10 flex items-center gap-2 rounded-md bg-background/70 px-2 py-1 text-xs backdrop-blur">
-            <span className="font-semibold">{session.symbol}</span>
-            <span className="text-muted-foreground">{session.timeframe}</span>
-            {session.randomMode && !finished && (
-              <span className="flex items-center gap-1 text-muted-foreground">
-                <Dice5 className="size-3" /> {t("hidden date")}
-              </span>
-            )}
+        {/* Chart column: toolbar on top, drawing rail on the left */}
+        <div className="flex min-h-0 flex-col border-b lg:border-r lg:border-b-0">
+          <BacktestChartToolbar
+            timeframe={viewTf}
+            onTimeframe={onTimeframe}
+            seriesType={seriesType}
+            onSeriesType={setSeriesType}
+            selectedIndicators={indicators}
+            onToggleIndicator={toggleIndicator}
+            canUndo={drawings.length > 0}
+            onUndo={undoDrawing}
+            canRedo={redoStack.length > 0}
+            onRedo={redoDrawing}
+          />
+          <div className="flex min-h-0 flex-1">
+            <BacktestDrawingRail
+              activeTool={activeTool}
+              onTool={setActiveTool}
+              magnet={magnet}
+              onToggleMagnet={() => setMagnet((m) => !m)}
+              showDrawings={showDrawings}
+              onToggleShowDrawings={() => setShowDrawings((s) => !s)}
+              onClear={() => {
+                setDrawings([])
+                setRedoStack([])
+                pendingPoint.current = null
+              }}
+            />
+            <div className="relative min-h-[320px] flex-1">
+              <div className="pointer-events-none absolute top-2 left-2 z-10 flex items-center gap-2 rounded-md bg-background/70 px-2 py-1 text-xs backdrop-blur">
+                <span className="font-semibold">{session.symbol}</span>
+                <span className="text-muted-foreground">{viewTf}</span>
+                {activeTool !== "cursor" && <span className="text-indigo-500">{t("drawing")}</span>}
+                {session.randomMode && !finished && (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <Dice5 className="size-3" /> {t("hidden date")}
+                  </span>
+                )}
+              </div>
+              <BacktestChart
+                candles={visible}
+                markers={markers}
+                priceLines={priceLines}
+                seriesType={seriesType}
+                indicators={indicatorOutputs}
+                drawings={drawings}
+                showDrawings={showDrawings}
+                magnet={magnet}
+                onChartClick={onChartClick}
+              />
+            </div>
           </div>
-          <BacktestChart candles={visible} markers={markers} priceLines={priceLines} />
         </div>
 
         {/* Account + order panel */}

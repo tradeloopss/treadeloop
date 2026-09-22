@@ -18,6 +18,8 @@ const INTERVAL_MAP: Record<string, string> = {
   "30m": "30m",
   "1h": "60m",
   "1d": "1d",
+  "1w": "1wk",
+  "1M": "1mo",
 }
 
 interface YahooChartResponse {
