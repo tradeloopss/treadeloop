@@ -1,55 +1,47 @@
 import { notFound } from "next/navigation"
 import Link from "next/link"
 import { getBacktestSession } from "@/app/actions/backtest"
-import { PageHeader } from "@/components/page-header"
-import { Card } from "@/components/ui/card"
 import { buttonVariants } from "@/components/ui/button"
+import { BacktestWorkspace, type WorkspaceSession } from "@/components/backtest/backtest-workspace"
 import { getT } from "@/lib/i18n/server"
 import { ChevronLeft } from "lucide-react"
 
-// Session shell. The interactive replay workspace (chart + controls + order
-// panel) is the next phase and mounts here; for now this confirms the session
-// exists and its parameters, so the create → open flow is navigable end to end.
+const toSec = (d: Date) => Math.floor(new Date(d).getTime() / 1000)
+
 export default async function BacktestSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const t = await getT()
   const session = await getBacktestSession(Number(id))
   if (!session) notFound()
 
-  const rows: [string, string][] = [
-    [t("Market"), session.symbol],
-    [t("Timeframe"), session.timeframe],
-    [t("Starting balance"), `$${Number(session.startingBalance).toLocaleString()}`],
-    [t("Status"), t(session.status)],
-    [t("Mode"), session.randomMode ? t("Random date (hidden)") : t("Fixed date")],
-  ]
+  const ws: WorkspaceSession = {
+    id: session.id,
+    symbol: session.symbol,
+    market: session.market,
+    timeframe: session.timeframe,
+    provider: session.provider,
+    rangeStart: toSec(session.rangeStart),
+    rangeEnd: toSec(session.rangeEnd),
+    currentTime: toSec(session.currentTime),
+    startingBalance: Number(session.startingBalance),
+    currentBalance: Number(session.currentBalance),
+    speed: session.speed,
+    status: session.status,
+    randomMode: session.randomMode,
+  }
 
   return (
     <div>
-      <PageHeader
-        title={session.name || session.symbol}
-        description={t("Backtest session")}
-        action={
-          <Link href="/backtest" className={buttonVariants({ variant: "outline", size: "sm" })}>
-            <ChevronLeft className="size-4" /> {t("Back")}
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-2 sm:px-4">
+        <div className="flex items-center gap-2 min-w-0">
+          <Link href="/backtest" className={buttonVariants({ variant: "ghost", size: "icon-sm" })} aria-label={t("Back")}>
+            <ChevronLeft className="size-4" />
           </Link>
-        }
-      />
-      <div className="p-4 sm:p-6">
-        <Card className="max-w-lg gap-3 p-5">
-          <dl className="divide-y">
-            {rows.map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between py-2 text-sm">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd className="font-medium">{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-            {t("The replay chart and trading controls load here — that's the next build phase.")}
-          </p>
-        </Card>
+          <h1 className="truncate text-sm font-semibold">{session.name || session.symbol}</h1>
+        </div>
+        <span className="text-xs text-muted-foreground">{t("Backtest")}</span>
       </div>
+      <BacktestWorkspace session={ws} />
     </div>
   )
 }
