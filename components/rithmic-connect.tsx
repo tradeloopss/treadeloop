@@ -2,19 +2,14 @@
 
 import type React from "react"
 import { useEffect, useState, useTransition } from "react"
+import Image from "next/image"
 import { connectRithmic, disconnectRithmic, syncRithmic, listAvailableRithmicSystems } from "@/app/actions/rithmic"
+import { brokerLogo } from "@/lib/broker-logos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -24,7 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
-import { Plus, RefreshCw, Unplug, Wifi } from "lucide-react"
+import { ArrowLeft, Plus, RefreshCw, Search, Unplug, Wifi } from "lucide-react"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
 // Matches lib/rithmic-client.ts's PRODUCTION_RITHMIC_GATEWAY / TEST_RITHMIC_GATEWAY
@@ -38,13 +33,46 @@ const PRODUCTION_GATEWAY = "wss://rprotocol.rithmic.com:443"
 const TEST_GATEWAY = "wss://rituz00100.rithmic.com:443"
 const CUSTOM = "__custom__"
 
+// A selectable prop-firm tile in the picker grid — the firm's real logo when we
+// ship one (lib/broker-logos.ts), else a monogram, styled like the reference.
+function FirmTile({ name, custom, onClick }: { name: string; custom?: boolean; onClick: () => void }) {
+  const t = useT()
+  const logo = custom ? null : brokerLogo(name)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-center gap-2 rounded-xl border p-4 text-center transition-colors hover:border-primary hover:bg-accent/40"
+    >
+      <div className="flex size-12 items-center justify-center overflow-hidden rounded-xl bg-muted">
+        {custom ? (
+          <Plus className="size-5 text-muted-foreground" />
+        ) : logo ? (
+          <Image src={logo} alt="" width={48} height={48} className="size-full object-cover" />
+        ) : (
+          <span className="text-lg font-bold text-muted-foreground">{name.charAt(0).toUpperCase()}</span>
+        )}
+      </div>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold">{custom ? t("Other") : name}</div>
+        <div className="text-xs text-muted-foreground">{custom ? t("Custom gateway") : t("Auto Sync")}</div>
+      </div>
+      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-600 uppercase dark:text-amber-400">
+        {t("Futures")}
+      </span>
+    </button>
+  )
+}
+
 export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; initialFirmHint?: string }) {
   const t = useT()
   const [systems, setSystems] = useState<string[]>([])
   const [loadingSystems, setLoadingSystems] = useState(true)
+  const [step, setStep] = useState<"firm" | "details">("firm")
   const [systemChoice, setSystemChoice] = useState("")
   const [customGateway, setCustomGateway] = useState(TEST_GATEWAY)
   const [customSystemName, setCustomSystemName] = useState("")
+  const [query, setQuery] = useState("")
   const [pending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -54,7 +82,10 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
         if (initialFirmHint) {
           const hint = initialFirmHint.toLowerCase()
           const match = list.find((s) => s.toLowerCase().includes(hint) || hint.includes(s.toLowerCase()))
-          if (match) setSystemChoice(match)
+          if (match) {
+            setSystemChoice(match)
+            setStep("details")
+          }
         }
       })
       .catch(() => toast.error(t("Could not load the list of prop firms from Rithmic")))
@@ -66,6 +97,13 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
   const gatewayUri = isCustom ? customGateway.trim() : PRODUCTION_GATEWAY
   const systemName = isCustom ? customSystemName.trim() : systemChoice
   const canSubmit = !!systemName && !!gatewayUri
+
+  const filtered = systems.filter((s) => s.toLowerCase().includes(query.trim().toLowerCase()))
+
+  function selectFirm(sys: string) {
+    setSystemChoice(sys)
+    setStep("details")
+  }
 
   function onConnect(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -97,47 +135,67 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
     })
   }
 
+  // Step 1 — pick the prop firm from the ones Rithmic serves.
+  if (step === "firm") {
+    return (
+      <div className="space-y-4">
+        <div className="text-center">
+          <h3 className="text-base font-semibold">{t("Select your prop firm")}</h3>
+          <p className="text-sm text-muted-foreground">{t("Pick the prop firm your Rithmic login belongs to.")}</p>
+        </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("Search prop firm…")} className="ps-9" />
+        </div>
+        {loadingSystems ? (
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("Loading…")}</div>
+        ) : (
+          <div className="grid max-h-[52vh] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+            {filtered.map((s) => (
+              <FirmTile key={s} name={s} onClick={() => selectFirm(s)} />
+            ))}
+            {"other".includes(query.trim().toLowerCase()) && <FirmTile name={t("Other")} custom onClick={() => selectFirm(CUSTOM)} />}
+            {filtered.length === 0 && !"other".includes(query.trim().toLowerCase()) && (
+              <p className="col-span-full py-6 text-center text-sm text-muted-foreground">{t("No prop firm matches — try “Other” for a custom gateway.")}</p>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Step 2 — account details for the selected firm.
+  const selectedLogo = isCustom ? null : brokerLogo(systemChoice)
   return (
     <form onSubmit={onConnect} className="space-y-3">
-      <div className="space-y-1.5">
-        <Label>{t("Prop firm / broker")}</Label>
-        <Select value={systemChoice} onValueChange={(v) => v && setSystemChoice(v)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={loadingSystems ? t("Loading…") : t("Select your prop firm")} />
-          </SelectTrigger>
-          <SelectContent>
-            {systems.map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-            <SelectItem value={CUSTOM}>{t("Other (custom gateway)…")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">{t("Not listed? Pick “Other” and enter your gateway directly.")}</p>
+      <button type="button" onClick={() => setStep("firm")} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-4" /> {t("Back")}
+      </button>
+
+      <div className="flex items-center gap-3 rounded-lg border p-3">
+        <div className="flex size-10 items-center justify-center overflow-hidden rounded-lg bg-muted">
+          {selectedLogo ? (
+            <Image src={selectedLogo} alt="" width={40} height={40} className="size-full object-cover" />
+          ) : (
+            <span className="text-base font-bold text-muted-foreground">{(isCustom ? "?" : systemChoice.charAt(0)).toUpperCase()}</span>
+          )}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-semibold">{isCustom ? t("Other prop firm") : systemChoice}</div>
+          <div className="text-xs text-muted-foreground">{t("Rithmic · Futures · Auto Sync")}</div>
+        </div>
       </div>
 
       {isCustom && (
         <>
           <div className="space-y-1.5">
             <Label htmlFor="rithmic-gateway">{t("Gateway address")}</Label>
-            <Input
-              id="rithmic-gateway"
-              value={customGateway}
-              onChange={(e) => setCustomGateway(e.target.value)}
-              required
-              autoComplete="off"
-            />
+            <Input id="rithmic-gateway" value={customGateway} onChange={(e) => setCustomGateway(e.target.value)} required autoComplete="off" />
             <p className="text-xs text-muted-foreground">{t("From your prop firm's connection_params.txt.")}</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="rithmic-system-custom">{t("System name")}</Label>
-            <Input
-              id="rithmic-system-custom"
-              value={customSystemName}
-              onChange={(e) => setCustomSystemName(e.target.value)}
-              required
-              autoComplete="off"
-              placeholder={t("e.g. Rithmic Test")}
-            />
+            <Input id="rithmic-system-custom" value={customSystemName} onChange={(e) => setCustomSystemName(e.target.value)} required autoComplete="off" placeholder={t("e.g. Rithmic Test")} />
           </div>
         </>
       )}
@@ -253,7 +311,7 @@ export function RithmicConnect({ connections }: { connections: RithmicConnection
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> {t("Connect")}</Button>} />
-          <DialogContent>
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>{t("Connect Rithmic")}</DialogTitle>
               <DialogDescription>
