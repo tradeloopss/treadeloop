@@ -246,8 +246,11 @@ export interface RithmicAccountSnapshot {
 function openSocket(uri: string): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
     // handshakeTimeout bounds the TLS/HTTP upgrade; the outer timer covers a
-    // socket that connects but then stalls before "open".
-    const ws = new WebSocket(uri, { rejectUnauthorized: false, handshakeTimeout: 12000 })
+    // socket that connects but then stalls before "open". Kept fairly tight so
+    // a throttled handshake (Rithmic rate-limits cloud IPs, which shows up as
+    // "Opening handshake has timed out") fails fast and is retried by connect()
+    // rather than burning the whole request budget on one dead attempt.
+    const ws = new WebSocket(uri, { rejectUnauthorized: false, handshakeTimeout: 8000 })
     const cleanup = () => {
       clearTimeout(timer)
       ws.off("open", onOpen)
@@ -287,10 +290,13 @@ function openSocket(uri: string): Promise<WebSocket> {
 }
 
 // The connection to a Rithmic gateway from a cloud host can drop during the
-// TLS handshake (a reset, a socket hang up) transiently, so a failed connect
-// is retried a couple of times with a short backoff before giving up. A bad
-// address fails the same way every time and just exhausts the attempts.
-async function connect(uri: string, attempts = 3): Promise<WebSocket> {
+// TLS handshake (a reset, a socket hang up) or have the handshake throttled
+// outright ("Opening handshake has timed out" — Rithmic rate-limits cloud IPs)
+// transiently, so a failed connect is retried several times with a short
+// backoff before giving up. That handshake-timeout case is the main thing the
+// background auto-sync trips on, and it usually clears within a retry or two.
+// A bad address fails the same way every time and just exhausts the attempts.
+async function connect(uri: string, attempts = 5): Promise<WebSocket> {
   let lastError: unknown
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
@@ -298,10 +304,10 @@ async function connect(uri: string, attempts = 3): Promise<WebSocket> {
     } catch (err) {
       lastError = err
       const message = err instanceof Error ? err.message : String(err)
-      const transient = /TLS|ECONNRESET|socket disconnected|socket hang ?up|ETIMEDOUT|EAI_AGAIN|before secure|closed the connection before|Timed out connecting/i.test(message)
+      const transient = /TLS|ECONNRESET|socket disconnected|socket hang ?up|ETIMEDOUT|EAI_AGAIN|before secure|closed the connection before|handshake|timed out|timeout/i.test(message)
       if (!transient || attempt === attempts) break
       console.warn(`[rithmic] connect attempt ${attempt} to ${uri} failed (${message}); retrying`)
-      await new Promise((resolve) => setTimeout(resolve, 600 * attempt))
+      await new Promise((resolve) => setTimeout(resolve, 700 * attempt))
     }
   }
   throw lastError
