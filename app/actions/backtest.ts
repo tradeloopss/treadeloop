@@ -8,6 +8,7 @@ import { computePnl, computeRMultiple, contractMultiplierForSymbol } from "@/lib
 import { instrumentMarket, timeframeSeconds } from "@/lib/market-data"
 import { regenerateJournalForDay } from "@/app/actions/trades"
 import { getAdmin } from "@/lib/admin/guard"
+import { computeBacktestDashboard, type BacktestDashboard } from "@/lib/backtest/dashboard-stats"
 
 // Backtesting is admin-only while it's still in progress, so every action here
 // requires an admin — a non-admin who calls one directly is refused, not just
@@ -95,7 +96,9 @@ export async function createBacktestSession(input: {
     })
     .returning({ id: backtestSessions.id })
 
-  revalidatePath("/backtest")
+  revalidatePath("/backtest/dashboard")
+  revalidatePath("/backtest/sessions")
+  revalidatePath("/backtest/reports")
   return { id: row.id }
 }
 
@@ -139,7 +142,9 @@ export async function updateBacktestState(
 export async function finishBacktest(id: number): Promise<void> {
   const userId = await getUserId()
   await db.update(backtestSessions).set({ status: "completed", updatedAt: new Date() }).where(and(eq(backtestSessions.id, id), eq(backtestSessions.userId, userId)))
-  revalidatePath("/backtest")
+  revalidatePath("/backtest/dashboard")
+  revalidatePath("/backtest/sessions")
+  revalidatePath("/backtest/reports")
 }
 
 export async function deleteBacktestSession(id: number): Promise<void> {
@@ -147,7 +152,9 @@ export async function deleteBacktestSession(id: number): Promise<void> {
   // The closed trades stay in the journal (they're real records now); only the
   // ephemeral session is removed.
   await db.delete(backtestSessions).where(and(eq(backtestSessions.id, id), eq(backtestSessions.userId, userId)))
-  revalidatePath("/backtest")
+  revalidatePath("/backtest/dashboard")
+  revalidatePath("/backtest/sessions")
+  revalidatePath("/backtest/reports")
 }
 
 // A closed backtest position becomes a real trade — same table, same math, same
@@ -222,8 +229,25 @@ export async function saveBacktestTrade(
     .where(eq(backtestSessions.id, sessionId))
   await regenerateJournalForDay(userId, exitTime.toISOString().slice(0, 10))
 
-  revalidatePath("/backtest")
+  revalidatePath("/backtest/dashboard")
+  revalidatePath("/backtest/sessions")
+  revalidatePath("/backtest/reports")
   return { id: row.id, pnl }
+}
+
+// Aggregate stats across every backtest trade (all sessions) for the
+// Backtesting Dashboard.
+export async function getBacktestDashboardData(): Promise<BacktestDashboard> {
+  const userId = await getUserId()
+  const [tradeRows, sessionRows] = await Promise.all([
+    db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.source, "backtest"))).orderBy(trades.exitTime),
+    db.select().from(backtestSessions).where(eq(backtestSessions.userId, userId)),
+  ])
+  return computeBacktestDashboard(
+    tradeRows.map((t) => ({ pnl: Number(t.pnl), side: t.side, entryTime: t.entryTime, exitTime: t.exitTime, rMultiple: t.rMultiple != null ? Number(t.rMultiple) : null, symbol: t.symbol })),
+    sessionRows.map((s) => ({ createdAt: s.createdAt, updatedAt: s.updatedAt, rangeStart: s.rangeStart, rangeEnd: s.rangeEnd })),
+    0,
+  )
 }
 
 // The session's own trades, for its results view — analyzed with the existing

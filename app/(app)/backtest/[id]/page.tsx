@@ -23,7 +23,7 @@ export default async function BacktestSessionPage({ params }: { params: Promise<
   const header = (
     <div className="flex items-center justify-between gap-3 border-b px-3 py-2 sm:px-4">
       <div className="flex min-w-0 items-center gap-2">
-        <Link href="/backtest" className={buttonVariants({ variant: "ghost", size: "icon-sm" })} aria-label={t("Back")}>
+        <Link href="/backtest/sessions" className={buttonVariants({ variant: "ghost", size: "icon-sm" })} aria-label={t("Back")}>
           <ChevronLeft className="size-4" />
         </Link>
         <h1 className="truncate text-sm font-semibold">{session.name || session.symbol}</h1>

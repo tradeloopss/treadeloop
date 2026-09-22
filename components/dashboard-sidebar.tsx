@@ -45,9 +45,6 @@ const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
   { href: "/journal", label: "Journal", icon: NotebookPen },
-  // Admin-only while it's still being built; everyone else sees a "Soon" badge
-  // and the page shows a coming-soon screen.
-  { href: "/backtest", label: "Backtesting", icon: CandlestickChart, soon: true },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },
@@ -179,11 +176,6 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                     >
                       <Icon className="size-4 shrink-0" />
                       <span className={cn(collapsed && "md:hidden")}>{t(link.label)}</span>
-                      {"soon" in link && link.soon && !isAdmin && (
-                        <span className={cn("ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground uppercase", collapsed && "md:hidden")}>
-                          {t("Soon")}
-                        </span>
-                      )}
                     </Link>
                   }
                 />
@@ -191,6 +183,36 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
               </Tooltip>
             )
           })}
+
+          {/* Backtesting sits on its own, apart from the live-trading tabs —
+              it's a separate mode with its own sub-navigation. Admin-only for
+              now, so non-admins see a "Soon" badge and the coming-soon page. */}
+          <div className="my-1.5 border-t" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  href="/backtest"
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    collapsed && "md:justify-center md:px-0",
+                    pathname.startsWith("/backtest")
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                  )}
+                >
+                  <CandlestickChart className="size-4 shrink-0" />
+                  <span className={cn(collapsed && "md:hidden")}>{t("Backtesting")}</span>
+                  {!isAdmin && (
+                    <span className={cn("ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground uppercase", collapsed && "md:hidden")}>
+                      {t("Soon")}
+                    </span>
+                  )}
+                </Link>
+              }
+            />
+            {collapsed && <TooltipContent side="inline-end">{t("Backtesting")}</TooltipContent>}
+          </Tooltip>
         </nav>
 
         <div className={cn("hidden border-t px-3 py-2 md:block")}>
