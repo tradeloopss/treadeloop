@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
+import Image from "next/image"
 import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { BrokerImport } from "@/components/broker-import"
@@ -132,6 +133,16 @@ export function PropFirmSync({
             name="Rithmic"
             recommended
             description={t("Live sync — auto-imports every trade")}
+          />
+          <PlatformCard
+            active={false}
+            onClick={() => {}}
+            logo={<Image src="/brokers/sm/topstep.png" alt="Topstep" width={40} height={40} className="size-full rounded-lg object-cover" />}
+            logoClassName="bg-[#0c1424] p-0"
+            activeClassName="border-border"
+            name="Topstep"
+            comingSoon
+            description={t("Direct auto-sync with your Topstep account")}
           />
           <PlatformCard
             active={platform === "tradingview"}
