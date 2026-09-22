@@ -149,27 +149,18 @@ async function runConnectRithmic(
   let importedTrades = 0
 
   for (const account of accounts) {
-    const accountName = `Rithmic ${account.accountName}`
-    const existingTradingAccount = await db
-      .select()
-      .from(tradingAccounts)
-      .where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.name, accountName)))
-    const accountId = existingTradingAccount.length
-      ? existingTradingAccount[0].id
-      : (
-          await db
-            .insert(tradingAccounts)
-            .values({ userId, name: accountName, broker: "Rithmic" })
-            .returning({ id: tradingAccounts.id })
-        )[0].id
+    // Name the account after the prop firm and its account number, and label it
+    // with the firm so the firm's logo can show (lib/broker-logos.ts). The
+    // Rithmic system name is the firm's own system, so it stands in as the firm
+    // name when our preset list doesn't have a nicer one.
+    const firmName = matchFirmFromSystemName(systemName) ?? systemName
+    const accountName = `${firmName} - ${account.accountId}`
 
-    // Import the fills first: the starting balance is worked back from the
-    // broker's balance minus every realized trade, so the trades have to be
-    // in before the snapshot is applied.
-    const fills = fillsByAccountId.get(account.accountId) ?? []
-
-    // Reconnecting the same login+account refreshes it instead of duplicating.
-    const existingConnection = await db
+    // Reconnecting the same login+account must update the SAME trading account
+    // (and rename it) rather than create a duplicate — so resolve the account
+    // off any existing connection first, then fall back to matching by name,
+    // then create.
+    const [existingConnection] = await db
       .select()
       .from(rithmicConnections)
       .where(
@@ -180,9 +171,28 @@ async function runConnectRithmic(
         )
       )
 
+    let accountId: number
+    if (existingConnection?.accountId != null) {
+      accountId = existingConnection.accountId
+      await db.update(tradingAccounts).set({ name: accountName, broker: firmName }).where(and(eq(tradingAccounts.id, accountId), eq(tradingAccounts.userId, userId)))
+    } else {
+      const [existingByName] = await db
+        .select()
+        .from(tradingAccounts)
+        .where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.name, accountName)))
+      accountId =
+        existingByName?.id ??
+        (await db.insert(tradingAccounts).values({ userId, name: accountName, broker: firmName }).returning({ id: tradingAccounts.id }))[0].id
+    }
+
+    // Import the fills first: the starting balance is worked back from the
+    // broker's balance minus every realized trade, so the trades have to be
+    // in before the snapshot is applied.
+    const fills = fillsByAccountId.get(account.accountId) ?? []
+
     let connectionId: number
-    if (existingConnection.length) {
-      connectionId = existingConnection[0].id
+    if (existingConnection) {
+      connectionId = existingConnection.id
       await db
         .update(rithmicConnections)
         .set({

@@ -3,6 +3,8 @@
 import type React from "react"
 import { useState, useTransition } from "react"
 import Link from "next/link"
+import Image from "next/image"
+import { brokerLogo } from "@/lib/broker-logos"
 import { createAccount, deleteAccount, updateAccount, setAccountArchived } from "@/app/actions/accounts"
 import { syncRithmicAccount } from "@/app/actions/rithmic"
 import { formatCurrency } from "@/lib/calc"
@@ -225,14 +227,18 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
                     <TableCell className="py-3.5">
                       {a.broker ? (
                         <span className="flex items-center gap-2 text-muted-foreground">
-                          <span
-                            className={cn(
-                              "flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-bold",
-                              brokerChipColor(a.broker),
-                            )}
-                          >
-                            {a.broker.charAt(0).toUpperCase()}
-                          </span>
+                          {brokerLogo(a.broker) ? (
+                            <Image src={brokerLogo(a.broker) as string} alt="" width={20} height={20} className="size-5 shrink-0 rounded object-cover" />
+                          ) : (
+                            <span
+                              className={cn(
+                                "flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-bold",
+                                brokerChipColor(a.broker),
+                              )}
+                            >
+                              {a.broker.charAt(0).toUpperCase()}
+                            </span>
+                          )}
                           {a.broker}
                         </span>
                       ) : (
