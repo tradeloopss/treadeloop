@@ -7,6 +7,7 @@ import { shareDailyPnl, type BrokerBreakdown } from "@/app/actions/daily-pnl-sha
 import type { PnlPeriod } from "@/lib/pnl-period"
 import { formatCurrency } from "@/lib/calc"
 import { chipColor, initials } from "@/lib/ui-chips"
+import { brokerLogo } from "@/lib/broker-logos"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -138,12 +139,17 @@ export function DailyPnlCard({
             return (
               <div key={row.broker} className="flex items-center justify-between gap-3 text-xs">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="flex size-5 shrink-0 items-center justify-center rounded-full text-[8px] font-black text-white"
-                    style={{ background: chipColor(row.broker) }}
-                  >
-                    {initials(row.broker)}
-                  </span>
+                  {brokerLogo(row.broker) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={brokerLogo(row.broker) as string} alt="" className="size-5 shrink-0 rounded-full bg-white object-cover" />
+                  ) : (
+                    <span
+                      className="flex size-5 shrink-0 items-center justify-center rounded-full text-[8px] font-black text-white"
+                      style={{ background: chipColor(row.broker) }}
+                    >
+                      {initials(row.broker)}
+                    </span>
+                  )}
                   <span className="truncate font-semibold uppercase tracking-wide text-white/80">{row.broker}</span>
                 </div>
                 <span

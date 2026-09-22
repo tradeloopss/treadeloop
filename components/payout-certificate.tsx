@@ -7,6 +7,7 @@ import { sharePayout } from "@/app/actions/payouts"
 import type { PayoutSummary } from "@/lib/payout-period"
 import { formatCurrency } from "@/lib/calc"
 import { chipColor, initials } from "@/lib/ui-chips"
+import { brokerLogo } from "@/lib/broker-logos"
 import { Button } from "@/components/ui/button"
 import { FitToWidth } from "@/components/fit-to-width"
 import { BadgeCheck, Copy, Download, Loader2, Printer, Share2 } from "lucide-react"
@@ -213,12 +214,17 @@ export function PayoutCertificate({
                           key={line.accountId}
                           className="flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.06] py-1 ps-1 pe-2.5 text-[11px]"
                         >
-                          <span
-                            className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-black text-white"
-                            style={{ background: chipColor(name) }}
-                          >
-                            {initials(name)}
-                          </span>
+                          {brokerLogo(name) ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={brokerLogo(name) as string} alt="" className="size-5 shrink-0 rounded-full bg-white object-cover" />
+                          ) : (
+                            <span
+                              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-black text-white"
+                              style={{ background: chipColor(name) }}
+                            >
+                              {initials(name)}
+                            </span>
+                          )}
                           <span className="truncate font-semibold text-white/80">{name}</span>
                           <span className="shrink-0 font-bold tabular-nums" style={{ color: tone }}>
                             {formatCurrency(line.amount, summary.currency)}
