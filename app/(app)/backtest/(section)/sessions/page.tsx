@@ -1,8 +1,9 @@
 import { getBacktestSessions } from "@/app/actions/backtest"
+import { getPlaybooks } from "@/app/actions/playbooks"
 import { BacktestManager, type BacktestSessionCard } from "@/components/backtest/backtest-manager"
 
 export default async function BacktestSessionsPage() {
-  const sessions = await getBacktestSessions()
+  const [sessions, playbooks] = await Promise.all([getBacktestSessions(), getPlaybooks()])
   const cards: BacktestSessionCard[] = sessions.map((s) => ({
     id: s.id,
     name: s.name,
@@ -17,7 +18,7 @@ export default async function BacktestSessionsPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <BacktestManager sessions={cards} />
+      <BacktestManager sessions={cards} playbooks={playbooks.map((p) => ({ id: p.id, name: p.name }))} />
     </div>
   )
 }

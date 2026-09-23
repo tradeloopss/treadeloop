@@ -62,6 +62,7 @@ export async function createBacktestSession(input: {
   randomMode?: boolean
   accountId?: number | null
   simulatePropRules?: boolean
+  strategy?: string // optional playbook/strategy label, kept on the session
 }): Promise<{ id: number }> {
   const userId = await getUserId()
   const timeframe = input.timeframe || "5m"
@@ -93,6 +94,7 @@ export async function createBacktestSession(input: {
       randomMode: input.randomMode ?? false,
       accountId: input.accountId ?? null,
       simulatePropRules: input.simulatePropRules ?? false,
+      settings: input.strategy ? { strategy: input.strategy } : {},
     })
     .returning({ id: backtestSessions.id })
 
