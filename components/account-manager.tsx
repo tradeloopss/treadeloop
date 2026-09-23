@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog"
 import { Plus, Trash2, Wallet, MoreVertical, ExternalLink, Pencil, Upload, PenLine, SlidersHorizontal, Archive, ArchiveRestore, RefreshCw, ArrowLeft, Zap } from "lucide-react"
 import { ConnectForm } from "@/components/rithmic-connect"
+import { BrokerImport } from "@/components/broker-import"
 import { toast } from "sonner"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
@@ -69,9 +70,9 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
   const t = useT()
   const dateLocale = useIntlLocale()
   const [open, setOpen] = useState(false)
-  // The Add Account dialog first asks how: manual entry or auto-sync (connect a
-  // broker). Resets to the choice each time it opens.
-  const [addMode, setAddMode] = useState<"choice" | "manual" | "auto">("choice")
+  // The Add Account dialog first asks how: auto-sync (connect a broker), upload
+  // a file, or manual entry. Resets to the choice each time it opens.
+  const [addMode, setAddMode] = useState<"choice" | "manual" | "auto" | "upload">("choice")
   const [pending, startTransition] = useTransition()
 
   function openAddDialog(o: boolean) {
@@ -167,24 +168,38 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
         </div>
         <Dialog open={open} onOpenChange={openAddDialog}>
           <DialogTrigger render={<Button size="lg" className="px-5 font-semibold"><Plus className="size-4" /> {t("Add account")}</Button>} />
-          <DialogContent className={addMode === "auto" ? "sm:max-w-3xl" : undefined}>
+          <DialogContent className={addMode === "auto" ? "sm:max-w-3xl" : addMode === "choice" || addMode === "upload" ? "sm:max-w-2xl" : undefined}>
             {addMode === "choice" && (
               <>
                 <DialogHeader>
                   <DialogTitle>{t("Add a trading account")}</DialogTitle>
                   <DialogDescription>{t("How do you want to add trades to this account?")}</DialogDescription>
                 </DialogHeader>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <button
                     type="button"
                     onClick={() => setAddMode("auto")}
-                    className="flex flex-col items-start gap-2 rounded-xl border p-4 text-start transition-colors hover:border-primary hover:bg-accent/40"
+                    className="relative flex flex-col items-start gap-2 rounded-xl border border-primary/40 bg-primary/[0.03] p-4 text-start transition-colors hover:border-primary hover:bg-accent/40"
                   >
+                    <span className="absolute end-3 top-3 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold tracking-wide text-primary-foreground uppercase">
+                      {t("Recommended")}
+                    </span>
                     <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
                       <Zap className="size-5" />
                     </span>
                     <span className="font-semibold">{t("Auto Sync")}</span>
                     <span className="text-sm text-muted-foreground">{t("Connect your prop firm — every trade imports automatically.")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddMode("upload")}
+                    className="flex flex-col items-start gap-2 rounded-xl border p-4 text-start transition-colors hover:border-primary hover:bg-accent/40"
+                  >
+                    <span className="flex size-10 items-center justify-center rounded-lg bg-muted text-foreground">
+                      <Upload className="size-5" />
+                    </span>
+                    <span className="font-semibold">{t("Upload file")}</span>
+                    <span className="text-sm text-muted-foreground">{t("Import a CSV from Tradovate, NinjaTrader & more — accounts are created automatically.")}</span>
                   </button>
                   <button
                     type="button"
@@ -195,9 +210,22 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
                       <PenLine className="size-5" />
                     </span>
                     <span className="font-semibold">{t("Manual")}</span>
-                    <span className="text-sm text-muted-foreground">{t("Create the account and log trades yourself (or import a file).")}</span>
+                    <span className="text-sm text-muted-foreground">{t("Create the account and log trades yourself.")}</span>
                   </button>
                 </div>
+              </>
+            )}
+
+            {addMode === "upload" && (
+              <>
+                <DialogHeader>
+                  <button type="button" onClick={() => setAddMode("choice")} className="mb-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                    <ArrowLeft className="size-4" /> {t("Back")}
+                  </button>
+                  <DialogTitle>{t("Upload a file")}</DialogTitle>
+                  <DialogDescription>{t("Import a CSV export from your broker — each account in the file is created automatically.")}</DialogDescription>
+                </DialogHeader>
+                <BrokerImport accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} />
               </>
             )}
 
