@@ -29,7 +29,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Trash2, Wallet, MoreVertical, ExternalLink, Pencil, Upload, PenLine, SlidersHorizontal, Archive, ArchiveRestore, RefreshCw } from "lucide-react"
+import { Plus, Trash2, Wallet, MoreVertical, ExternalLink, Pencil, Upload, PenLine, SlidersHorizontal, Archive, ArchiveRestore, RefreshCw, ArrowLeft, Zap } from "lucide-react"
+import { ConnectForm } from "@/components/rithmic-connect"
 import { toast } from "sonner"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
@@ -68,7 +69,15 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
   const t = useT()
   const dateLocale = useIntlLocale()
   const [open, setOpen] = useState(false)
+  // The Add Account dialog first asks how: manual entry or auto-sync (connect a
+  // broker). Resets to the choice each time it opens.
+  const [addMode, setAddMode] = useState<"choice" | "manual" | "auto">("choice")
   const [pending, startTransition] = useTransition()
+
+  function openAddDialog(o: boolean) {
+    setOpen(o)
+    if (o) setAddMode("choice")
+  }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -156,38 +165,91 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
             {isPro ? t("Unlimited active accounts included in your plan.") : t("You can have up to 1 active account on your plan.")}
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={openAddDialog}>
           <DialogTrigger render={<Button size="lg" className="px-5 font-semibold"><Plus className="size-4" /> {t("Add account")}</Button>} />
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t("Add a trading account")}</DialogTitle>
-              <DialogDescription>{t("Give it a name you'll recognize when logging trades.")}</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={onSubmit} className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="name">{t("Name")}</Label>
-                <Input id="name" name="name" placeholder={t("Apex 50K, Main Tradovate, IBKR…")} required />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="broker">{t("Broker / prop firm")}</Label>
-                <Input id="broker" name="broker" placeholder={t("Tradovate, NinjaTrader, Apex, TopStep…")} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="startingBalance">{t("Starting balance")}</Label>
-                  <Input id="startingBalance" name="startingBalance" type="number" step="0.01" defaultValue="0" />
+          <DialogContent className={addMode === "auto" ? "sm:max-w-3xl" : undefined}>
+            {addMode === "choice" && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{t("Add a trading account")}</DialogTitle>
+                  <DialogDescription>{t("How do you want to add trades to this account?")}</DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddMode("auto")}
+                    className="flex flex-col items-start gap-2 rounded-xl border p-4 text-start transition-colors hover:border-primary hover:bg-accent/40"
+                  >
+                    <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Zap className="size-5" />
+                    </span>
+                    <span className="font-semibold">{t("Auto Sync")}</span>
+                    <span className="text-sm text-muted-foreground">{t("Connect your prop firm — every trade imports automatically.")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddMode("manual")}
+                    className="flex flex-col items-start gap-2 rounded-xl border p-4 text-start transition-colors hover:border-primary hover:bg-accent/40"
+                  >
+                    <span className="flex size-10 items-center justify-center rounded-lg bg-muted text-foreground">
+                      <PenLine className="size-5" />
+                    </span>
+                    <span className="font-semibold">{t("Manual")}</span>
+                    <span className="text-sm text-muted-foreground">{t("Create the account and log trades yourself (or import a file).")}</span>
+                  </button>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="currency">{t("Currency")}</Label>
-                  <Input id="currency" name="currency" defaultValue="USD" maxLength={3} className="uppercase" />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={pending} className="w-full">
-                  {pending ? t("Adding…") : t("Add account")}
-                </Button>
-              </DialogFooter>
-            </form>
+              </>
+            )}
+
+            {addMode === "manual" && (
+              <>
+                <DialogHeader>
+                  <button type="button" onClick={() => setAddMode("choice")} className="mb-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                    <ArrowLeft className="size-4" /> {t("Back")}
+                  </button>
+                  <DialogTitle>{t("Add a trading account")}</DialogTitle>
+                  <DialogDescription>{t("Give it a name you'll recognize when logging trades.")}</DialogDescription>
+                </DialogHeader>
+                <form onSubmit={onSubmit} className="space-y-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="name">{t("Name")}</Label>
+                    <Input id="name" name="name" placeholder={t("Apex 50K, Main Tradovate, IBKR…")} required />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="broker">{t("Broker / prop firm")}</Label>
+                    <Input id="broker" name="broker" placeholder={t("Tradovate, NinjaTrader, Apex, TopStep…")} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="startingBalance">{t("Starting balance")}</Label>
+                      <Input id="startingBalance" name="startingBalance" type="number" step="0.01" defaultValue="0" />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="currency">{t("Currency")}</Label>
+                      <Input id="currency" name="currency" defaultValue="USD" maxLength={3} className="uppercase" />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit" disabled={pending} className="w-full">
+                      {pending ? t("Adding…") : t("Add account")}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </>
+            )}
+
+            {addMode === "auto" && (
+              <>
+                <DialogHeader>
+                  <button type="button" onClick={() => setAddMode("choice")} className="mb-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                    <ArrowLeft className="size-4" /> {t("Back")}
+                  </button>
+                  <DialogTitle>{t("Connect Rithmic")}</DialogTitle>
+                  <DialogDescription>{t("Use your Rithmic trading login. Every account found under it is added and synced.")}</DialogDescription>
+                </DialogHeader>
+                <ConnectForm onDone={() => setOpen(false)} />
+              </>
+            )}
           </DialogContent>
         </Dialog>
       </div>
