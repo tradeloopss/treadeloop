@@ -731,13 +731,24 @@ async function fetchExecutionsInSession(
     if (alt.fills.length > 0) ({ fills, rp, terminal } = alt)
   }
 
+  // A replay streams executions for EVERY account under the login. Whenever the
+  // fills carry an account id at all, keep ONLY the ones whose id matches this
+  // account — so foreign accounts' trades can never leak in (that's "trades I
+  // didn't take"). Only when NO fill carries an account id do we fall back to
+  // trusting the request's own account scoping.
+  const mine = String(account.accountId)
+  const seenAccts = new Set<string>()
+  for (const m of fills) if (m.accountId != null && m.accountId !== "") seenAccts.add(String(m.accountId))
+  const mustFilter = seenAccts.size > 0
+
   const byId = new Map<string, ParsedFill>()
   let otherAccount = 0
   let buys = 0
   let sells = 0
   const symbols = new Set<string>()
   for (const m of fills) {
-    if (m.accountId != null && m.accountId !== "" && String(m.accountId) !== String(account.accountId)) {
+    const fillAcct = m.accountId != null && m.accountId !== "" ? String(m.accountId) : ""
+    if (mustFilter && fillAcct !== mine) {
       otherAccount++
       continue
     }
@@ -746,7 +757,7 @@ async function fetchExecutionsInSession(
     if (m.symbol) symbols.add(String(m.symbol))
     addExecutionFill(byId, account.accountId, m)
   }
-  const diag = `${account.accountId}: replay ${fills.length} exec (${otherAccount} other-acct, ${buys}B/${sells}S, sym=${[...symbols].join("/") || "none"})→${byId.size} kept, rp=${rp.join(",") || (terminal ? "none" : "timeout")}, from ${startIndex}`
+  const diag = `${mine}: replay ${fills.length} exec, accts=[${[...seenAccts].join(",") || "none"}], ${otherAccount} other, ${buys}B/${sells}S, sym=${[...symbols].join("/") || "none"}→${byId.size} kept, rp=${rp.join(",") || (terminal ? "none" : "timeout")}, from ${startIndex}`
   console.log(`[rithmic] ${diag}`)
   rithmicFillDiagnostics.push(diag)
   return [...byId.values()]
