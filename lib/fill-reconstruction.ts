@@ -36,63 +36,79 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     )
 
+    // One trade per POSITION (flat → flat), not per fill: a position built and
+    // scaled out over many fills is ONE trade the trader took, with a blended
+    // entry and exit price — so partial scale-ins/outs never inflate the trade
+    // count. A trade is only emitted when the position returns to flat (or
+    // flips through it).
     let position = 0 // signed open quantity: positive = long, negative = short
-    let entryQty = 0 // unsigned quantity backing the current open position
-    let entryNotional = 0 // entryQty * average entry price
+    let side: "long" | "short" | null = null
+    let entryQty = 0 // total contracts entered on this leg
+    let entryNotional = 0 // sum(entry price × entry qty) → avg entry
     let entryTime: string | null = null
+    let closedQty = 0 // total contracts closed on this leg
+    let closedNotional = 0 // sum(exit price × close qty) → avg exit
+    let exitTime: string | null = null
+    let lastExitFillId = "" // the fill that closed the leg — stable id for dedupe
+
+    const openLeg = (signedQty: number, price: number, time: string) => {
+      position = signedQty
+      side = signedQty > 0 ? "long" : "short"
+      entryQty = Math.abs(signedQty)
+      entryNotional = price * entryQty
+      entryTime = time
+      closedQty = 0
+      closedNotional = 0
+      exitTime = null
+      lastExitFillId = ""
+    }
+
+    const emit = () => {
+      if (closedQty <= 0 || entryQty <= 0 || side == null || entryTime == null || exitTime == null) return
+      trades.push({
+        externalId: `${sourcePrefix}:${account}:${symbol}:${lastExitFillId}`,
+        account,
+        symbol,
+        side,
+        quantity: closedQty,
+        entryPrice: entryNotional / entryQty,
+        exitPrice: closedNotional / closedQty,
+        entryTime,
+        exitTime,
+        fees: 0,
+      })
+      position = 0
+      side = null
+    }
 
     for (const fill of sorted) {
       const signedQty = fill.action === "Buy" ? fill.qty : -fill.qty
 
       if (position === 0) {
-        position = signedQty
-        entryQty = fill.qty
-        entryNotional = fill.price * fill.qty
-        entryTime = fill.timestamp
+        openLeg(signedQty, fill.price, fill.timestamp)
         continue
       }
 
-      const isAdding = Math.sign(signedQty) === Math.sign(position)
-      if (isAdding) {
+      if (Math.sign(signedQty) === Math.sign(position)) {
+        // Adding to the position (scale-in): fold into the average entry.
         entryNotional += fill.price * fill.qty
         entryQty += fill.qty
         position += signedQty
         continue
       }
 
-      // This fill reduces (or flips) the open position, closing some/all of it.
-      const closingQty = Math.min(fill.qty, Math.abs(position))
-      const avgEntryPrice = entryNotional / entryQty
-      const side: "long" | "short" = position > 0 ? "long" : "short"
+      // Opposite direction: closes some/all of the position, and may flip.
+      const closeAmt = Math.min(fill.qty, Math.abs(position))
+      closedQty += closeAmt
+      closedNotional += fill.price * closeAmt
+      exitTime = fill.timestamp
+      lastExitFillId = fill.externalId
+      position += Math.sign(signedQty) * closeAmt // moves toward 0
+      const remainder = fill.qty - closeAmt
 
-      trades.push({
-        externalId: `${sourcePrefix}:${account}:${symbol}:${fill.externalId}`,
-        account,
-        symbol,
-        side,
-        quantity: closingQty,
-        entryPrice: avgEntryPrice,
-        exitPrice: fill.price,
-        entryTime: entryTime!,
-        exitTime: fill.timestamp,
-        fees: 0,
-      })
-
-      const remainderQty = fill.qty - closingQty
-      position += signedQty
-
-      if (remainderQty > 0) {
-        // The fill was large enough to close the old position and open a new one the other way.
-        entryQty = remainderQty
-        entryNotional = fill.price * remainderQty
-        entryTime = fill.timestamp
-      } else if (position === 0) {
-        entryQty = 0
-        entryNotional = 0
-        entryTime = null
-      } else {
-        entryQty -= closingQty
-        entryNotional = avgEntryPrice * entryQty
+      if (position === 0) {
+        emit()
+        if (remainder > 0) openLeg(Math.sign(signedQty) * remainder, fill.price, fill.timestamp)
       }
     }
   }
