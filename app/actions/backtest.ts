@@ -59,6 +59,8 @@ export async function createBacktestSession(input: {
   name?: string
   provider?: string
   anchorDate?: string // ISO datetime for the replay start; ignored in random mode
+  startDate?: string // ISO — explicit market-data window start (replay begins here)
+  endDate?: string // ISO — explicit market-data window end
   randomMode?: boolean
   accountId?: number | null
   simulatePropRules?: boolean
@@ -67,13 +69,26 @@ export async function createBacktestSession(input: {
   const userId = await getUserId()
   const timeframe = input.timeframe || "5m"
 
-  const anchorSec = input.randomMode
-    ? randomAnchorSec(timeframe)
-    : input.anchorDate
-      ? Math.floor(new Date(input.anchorDate).getTime() / 1000)
-      : randomAnchorSec(timeframe)
-
-  const { rangeStart, rangeEnd, currentTime } = computeWindow(timeframe, anchorSec)
+  let rangeStart: Date
+  let rangeEnd: Date
+  let currentTime: Date
+  if (!input.randomMode && input.startDate && input.endDate) {
+    // Explicit window: replay from the start date to the end date, with some
+    // context loaded before the start so the chart isn't bare on the first bar.
+    const tf = timeframeSeconds(timeframe)
+    const startSec = Math.floor(new Date(input.startDate).getTime() / 1000)
+    const endSec = Math.floor(new Date(input.endDate).getTime() / 1000)
+    rangeStart = new Date((startSec - CONTEXT_BARS * tf) * 1000)
+    rangeEnd = new Date(Math.max(endSec, startSec + tf) * 1000)
+    currentTime = new Date(startSec * 1000)
+  } else {
+    const anchorSec = input.randomMode
+      ? randomAnchorSec(timeframe)
+      : input.anchorDate
+        ? Math.floor(new Date(input.anchorDate).getTime() / 1000)
+        : randomAnchorSec(timeframe)
+    ;({ rangeStart, rangeEnd, currentTime } = computeWindow(timeframe, anchorSec))
+  }
   const balance = Number.isFinite(input.startingBalance) && input.startingBalance > 0 ? input.startingBalance : 50000
 
   const [row] = await db

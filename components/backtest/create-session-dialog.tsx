@@ -32,6 +32,8 @@ export function CreateSessionDialog({ playbooks = [], trigger }: { playbooks?: {
   const [assetSearch, setAssetSearch] = useState("")
   const [assetOpen, setAssetOpen] = useState(false)
   const [timeframe, setTimeframe] = useState("5m")
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
   const [advanced, setAdvanced] = useState(false)
   const [randomMode, setRandomMode] = useState(false)
 
@@ -39,12 +41,16 @@ export function CreateSessionDialog({ playbooks = [], trigger }: { playbooks?: {
   const filteredAssets = INSTRUMENTS.filter((i) => (i.name + " " + i.symbol).toLowerCase().includes(assetSearch.trim().toLowerCase()))
 
   function reset() {
-    setTab("backtest"); setName(""); setBalance("100000"); setStrategy(""); setSymbol(""); setAssetSearch(""); setTimeframe("5m"); setAdvanced(false); setRandomMode(false)
+    setTab("backtest"); setName(""); setBalance("100000"); setStrategy(""); setSymbol(""); setAssetSearch(""); setTimeframe("5m"); setStartDate(""); setEndDate(""); setAdvanced(false); setRandomMode(false)
   }
 
   function onCreate() {
     if (!symbol) {
       toast.error(t("Pick an asset first"))
+      return
+    }
+    if (!randomMode && startDate && endDate && new Date(startDate) >= new Date(endDate)) {
+      toast.error(t("The end date must be after the start date"))
       return
     }
     startTransition(async () => {
@@ -55,6 +61,8 @@ export function CreateSessionDialog({ playbooks = [], trigger }: { playbooks?: {
           startingBalance: Number(balance) || 100000,
           name: name.trim() || undefined,
           randomMode,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
           simulatePropRules: tab === "propfirm",
           strategy: strategy || undefined,
         })
@@ -174,6 +182,18 @@ export function CreateSessionDialog({ playbooks = [], trigger }: { playbooks?: {
               </SelectContent>
             </Select>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="cs-start">{t("Start date")}</Label>
+              <Input id="cs-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={randomMode} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cs-end">{t("End date")}</Label>
+              <Input id="cs-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={randomMode} />
+            </div>
+          </div>
+          <p className="-mt-2 text-xs text-muted-foreground">{t("The market-data window to replay. Leave blank for a recent period. Note: intraday data on the free feed only goes back ~60 days.")}</p>
 
           {advanced && (
             <label className="flex items-start gap-2.5 rounded-lg border p-3 text-sm">
