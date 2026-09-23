@@ -35,6 +35,7 @@ export default async function SettingsPage() {
             startingBalance: a.startingBalance,
             currentBalance: a.currentBalance,
             currency: a.currency,
+            commissionPerContract: a.commissionPerContract,
             isLiveSynced: a.isLiveSynced,
             canSync: a.canSync,
             archived: a.archived,

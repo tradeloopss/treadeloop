@@ -7,6 +7,7 @@ import { and, desc, eq } from "drizzle-orm"
 import { headers, cookies } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { isPro } from "@/lib/subscription"
+import { repriceAccountTrades } from "@/lib/trade-commission"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -85,7 +86,10 @@ export async function getAccounts(includeArchived = false) {
 
 // Edit an account's own details. Broker-linked accounts keep their trades
 // from the broker, so only the label/size are editable here.
-export async function updateAccount(id: number, data: { name?: string; broker?: string | null; startingBalance?: number; currency?: string }) {
+export async function updateAccount(
+  id: number,
+  data: { name?: string; broker?: string | null; startingBalance?: number; currency?: string; commissionPerContract?: number | null },
+) {
   const userId = await getUserId()
   const patch: Partial<typeof tradingAccounts.$inferInsert> = {}
   if (data.name != null && data.name.trim() !== "") patch.name = data.name.trim()
@@ -96,10 +100,27 @@ export async function updateAccount(id: number, data: { name?: string; broker?: 
     patch.startingBalance = String(data.startingBalance)
     patch.startingBalanceInferred = false
   }
+  // A hand-set round-turn commission per contract re-prices every trade on the
+  // account to net, so a broker whose commission Rithmic doesn't report (or a
+  // CSV account) still matches the firm's numbers.
+  let repriceRate: number | null = null
+  if (data.commissionPerContract !== undefined) {
+    if (data.commissionPerContract != null && Number.isFinite(data.commissionPerContract) && data.commissionPerContract >= 0) {
+      patch.commissionPerContract = String(data.commissionPerContract)
+      repriceRate = data.commissionPerContract
+    } else {
+      patch.commissionPerContract = null
+      repriceRate = 0
+    }
+  }
   if (Object.keys(patch).length === 0) return
   await db.update(tradingAccounts).set(patch).where(and(eq(tradingAccounts.id, id), eq(tradingAccounts.userId, userId)))
+  if (repriceRate != null) await repriceAccountTrades(id, repriceRate)
   revalidatePath("/settings")
   revalidatePath("/dashboard")
+  revalidatePath("/trades")
+  revalidatePath("/calendar")
+  revalidatePath("/reports")
   revalidatePath("/add-trade")
 }
 

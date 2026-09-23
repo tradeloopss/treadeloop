@@ -59,6 +59,7 @@ export interface AccountCard {
   startingBalance: string
   currentBalance: string | null
   currency: string
+  commissionPerContract?: string | null
   isLiveSynced: boolean
   canSync?: boolean
   archived?: boolean
@@ -139,7 +140,12 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
         if (editing.mode === "balance") {
           await updateAccount(id, { startingBalance: Number(fd.get("startingBalance")), currency: String(fd.get("currency") ?? "") })
         } else {
-          await updateAccount(id, { name: String(fd.get("name") ?? ""), broker: String(fd.get("broker") ?? "") })
+          const commRaw = String(fd.get("commissionPerContract") ?? "").trim()
+          await updateAccount(id, {
+            name: String(fd.get("name") ?? ""),
+            broker: String(fd.get("broker") ?? ""),
+            commissionPerContract: commRaw === "" ? null : Number(commRaw),
+          })
         }
         toast.success(t("Account updated"))
         setEditing(null)
@@ -437,6 +443,11 @@ export function AccountManager({ accounts, isPro }: { accounts: AccountCard[]; i
                     <div className="flex flex-col gap-2">
                       <Label htmlFor="edit-broker">{t("Broker / prop firm")}</Label>
                       <Input id="edit-broker" name="broker" defaultValue={editing.account.broker ?? ""} placeholder={t("Tradovate, NinjaTrader, Apex, TopStep…")} />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="edit-commission">{t("Commission per contract (round-turn)")}</Label>
+                      <Input id="edit-commission" name="commissionPerContract" type="number" step="0.01" min="0" defaultValue={editing.account.commissionPerContract ?? ""} placeholder={t("e.g. 1.82 — leave blank for auto")} />
+                      <p className="text-xs text-muted-foreground">{t("Applied to every trade so P&L is net, matching your broker. Auto-filled from Rithmic when available.")}</p>
                     </div>
                   </>
                 )}
