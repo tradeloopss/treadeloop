@@ -118,6 +118,27 @@ export async function connectRithmic(formData: FormData): Promise<ConnectRithmic
   }
 }
 
+// Runs `fn`, retrying once on a transient connectivity/timeout error (the
+// hallmark of Rithmic throttling a cloud IP), with a short pause between so the
+// throttle window can clear. Anything that isn't a timeout/connection blip
+// (bad credentials, permission denied, "no account") surfaces immediately.
+async function retryOnTimeout<T>(fn: () => Promise<T>, attempts = 2, delayMs = 1200): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err
+      const message = err instanceof Error ? err.message : String(err)
+      const transient = /timed out|timeout|TLS|ECONNRESET|socket|before secure|handshake|closed the connection|Timed out connecting/i.test(message)
+      if (!transient || attempt === attempts) throw err
+      console.warn(`[rithmic] connect attempt ${attempt} timed out (${message}); retrying`)
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+  throw lastError
+}
+
 async function runConnectRithmic(
   userId: string,
   login: string,
@@ -129,7 +150,15 @@ async function runConnectRithmic(
   // Rithmic rejects a second login attempted right after a prior one closes,
   // so account discovery and the first sync must share a single session.
   const since = new Date(0)
-  const { accounts, fillsByAccountId, rmsByAccountId } = await discoverAccountsAndFills(login, password, systemName, gatewayUri, since)
+  // Rithmic throttles cloud IPs, so a connect can time out mid-flight even
+  // when the login is fine. Retry the whole discovery once on a transient
+  // timeout (a fresh session), so a single blip recovers without the trader
+  // re-clicking. The per-session budgets keep two attempts inside the route's
+  // time limit; a real error (bad login, no API access) isn't a timeout and
+  // isn't retried.
+  const { accounts, fillsByAccountId, rmsByAccountId } = await retryOnTimeout(() =>
+    discoverAccountsAndFills(login, password, systemName, gatewayUri, since),
+  )
   const fillDiagnostic = takeRithmicFillDiagnostics().join(" | ")
   if (accounts.length === 0) {
     return {
