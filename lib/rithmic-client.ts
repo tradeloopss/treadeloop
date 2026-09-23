@@ -644,6 +644,10 @@ export async function listRithmicAccounts(
 // price/size/time across the several fields Rithmic may populate, and adds it
 // to the dedupe map. Skips a row that carries no usable price, size, or time.
 function addParsedFill(byId: Map<string, ParsedFill>, accountId: string, f: any): void {
+  // Fill history, like the replay stream, can return rows for EVERY account
+  // under the login — each row carries its own account_id, so drop any that
+  // isn't this account, or one account shows another's trades.
+  if (f.accountId != null && f.accountId !== "" && String(f.accountId) !== String(accountId)) return
   const price = f.fillPrice ?? f.avgFillPrice ?? f.price
   const size = f.fillSize ?? f.totalFillSize
   const timestamp =
@@ -801,6 +805,20 @@ async function fetchFillsInSession(
   let windows = 0
   let raw = 0
   let lastRp: string[] = ["0"]
+  // Track the account ids the fill rows carry (and how many belong to a
+  // different account) so the diagnostic shows whether foreign trades were
+  // filtered out. addParsedFill drops the foreign ones; this only counts them.
+  const fhAccts = new Set<string>()
+  let fhOther = 0
+  const addFills = (rows: any[]) => {
+    for (const f of rows) {
+      if (f.accountId != null && f.accountId !== "") {
+        fhAccts.add(String(f.accountId))
+        if (String(f.accountId) !== String(account.accountId)) fhOther++
+      }
+      addParsedFill(byId, account.accountId, f)
+    }
+  }
   // A hard ceiling on the whole windowed pull. A single hung request already
   // aborts (collectFills rejects on timeout), but under mild throttle every
   // window can answer slowly-but-not-quite-timing-out, and 9 windows × two
@@ -849,7 +867,7 @@ async function fetchFillsInSession(
     }
     lastRp = rp
     raw += fills.length
-    for (const f of fills) addParsedFill(byId, account.accountId, f)
+    addFills(fills)
   }
 
   // Last resort: some Rithmic setups return "no data" for any bounded range
@@ -863,11 +881,11 @@ async function fetchFillsInSession(
     if (!(rp.length > 0 && rp[0] !== "0" && rp[0] !== "7")) {
       lastRp = rp
       raw += fills.length
-      for (const f of fills) addParsedFill(byId, account.accountId, f)
+      addFills(fills)
     }
   }
 
-  const diag = `${account.accountId}: ${raw} rows→${byId.size} kept, rp=${lastRp.join(",") || "none"}, fcm=${account.fcmId ? "y" : "n"}, ib=${account.ibId ? "y" : "n"}, ${windows}w from ${toDateInt(start)}`
+  const diag = `${account.accountId}: fillhist ${raw} rows, accts=[${[...fhAccts].join(",") || "none"}], ${fhOther} other→${byId.size} kept, rp=${lastRp.join(",") || "none"}, fcm=${account.fcmId ? "y" : "n"}, ib=${account.ibId ? "y" : "n"}, ${windows}w from ${toDateInt(start)}`
   console.log(`[rithmic] ${diag}`)
   rithmicFillDiagnostics.push(diag)
   return [...byId.values()]
