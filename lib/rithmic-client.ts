@@ -670,6 +670,10 @@ function addParsedFill(byId: Map<string, ParsedFill>, accountId: string, f: any)
 // is the numeric TransactionType enum (BUY=1) and its time is ssboe/usecs
 // (seconds+microseconds since epoch), not fill_date/fill_time strings.
 function addExecutionFill(byId: Map<string, ParsedFill>, accountId: string, m: any): void {
+  // A replay streams executions for EVERY account under the login, and each
+  // fill carries its own account_id — so keep only this account's, or one
+  // account ends up showing another account's trades.
+  if (m.accountId != null && m.accountId !== "" && String(m.accountId) !== String(accountId)) return
   const price = m.fillPrice ?? m.avgFillPrice
   const size = m.fillSize ?? m.totalFillSize
   if (!(m.symbol && price != null && size != null && Number(size) > 0 && m.ssboe != null)) return
@@ -728,8 +732,21 @@ async function fetchExecutionsInSession(
   }
 
   const byId = new Map<string, ParsedFill>()
-  for (const m of fills) addExecutionFill(byId, account.accountId, m)
-  const diag = `${account.accountId}: replay ${fills.length} exec→${byId.size} kept, rp=${rp.join(",") || (terminal ? "none" : "timeout")}, from ${startIndex}`
+  let otherAccount = 0
+  let buys = 0
+  let sells = 0
+  const symbols = new Set<string>()
+  for (const m of fills) {
+    if (m.accountId != null && m.accountId !== "" && String(m.accountId) !== String(account.accountId)) {
+      otherAccount++
+      continue
+    }
+    if (m.transactionType === TRANSACTION_TYPE_BUY) buys++
+    else sells++
+    if (m.symbol) symbols.add(String(m.symbol))
+    addExecutionFill(byId, account.accountId, m)
+  }
+  const diag = `${account.accountId}: replay ${fills.length} exec (${otherAccount} other-acct, ${buys}B/${sells}S, sym=${[...symbols].join("/") || "none"})→${byId.size} kept, rp=${rp.join(",") || (terminal ? "none" : "timeout")}, from ${startIndex}`
   console.log(`[rithmic] ${diag}`)
   rithmicFillDiagnostics.push(diag)
   return [...byId.values()]
