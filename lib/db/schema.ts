@@ -108,6 +108,12 @@ export const tradingAccounts = pgTable("trading_accounts", {
   // Hidden from active views (dashboard, selectors) but kept, with its trades,
   // so it can be brought back. Deleting is the permanent option.
   archived: boolean("archived").notNull().default(false),
+  // Average round-turn commission per contract, derived from the broker's own
+  // reported commission total (Rithmic's rms_account_commission ÷ filled
+  // contracts). Synced fills carry no commission, so this is what makes their
+  // P&L net — every synced trade's fees = this × its quantity. Null until a
+  // snapshot provides it, or for non-commission accounts.
+  commissionPerContract: numeric("commissionPerContract", { precision: 18, scale: 4 }),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 

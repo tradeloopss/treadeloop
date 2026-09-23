@@ -240,6 +240,12 @@ export interface RithmicAccountSnapshot {
   openPositionPnl: number
   closedPositionPnl: number
   minAccountBalance: number | null
+  // The account's total commission and total filled contracts as Rithmic's RMS
+  // tracks them — the fill feed carries no commission, so this snapshot is the
+  // only place we can get it. Dividing gives an average per-contract commission
+  // used to make synced P&L net (lib/rithmic-sync.ts). Null when not reported.
+  commission: number | null
+  filledContracts: number | null
   at: Date
 }
 
@@ -609,6 +615,8 @@ export async function fetchAccountSnapshots(
             openPositionPnl: Number(m.openPositionPnl || 0),
             closedPositionPnl: Number(m.closedPositionPnl || 0),
             minAccountBalance: positiveOrNull(m.minAccountBalance),
+            commission: m.rmsAccountCommission != null && m.rmsAccountCommission !== "" ? Math.abs(Number(m.rmsAccountCommission)) : null,
+            filledContracts: (Number(m.fillBuyQty || 0) + Number(m.fillSellQty || 0)) || null,
             at: new Date(),
           })
         }

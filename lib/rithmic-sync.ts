@@ -9,11 +9,49 @@ import { decrypt } from "@/lib/crypto"
 import { fetchAccountSnapshots, fetchRithmicFillsAndRms, type RithmicAccountRms, type RithmicAccountSnapshot } from "@/lib/rithmic-client"
 import { brokerDrawdownFloor, inferStartingBalance } from "@/lib/broker-balance"
 import { reconstructTrades, type ParsedFill } from "@/lib/fill-reconstruction"
-import { computePnl, contractMultiplierForSymbol } from "@/lib/calc"
+import { computePnl, computeRMultiple, contractMultiplierForSymbol } from "@/lib/calc"
 import { regenerateJournalForDay } from "@/app/actions/trades"
 import { recordSyncRun, type SyncTrigger } from "@/lib/sync-runs"
 
 export type RithmicConnectionRow = typeof rithmicConnections.$inferSelect
+
+// Average round-turn commission per contract from the broker's own totals.
+// filled contracts count both sides, so a round-turn is 2 contracts. Guarded to
+// a sane futures range ($0.10–$50/round-turn) so a bad or missing value can
+// never corrupt P&L — it simply leaves trades gross. This is the whole trick
+// for matching the firm's net numbers, since Rithmic's fill feed carries no
+// commission (only this account-level total does).
+export function commissionRateFromSnapshot(snapshot: RithmicAccountSnapshot): number | null {
+  const { commission, filledContracts } = snapshot
+  if (commission == null || filledContracts == null || commission <= 0 || filledContracts <= 0) return null
+  const roundTurns = filledContracts / 2
+  if (roundTurns <= 0) return null
+  const rate = commission / roundTurns
+  if (rate < 0.1 || rate > 50) return null
+  return Number(rate.toFixed(4))
+}
+
+// Re-prices every closed trade on the account so its P&L is net of commission:
+// fees = ratePerContract × quantity, pnl = gross − fees. Gross is recomputed
+// from the stored prices each time, so this is idempotent and safe to re-run.
+async function repriceAccountTrades(accountId: number, ratePerContract: number): Promise<void> {
+  const rows = await db.select().from(trades).where(and(eq(trades.accountId, accountId), eq(trades.status, "closed")))
+  for (const tr of rows) {
+    if (tr.exitPrice == null) continue
+    const qty = Number(tr.quantity)
+    const base = {
+      side: tr.side as "long" | "short",
+      quantity: qty,
+      entryPrice: Number(tr.entryPrice),
+      exitPrice: Number(tr.exitPrice),
+      contractMultiplier: Number(tr.contractMultiplier),
+    }
+    const fees = Number((ratePerContract * qty).toFixed(2))
+    const pnl = computePnl({ ...base, fees: 0 }) - fees
+    const rMultiple = computeRMultiple({ ...base, stopLoss: tr.stopLoss != null ? Number(tr.stopLoss) : null, fees })
+    await db.update(trades).set({ fees: String(fees), pnl: String(pnl), rMultiple: rMultiple == null ? null : String(rMultiple) }).where(eq(trades.id, tr.id))
+  }
+}
 
 export async function importFillsForConnection(
   userId: string,
@@ -45,10 +83,18 @@ export async function importFillsForConnection(
   const seen = new Set(existingIds.map((r) => r.externalId))
   const toImport = imported.filter((t) => !seen.has(t.externalId))
 
+  // Price new trades net of commission using the rate the broker's snapshot
+  // already gave us (0 until the first snapshot lands, then applied on the next
+  // refresh's reprice — see applyBrokerSnapshot).
+  const [account] = await db.select({ commissionPerContract: tradingAccounts.commissionPerContract }).from(tradingAccounts).where(eq(tradingAccounts.id, accountId))
+  const rate = account?.commissionPerContract != null ? Number(account.commissionPerContract) : 0
+
   const affectedDays = new Set<string>()
   for (const t of toImport) {
     const contractMultiplier = contractMultiplierForSymbol(t.symbol)
-    const pnl = t.pnl ?? computePnl({ side: t.side, quantity: t.quantity, entryPrice: t.entryPrice, exitPrice: t.exitPrice, fees: t.fees, contractMultiplier })
+    const fees = Number((rate * t.quantity).toFixed(2))
+    const gross = t.pnl ?? computePnl({ side: t.side, quantity: t.quantity, entryPrice: t.entryPrice, exitPrice: t.exitPrice, fees: 0, contractMultiplier })
+    const pnl = gross - fees
     await db.insert(trades).values({
       userId,
       accountId,
@@ -59,12 +105,13 @@ export async function importFillsForConnection(
       quantity: String(t.quantity),
       entryPrice: String(t.entryPrice),
       exitPrice: String(t.exitPrice),
-      fees: String(t.fees),
+      fees: String(fees),
       pnl: String(pnl),
       contractMultiplier: String(contractMultiplier),
       entryTime: new Date(t.entryTime),
       exitTime: new Date(t.exitTime),
       externalId: t.externalId,
+      source: "rithmic",
     })
     affectedDays.add(t.exitTime.slice(0, 10))
   }
@@ -105,6 +152,18 @@ export async function applyBrokerSnapshot(
       return floor == null ? null : String(floor)
     })(),
   }
+
+  // Make the account's trade P&L net of commission using the broker's own
+  // commission total. Only re-prices when the derived rate actually changes
+  // (it stabilises quickly), so this isn't rewritten every refresh. Done before
+  // the starting-balance inference below so that walks off net P&L, matching
+  // the net balance.
+  const rate = commissionRateFromSnapshot(snapshot)
+  if (rate != null && (account.commissionPerContract == null || Math.abs(Number(account.commissionPerContract) - rate) > 0.0001)) {
+    patch.commissionPerContract = String(rate)
+    await repriceAccountTrades(accountId, rate)
+  }
+
   if ((Number(account.startingBalance) <= 0 || account.startingBalanceInferred) && balance > 0) {
     const [{ net }] = await db
       .select({ net: sql<string>`coalesce(sum(${trades.pnl}), 0)` })
