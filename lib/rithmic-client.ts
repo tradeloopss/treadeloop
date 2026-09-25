@@ -17,6 +17,7 @@
 // list for whichever gateway it's pointed at.
 import fs from "node:fs"
 import path from "node:path"
+import tls from "node:tls"
 import WebSocket from "ws"
 import protobuf from "protobufjs"
 import type { ParsedFill } from "@/lib/fill-reconstruction"
@@ -249,6 +250,30 @@ export interface RithmicAccountSnapshot {
   at: Date
 }
 
+// Rithmic throttles cloud (Vercel/AWS) IPs, so when RITHMIC_RELAY ("host:port")
+// is set every Rithmic socket is opened through that static-IP relay — an nginx
+// SNI passthrough on the TradeLoop sync VPS. The relay only reads the TLS SNI
+// and pipes bytes, so TLS still runs end to end to Rithmic, and here the
+// certificate IS verified (a compromised relay can't impersonate Rithmic).
+// Only *.rithmic.com on 443 is routed; anything else connects directly.
+function relayConnection(uri: string): { createConnection?: () => tls.TLSSocket } {
+  const relay = process.env.RITHMIC_RELAY?.trim()
+  if (!relay) return {}
+  let target: URL
+  try {
+    target = new URL(uri)
+  } catch {
+    return {}
+  }
+  const port = target.port ? Number(target.port) : 443
+  if (target.protocol !== "wss:" || port !== 443 || !/\.rithmic\.com$/i.test(target.hostname)) return {}
+  const [relayHost, relayPort] = relay.split(":")
+  return {
+    createConnection: () =>
+      tls.connect({ host: relayHost, port: Number(relayPort) || 8443, servername: target.hostname, rejectUnauthorized: true }),
+  }
+}
+
 function openSocket(uri: string): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
     // handshakeTimeout bounds the TLS/HTTP upgrade; the outer timer covers a
@@ -256,7 +281,7 @@ function openSocket(uri: string): Promise<WebSocket> {
     // a throttled handshake (Rithmic rate-limits cloud IPs, which shows up as
     // "Opening handshake has timed out") fails fast and is retried by connect()
     // rather than burning the whole request budget on one dead attempt.
-    const ws = new WebSocket(uri, { rejectUnauthorized: false, handshakeTimeout: 8000 })
+    const ws = new WebSocket(uri, { rejectUnauthorized: false, handshakeTimeout: 8000, ...relayConnection(uri) })
     const cleanup = () => {
       clearTimeout(timer)
       ws.off("open", onOpen)
