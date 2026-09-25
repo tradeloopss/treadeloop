@@ -7,24 +7,13 @@ import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { ChangePasswordForm } from "@/components/change-password-form"
 import { DangerZone } from "@/components/danger-zone"
-import { SubscriptionPanel, type SubscriptionInfo } from "@/components/subscription-panel"
 import { TwoFactorPanel } from "@/components/two-factor-panel"
 import { User, UserRound, Settings, Lock, CreditCard, Wallet, TriangleAlert } from "lucide-react"
 import { useT } from "@/components/locale-provider"
 
-type Tab = "security" | "subscription" | "danger"
+type Tab = "security" | "danger"
 
-export function SettingsShell({
-  subscription,
-  isOwner,
-  twoFactorEnabled,
-  hasPassword,
-}: {
-  subscription: SubscriptionInfo | null
-  isOwner: boolean
-  twoFactorEnabled: boolean
-  hasPassword: boolean
-}) {
+export function SettingsShell({ twoFactorEnabled, hasPassword }: { twoFactorEnabled: boolean; hasPassword: boolean }) {
   const t = useT()
   const [tab, setTab] = useState<Tab>("security")
 
@@ -43,7 +32,13 @@ export function SettingsShell({
               <User className="size-4" /> {t("Profile")}
             </Link>
             <NavButton icon={Lock} label={t("Security")} active={tab === "security"} onClick={() => setTab("security")} />
-            <NavButton icon={CreditCard} label={t("Subscription")} active={tab === "subscription"} onClick={() => setTab("subscription")} />
+            {/* Plan, payments and cards have their own page. */}
+            <Link
+              href="/billing"
+              className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <CreditCard className="size-4" /> {t("Billing & subscription")}
+            </Link>
           </div>
         </div>
         <div>
@@ -70,7 +65,6 @@ export function SettingsShell({
             <TwoFactorPanel enabled={twoFactorEnabled} hasPassword={hasPassword} />
           </>
         )}
-        {tab === "subscription" && <SubscriptionPanel subscription={subscription} isOwner={isOwner} />}
         {tab === "danger" && <DangerZone />}
       </div>
     </div>

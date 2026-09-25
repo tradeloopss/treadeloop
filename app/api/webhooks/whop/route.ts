@@ -4,7 +4,7 @@ import { db } from "@/lib/db"
 import { subscriptions, user } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { tierFromPlanId, type PlanTier } from "@/lib/whop"
-import { findPendingCheckoutByPlan } from "@/lib/checkout"
+import { findPendingCheckoutByPlan, retireReplacedMembership } from "@/lib/checkout"
 
 function tierFromMetadata(metadata: Record<string, unknown> | null | undefined): PlanTier | "unknown" {
   const value = metadata?.plan
@@ -86,6 +86,7 @@ async function handlePaymentSucceeded(payment: Record<string, any>) {
       status: "active",
     })
   }
+  await retireReplacedMembership(userId ?? existing?.userId, payment.metadata)
 }
 
 // membership.activated fires the moment someone starts a free trial, before
@@ -135,6 +136,7 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
       currentPeriodEnd,
     })
   }
+  if (eventName === "membership.activated") await retireReplacedMembership(userId ?? existing?.userId, membership.metadata)
 }
 
 export async function POST(request: Request) {

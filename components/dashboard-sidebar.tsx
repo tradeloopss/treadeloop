@@ -36,6 +36,7 @@ import {
   Banknote,
   CandlestickChart,
   Wallet,
+  CreditCard,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -320,6 +321,10 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
               <DropdownMenuItem render={<Link href="/accounts" />}>
                 <Wallet className="size-4" />
                 {t("Accounts")}
+              </DropdownMenuItem>
+              <DropdownMenuItem render={<Link href="/billing" />}>
+                <CreditCard className="size-4" />
+                {t("Billing")}
               </DropdownMenuItem>
               <DropdownMenuItem render={<Link href="/settings" />}>
                 <Plug className="size-4" />

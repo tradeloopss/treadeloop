@@ -1,28 +1,15 @@
 "use server"
 
 import { auth } from "@/lib/auth"
-import { db } from "@/lib/db"
-import { subscriptions } from "@/lib/db/schema"
-import { and, desc, eq, ne } from "drizzle-orm"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { createCheckout, confirmPendingCheckouts } from "@/lib/checkout"
-import { getUserPlan, PENDING_STATUS } from "@/lib/subscription"
+import { getUserPlan } from "@/lib/subscription"
+import { currentWhopMembershipId } from "@/lib/billing"
 import type { PlanTier, Billing } from "@/lib/whop"
 
 async function getSession() {
   return auth.api.getSession({ headers: await headers() })
-}
-
-export async function getMySubscription() {
-  const session = await getSession()
-  if (!session?.user) return null
-  const [row] = await db
-    .select()
-    .from(subscriptions)
-    .where(and(eq(subscriptions.userId, session.user.id), ne(subscriptions.status, PENDING_STATUS)))
-    .orderBy(desc(subscriptions.updatedAt))
-  return row ?? null
 }
 
 // A purchase has to belong to an account the moment it's made, or there's
@@ -34,7 +21,10 @@ export async function startCheckout(plan: PlanTier, billing: Billing) {
   if (!session?.user) {
     redirect(`/sign-up?next=${encodeURIComponent(`/checkout?plan=${plan}&billing=${billing}`)}`)
   }
-  const url = await createCheckout(session.user, plan, billing)
+  // Already subscribed on Whop: this is a plan switch, and the new
+  // membership retires the current one once it's live (lib/checkout.ts).
+  const replaces = await currentWhopMembershipId(session.user.id)
+  const url = await createCheckout(session.user, plan, billing, replaces)
   redirect(url)
 }
 

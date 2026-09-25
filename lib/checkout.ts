@@ -25,10 +25,15 @@ const GRANTING_STATUS: Record<string, string> = {
 //
 // The free trial is decided here, not by the button that was clicked: one
 // per person, so someone who has had theirs gets a plan that bills today.
+//
+// `replaces` is the membership a plan switch takes over from: it travels in
+// the metadata, and once the new membership is live the old one is set not
+// to renew (retireReplacedMembership), so nobody pays for both.
 export async function createCheckout(
   user: { id: string; email: string },
   plan: PlanTier,
-  billing: Billing
+  billing: Billing,
+  replaces: string | null = null
 ): Promise<string> {
   const withTrial = !(await hasUsedTrial(user.id, user.email))
   const { amount, billingPeriodDays, trialPeriodDays } = renewalPriceFor(plan, billing, withTrial)
@@ -46,7 +51,7 @@ export async function createCheckout(
       currency: "usd",
       plan_type: "renewal",
     },
-    metadata: { plan, billing, app_user_id: user.id },
+    metadata: { plan, billing, app_user_id: user.id, ...(replaces ? { replaces_membership: replaces } : {}) },
     // Whop rejects anything but a real https:// URL — in local dev
     // BETTER_AUTH_URL is http://localhost:3000, so this only sends it once
     // deployed behind a real https domain, and just omits it otherwise
@@ -112,6 +117,7 @@ export async function confirmPendingCheckouts(userId: string): Promise<void> {
 
     const membership = memberships.find((m) => GRANTING_STATUS[m.status])
     if (!membership) continue
+    await retireReplacedMembership(userId, membership.metadata)
 
     try {
       await db
@@ -130,6 +136,24 @@ export async function confirmPendingCheckouts(userId: string): Promise<void> {
       if (code !== "23505") throw err
       await db.delete(subscriptions).where(eq(subscriptions.id, row.id))
     }
+  }
+}
+
+// A plan switch is live: stop the membership it replaced from renewing (it
+// keeps access to what was already paid for). Only a membership our records
+// say belongs to this same user is touched; setting it twice is harmless.
+export async function retireReplacedMembership(userId: string | null | undefined, metadata: Record<string, unknown> | null | undefined): Promise<void> {
+  const replaces = typeof metadata?.replaces_membership === "string" ? metadata.replaces_membership : null
+  if (!userId || !replaces) return
+  const [row] = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(and(eq(subscriptions.userId, userId), eq(subscriptions.whopMembershipId, replaces)))
+  if (!row) return
+  try {
+    await getWhopClient().memberships.update({ id: replaces, cancel_at_period_end: true })
+  } catch (err) {
+    console.error("[checkout] couldn't stop the replaced membership from renewing:", replaces, err instanceof Error ? err.message : err)
   }
 }
 

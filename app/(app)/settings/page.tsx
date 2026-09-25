@@ -1,7 +1,5 @@
 import { auth } from "@/lib/auth"
 import { headers } from "next/headers"
-import { getMySubscription } from "@/app/actions/subscriptions"
-import { isOwner } from "@/lib/subscription"
 import { PageHeader } from "@/components/page-header"
 import { SettingsShell } from "@/components/settings-shell"
 import { db } from "@/lib/db"
@@ -12,9 +10,7 @@ import { getT } from "@/lib/i18n/server"
 export default async function SettingsPage() {
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [subscription, owner, credential] = await Promise.all([
-    getMySubscription(),
-    session?.user ? isOwner(session.user.id) : Promise.resolve(false),
+  const [credential] = await Promise.all([
     session?.user
       ? db.select({ id: account.id }).from(account).where(and(eq(account.userId, session.user.id), eq(account.providerId, "credential"))).limit(1)
       : Promise.resolve([]),
@@ -25,12 +21,6 @@ export default async function SettingsPage() {
       <PageHeader title={t("Settings")} description={t("Manage your accounts, subscription, and security")} />
       <div className="p-4 sm:p-6">
         <SettingsShell
-          subscription={
-            subscription
-              ? { plan: subscription.plan, status: subscription.status, currentPeriodEnd: subscription.currentPeriodEnd }
-              : null
-          }
-          isOwner={owner}
           twoFactorEnabled={!!session?.user.twoFactorEnabled}
           hasPassword={credential.length > 0}
         />
