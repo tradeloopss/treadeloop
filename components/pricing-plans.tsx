@@ -76,7 +76,7 @@ const PLANS: Plan[] = [
         items: [
           { text: "CSV / file import", included: true },
           { text: "Live broker & prop firm sync (Rithmic)", included: true },
-          { text: "MetaTrader (MT4/5) live sync — coming soon", included: false },
+          { text: "MetaTrader 4 & 5 live sync", included: true },
         ],
       },
       {

@@ -8,9 +8,11 @@ TradeLoopExport script"); the script waits for the login, writes the account's
 info and history to MQL4\\Files\\tradeloop-<login>.json and closes the terminal.
 This bridge then reshapes MT4's closed orders into MT5-style entry/exit deals.
 
-A terminal knows a server only from its config\\<server>.srv file; MT4 reads
-every .srv in that folder, so one terminal serves every broker we have files
-for (unlike MT5, no swapping).
+A terminal knows a server only from the .srv files dropped into its config
+folder (current builds import them into an encrypted config\\servers.ini on
+their next start and delete the .srv files). MT4 reads every one, so one
+terminal serves every broker we have files for (unlike MT5, no swapping); the
+worker checks the server against mt4-servers.json before sending it here.
 """
 
 import argparse
@@ -34,6 +36,8 @@ FILES_DIR = os.path.join(TERMINAL_DIR, "MQL4", "Files")
 LOGS_DIR = os.path.join(TERMINAL_DIR, "logs")
 CONFIG_DIR = os.path.join(TERMINAL_DIR, "config")
 START_INI = os.path.join(TERMINAL_DIR, "tradeloop-start.ini")
+# Where MT4 remembers accounts it has logged into (with their password).
+ACCOUNTS_INI = os.path.join(CONFIG_DIR, "accounts.ini")
 EXPORT_TIMEOUT = 150
 
 # MT4 order types: 0 buy, 1 sell, 2-5 pending (cancelled ones sit in history
@@ -67,8 +71,6 @@ def check_journal(before, account):
 
 
 def export(account, password, server):
-    if not os.path.exists(os.path.join(CONFIG_DIR, server + ".srv")):
-        raise BridgeError(404, "server", "Couldn't find that MetaTrader 4 server — check the server name matches your terminal exactly")
     os.makedirs(FILES_DIR, exist_ok=True)
     out = os.path.join(FILES_DIR, f"tradeloop-{account}.json")
     for stale in (out, out + ".part"):
@@ -105,12 +107,17 @@ def export(account, password, server):
             time.sleep(0.5)
         raise BridgeError(504, "timeout", "MetaTrader 4 didn't finish loading the account in time")
     finally:
-        # The startup file holds the password: never leave it behind.
+        # The startup file holds the password, and MT4 saves the login in
+        # accounts.ini: never leave either behind.
         try:
             os.remove(START_INI)
         except OSError:
             pass
         kill_process(args.terminal)
+        try:
+            os.remove(ACCOUNTS_INI)
+        except OSError:
+            pass
 
 
 def reshape(data):
@@ -172,7 +179,7 @@ def reset(req):
 
 
 def health():
-    return {"ok": True, "platform": "mt4", "servers": len(glob.glob(os.path.join(CONFIG_DIR, "*.srv")))}
+    return {"ok": True, "platform": "mt4", "terminal": os.path.exists(args.terminal)}
 
 
 if __name__ == "__main__":

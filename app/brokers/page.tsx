@@ -19,7 +19,7 @@ const AUTO_SYNC = [
   {
     name: "MetaTrader 4 & 5",
     detail: "Connect with your investor (read-only) password. Closed positions and balance sync on their own.",
-    note: "Works with any broker running an MT4 or MT5 server.",
+    note: "Set up today for Exness and FTMO, including FTMO's free-trial servers. Other brokers are added as traders ask for them.",
   },
 ]
 

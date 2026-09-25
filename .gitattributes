@@ -1,0 +1,4 @@
+# Scripts that run on the Linux sync server must keep LF line endings.
+worker/mt5/*.py text eol=lf
+worker/mt5/*.sh text eol=lf
+worker/mt5/mql4/*.mq4 text eol=lf

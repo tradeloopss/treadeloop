@@ -43,13 +43,20 @@ server, and `Script=TradeLoopExport`. The script (`mql4/TradeLoopExport.mq4`,
 compiled into each slot) waits for the login, writes the account's info,
 history and open orders to `MQL4\Files	radeloop-<login>.json`, and closes the
 terminal. The bridge deletes the startup file (it holds the password) and
-reshapes each closed MT4 order into an entry and an exit deal. From there the
+`configccounts.ini` (MT4 saves the login there), and reshapes each closed MT4 order into an entry and an exit deal. From there the
 worker and the app treat it like MT5. Services: `mt4-bridge@m1`,
 `mt4-bridge@m2` (ports 9201, 9202; `MT4_BRIDGES` in the worker's env).
 
-MT4 knows a server from its `config\<server>.srv` file and reads every file in
-that folder, so one terminal serves all MT4 brokers. `mt4-servers.json` lists
-the servers we have.
+MT4 learns servers from the `.srv` files in its `config` folder and reads
+every one, so one terminal serves all MT4 brokers. Current builds (1479+)
+import them into an encrypted `config\servers.ini` on their next start and
+delete the `.srv` files, so the bridge can't look a server up itself — the
+worker checks it against `/srv/mt5/brokers/mt4-servers.json` (every `.srv`
+name we've added, kept in `brokers/mt4/`) before sending an account over.
+
+MT4's main window is titled `<login>: <server> - …`, not like MT5's, so the
+worker's stray-window cleanup leaves every window of a `C:\mt4\…` process
+alone (it used to close the terminal mid-export).
 
 ## Brokers
 
@@ -76,7 +83,8 @@ sudo -u mt5 /usr/local/bin/add-broker --platform mt5 --url <url> --slug ftmo --n
 sudo -u mt5 /usr/local/bin/add-broker --platform mt4 --url <url> --slug exness --name Exness
 ```
 
-The worker rereads the lists within a minute. **Don't script bulk downloads or
+The worker rereads the lists within a minute, and accounts that failed with
+"not set up yet" for that broker retry on their own. **Don't script bulk downloads or
 link-guessing against download.mql5.com.** MetaQuotes' CDN blocks addresses
 that do (it blocked this VPS for hours once).
 
@@ -106,9 +114,17 @@ Build from a checkout with working `node_modules`:
 esbuild worker/mt5/worker.ts --bundle --platform=node --target=node22 --format=cjs \
   --outfile=worker.cjs --external:pg-native
 scp worker.cjs root@sync:/srv/tradeloop/mt5-worker/worker.cjs
-scp worker/mt5/bridge.py root@sync:/srv/mt5/wine/drive_c/mt5/bridge.py   # then chown mt5
-ssh root@sync 'systemctl restart mt5-bridge@t1 mt5-bridge@t2 tradeloop-mt5-worker'
+scp worker/mt5/bridge.py worker/mt5/bridge_mt4.py worker/mt5/bridge_common.py     root@sync:/srv/mt5/wine/drive_c/mt5/                                  # then chown mt5
+scp worker/mt5/add_broker.py root@sync:/usr/local/bin/add-broker        # chmod 755
+ssh root@sync 'systemctl restart mt5-bridge@t1 mt5-bridge@t2 mt4-bridge@m1 mt4-bridge@m2 tradeloop-mt5-worker'
 ```
+
+Scripts must reach the server with LF line endings (`.gitattributes` pins
+them; a CRLF `add-broker` fails with `python3: No such file or directory`).
+
+**Set up (2026-09-26):** MT5 packs `exness`, `ftmo` (prefix `FTMO`: every
+FTMO-Server/-Demo, incl. free trials); MT4 servers from FTMO (FTMO-Demo,
+-Demo2, -Server…-Server4) and Exness (Exness-Real*, Exness-Trial*).
 
 The worker's environment: `/etc/tradeloop/db.env` (`DATABASE_URL`, the
 `tradeloop_sync` role) and `/etc/tradeloop/mt5-worker.env`

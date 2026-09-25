@@ -16,7 +16,7 @@
 import os from "node:os"
 import { execFile } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
-import { eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, like, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { metatraderConnections, metatraderDeals, tradingAccounts } from "@/lib/db/schema"
 import { decrypt } from "@/lib/crypto"
@@ -212,6 +212,9 @@ function pickBridge(free: Bridge[], connection: Connection, broker: Broker | nul
 
 const MAX_BACKOFF_MS = 30 * 60_000
 const PERMANENT = new Set(["auth", "server", "unsupported"])
+// How the "we don't have this server" error starts — requeueNewlySupported
+// looks for it once a broker is added.
+const UNSUPPORTED_PREFIX = `We don't have "`
 
 // Server time → the incremental window: re-read the last 3 days every time
 // (deals are de-duplicated by ticket), so nothing that arrives late is missed.
@@ -229,7 +232,7 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
       console.warn(`[mt5] no ${bridge.platform} pack for server "${connection.server}" (connection ${connection.id})`)
       throw new BridgeError(
         "unsupported",
-        `We don't have "${connection.server}" set up yet. Double-check the server name in MetaTrader (File → Login to Trade Account); if it's right, we've been notified and will add your broker.`,
+        `${UNSUPPORTED_PREFIX}${connection.server}" set up yet. Double-check the server name in MetaTrader (File → Login to Trade Account); if it's right, we've been notified and will add your broker.`,
       )
     }
     if (broker && bridge.broker !== broker.slug) {
@@ -414,16 +417,29 @@ async function flushNormalize() {
 // Python API until closed. Anything that isn't a terminal's main window
 // ("<login> - <server>…" or "MetaTrader 5 - …") gets closed.
 function closeStrayWindows() {
-  execFile("wmctrl", ["-l"], { env: { ...process.env, DISPLAY } }, (err, stdout) => {
+  execFile("wmctrl", ["-lp"], { env: { ...process.env, DISPLAY } }, (err, stdout) => {
     if (err) return
     for (const line of stdout.split("\n")) {
-      const match = /^(0x[0-9a-f]+)\s+\S+\s+\S+\s?(.*)$/i.exec(line.trim())
+      const match = /^(0x[0-9a-f]+)\s+-?\d+\s+(\d+)\s+\S+\s?(.*)$/i.exec(line.trim())
       if (!match) continue
-      const [, id, title] = match
+      const [, id, pid, title] = match
       if (/^(\d+ - |MetaTrader 5)/.test(title)) continue
+      // MT4 terminals (C:\mt4\<slot>) only run for the few seconds of an
+      // export, which the bridge ends itself — closing their windows (the
+      // main one is titled "<login>: <server> - …") would kill the export.
+      if (isMt4Process(Number(pid))) continue
       execFile("wmctrl", ["-i", "-c", id], { env: { ...process.env, DISPLAY } }, () => {})
     }
   })
+}
+
+function isMt4Process(pid: number): boolean {
+  if (!pid) return false
+  try {
+    return /[\\/]mt4[\\/]/i.test(readFileSync(`/proc/${pid}/cmdline`, "latin1"))
+  } catch {
+    return false
+  }
 }
 
 function writeStatus(extra: Record<string, unknown> = {}) {
@@ -469,6 +485,25 @@ const QUEUED_MESSAGE: Record<Platform, string> = {
   mt4: "MetaTrader 4 sync is still being set up on our sync server — your account is queued and will connect automatically once it's ready.",
 }
 
+// An account that failed only because its server wasn't set up yet retries
+// by itself once that broker is added (add-broker), instead of staying failed
+// until the user reconnects.
+async function requeueNewlySupported() {
+  const failed = await db
+    .select({ id: metatraderConnections.id, platform: metatraderConnections.platform, server: metatraderConnections.server })
+    .from(metatraderConnections)
+    .where(and(eq(metatraderConnections.status, "error"), like(metatraderConnections.lastSyncError, `${UNSUPPORTED_PREFIX}%`)))
+  for (const c of failed) {
+    const known = c.platform === "mt4" ? mt4ServerKnown(c.server) : brokerFor(c.server) != null
+    if (!known) continue
+    await db
+      .update(metatraderConnections)
+      .set({ status: "pending", statusMessage: null, errorCount: 0, nextSyncAt: new Date(), leaseUntil: null })
+      .where(and(eq(metatraderConnections.id, c.id), eq(metatraderConnections.status, "error")))
+    console.log(`[mt5] connection ${c.id} (${c.server}): its broker is set up now — retrying`)
+  }
+}
+
 async function flagQueued() {
   for (const platform of ["mt5", "mt4"] as const) {
     if (bridges.some((b) => b.platform === platform && b.alive)) continue
@@ -491,6 +526,7 @@ async function tick() {
   if (ticks % 8 === 1) {
     await checkBridges()
     await flagQueued()
+    await requeueNewlySupported()
   }
   for (const platform of ["mt5", "mt4"] as const) {
     const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)

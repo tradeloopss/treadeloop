@@ -61,7 +61,7 @@ const PLATFORMS: PlatformDef[] = [
   { id: "rithmic", name: "Rithmic", description: "Futures prop firms — Apex, Bulenox, Tradeify & more.", badge: "live", icon: <Logo src="/brokers/sm/rithmic.png" />, live: true },
   { id: "mt5", name: "MetaTrader 5", description: "Forex & CFD brokers, read-only investor password.", badge: "live", icon: <Logo src="/brokers/sm/metatrader.png" />, live: true },
   { id: "tradingview", name: "TradingView", description: "Paper trading via the TradeLoop extension.", badge: "paper", icon: <Logo src="/brokers/sm/tradingview.png" dark="/brokers/sm/tradingview-dark.png" />, live: true },
-  { id: "mt4", name: "MetaTrader 4", description: "Accounts queue until MT4 sync goes live.", badge: "setup", icon: <Logo src="/brokers/sm/metatrader.png" />, live: true },
+  { id: "mt4", name: "MetaTrader 4", description: "Classic MT4 accounts, read-only investor password.", badge: "live", icon: <Logo src="/brokers/sm/metatrader.png" />, live: true },
   { id: "file", name: "File import", description: "Tradovate, NinjaTrader, TradingView & MT reports.", badge: "file", icon: <TintIcon><FileUp className="size-5" /></TintIcon>, live: false },
   { id: "topstep", name: "Topstep", description: "Direct Topstep sync is on the way.", badge: "soon", icon: <Logo src="/brokers/sm/topstep.png" />, live: true, disabled: true },
 ]
@@ -69,7 +69,7 @@ const PLATFORMS: PlatformDef[] = [
 const CONNECT_COPY: Record<PlatformId, { title: string; description: string }> = {
   rithmic: { title: "Connect your Rithmic account", description: "Pick your prop firm, then sign in with your Rithmic login. Every account under it is added and synced." },
   mt5: { title: "Connect your MetaTrader 5 account", description: "Use the investor (read-only) password from your broker or prop firm — never your trading password." },
-  mt4: { title: "Connect your MetaTrader 4 account", description: "Use the investor (read-only) password. MT4 accounts wait in a queue until MT4 sync is live, then connect by themselves." },
+  mt4: { title: "Connect your MetaTrader 4 account", description: "Use the investor (read-only) password from your broker or prop firm — never your trading password." },
   tradingview: { title: "Connect TradingView paper trading", description: "Pair the TradeLoop browser extension once; paper trades then sync on their own." },
   file: { title: "Import a file", description: "Upload an export from your platform. Accounts in the file are created automatically, and re-importing never duplicates trades." },
   topstep: { title: "Topstep", description: "" },
