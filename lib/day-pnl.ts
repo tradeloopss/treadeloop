@@ -18,11 +18,17 @@ export interface DayPnlEntry {
   notes: string | null
 }
 
+// The day a closed trade counts toward: its exit date (entry date if it has
+// none), in UTC. Shared so every view buckets trades onto the same days.
+export function tradeDate(t: Pick<DayPnlTrade, "exitTime" | "entryTime">): string {
+  return new Date(t.exitTime ?? t.entryTime).toISOString().slice(0, 10)
+}
+
 export function computeDayPnl(rows: DayPnlTrade[], entries: DayPnlEntry[] = []): Map<string, DayPnl> {
   const byDay = new Map<string, DayPnl>()
   for (const t of rows) {
     if (t.status !== "closed") continue
-    const date = new Date(t.exitTime ?? t.entryTime).toISOString().slice(0, 10)
+    const date = tradeDate(t)
     const existing = byDay.get(date) ?? { date, pnl: 0, trades: 0, wins: 0 }
     existing.pnl += Number(t.pnl)
     existing.trades += 1

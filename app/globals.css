@@ -103,6 +103,7 @@
   --cal-neutral-border: #3b82f6;
   --cal-neutral-text: #1d4ed8;
   --cal-neutral-line: #1d4ed8;
+  --cal-neutral-sub: #2563eb;
 }
 
 .dark {
@@ -156,6 +157,7 @@
   --cal-neutral-border: #3b82f6;
   --cal-neutral-text: #ffffff;
   --cal-neutral-line: #60a5fa;
+  --cal-neutral-sub: #93c5fd;
 }
 
 @layer base {
