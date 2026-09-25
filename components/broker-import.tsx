@@ -97,7 +97,12 @@ export function BrokerImport({
         <div className="space-y-1.5">
           <Label>{t("Import into")}</Label>
           <Select value={accountId} onValueChange={(v) => v && setAccountId(v)}>
-            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full">
+              {/* Show the option's label, not its raw value ("auto" / an id). */}
+              <SelectValue>
+                {(v: string) => (v === "auto" ? t("Split automatically by account (recommended)") : (accounts.find((a) => String(a.id) === v)?.name ?? v))}
+              </SelectValue>
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="auto">{t("Split automatically by account (recommended)")}</SelectItem>
               {accounts.map((a) => (

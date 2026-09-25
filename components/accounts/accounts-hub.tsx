@@ -68,7 +68,16 @@ export function AccountsHub({
           </Button>
         </header>
 
-        <ConnectionWorkspace selection={selection} onSelect={(p) => select(p)} isPro={isPro} pairings={pairings} importAccounts={importAccounts} />
+        <ConnectionWorkspace
+          selection={selection}
+          onSelect={(p) => select(p)}
+          // Closing a platform's window just returns to the grid (no nonce
+          // bump, so the page doesn't jump).
+          onClose={() => setSelection((s) => ({ ...s, platform: null, initial: undefined }))}
+          isPro={isPro}
+          pairings={pairings}
+          importAccounts={importAccounts}
+        />
 
         <AccountsList
           connections={connections}

@@ -4,9 +4,10 @@ import type React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, CandlestickChart, CheckCircle2, FileUp, LineChart } from "lucide-react"
+import { AlertCircle, CandlestickChart, CheckCircle2, FileUp, LineChart } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useT } from "@/components/locale-provider"
 import { ConnectForm, type RithmicConnected } from "@/components/rithmic-connect"
 import { ConnectFlow, type MetaTraderStage } from "@/components/metatrader-connect"
@@ -70,12 +71,14 @@ const CONNECT_COPY: Record<PlatformId, { title: string; description: string }> =
 export function ConnectionWorkspace({
   selection,
   onSelect,
+  onClose,
   isPro,
   pairings,
   importAccounts,
 }: {
   selection: WorkspaceSelection
-  onSelect: (platform: PlatformId | null) => void
+  onSelect: (platform: PlatformId) => void
+  onClose: () => void
   isPro: boolean
   pairings: TradingViewPairingView[]
   importAccounts: { id: number; name: string }[]
@@ -91,16 +94,21 @@ export function ConnectionWorkspace({
   const platform = selection.platform
   const def = PLATFORMS.find((p) => p.id === platform) ?? null
 
-  // A new request from the hub (a platform card, "Connect another account",
-  // "Reconnect") starts that flow fresh and brings it into view.
+  // Every opened flow starts fresh.
   useEffect(() => {
     setOutcome(null)
     setMtStage("form")
-    if (selection.nonce > 0) {
+    setAttempt(0)
+  }, [platform, selection.nonce])
+
+  // "Add account" / "Connect another account" bring the platform grid into
+  // view (a platform itself opens in a window, so there's nothing to scroll).
+  useEffect(() => {
+    if (selection.nonce > 0 && !selection.platform) {
       rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
       headingRef.current?.focus({ preventScroll: true })
     }
-  }, [selection.nonce])
+  }, [selection.nonce, selection.platform])
 
   const onMtStage = useCallback((stage: MetaTraderStage) => setMtStage(stage), [])
 
@@ -110,42 +118,15 @@ export function ConnectionWorkspace({
   const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done")
 
   function done() {
-    onSelect(null)
+    onClose()
     router.refresh()
   }
 
   const locked = def != null && def.live && !isPro
 
-  let content: React.ReactNode
-  if (!platform || !def) {
-    content = (
-      <>
-        <h2 ref={headingRef} tabIndex={-1} className="text-[22px] leading-7 font-semibold tracking-[-0.4px] text-foreground outline-none @[560px]/ws:text-2xl @[900px]/ws:text-[26px] @[900px]/ws:leading-8">
-          {t("Connect a trading account")}
-        </h2>
-        <p className="mt-2 max-w-[650px] text-sm text-muted-foreground">
-          {t("Select a platform to get started. Live connections keep your journal in sync automatically, while file imports let you bring in historical trades.")}
-        </p>
-        <h3 className="mt-6 text-base font-semibold text-foreground @[900px]/ws:mt-7">{t("Choose your platform")}</h3>
-        <div className="mt-3 grid grid-cols-1 gap-3 @[560px]/ws:grid-cols-2 @[840px]/ws:grid-cols-3">
-          {PLATFORMS.map((p) => (
-            <PlatformCard
-              key={p.id}
-              icon={p.icon}
-              name={t(p.name)}
-              description={t(p.description)}
-              badge={p.badge}
-              pro={p.live && !p.disabled && !isPro}
-              disabled={p.disabled}
-              onSelect={() => onSelect(p.id)}
-            />
-          ))}
-        </div>
-      </>
-    )
-  } else {
-    const copy = CONNECT_COPY[def.id]
-    let body: React.ReactNode
+  // The window for the chosen platform: its own form, or the result.
+  let body: React.ReactNode = null
+  if (def) {
     if (locked) {
       body = (
         <LiveSyncUpgradeBanner
@@ -189,7 +170,7 @@ export function ConnectionWorkspace({
               >
                 {t("Try again")}
               </Button>
-              <Button className="h-11" variant="outline" onClick={() => onSelect(null)}>
+              <Button className="h-11" variant="outline" onClick={onClose}>
                 {t("Back")}
               </Button>
             </div>
@@ -197,14 +178,14 @@ export function ConnectionWorkspace({
         />
       )
     } else if (outcome?.kind === "file") {
-      const s = outcome.summary
+      const summary = outcome.summary
       body = (
         <Result
           tone="success"
-          title={s.imported > 0 ? t("Trades imported") : t("Already up to date")}
+          title={summary.imported > 0 ? t("Trades imported") : t("Already up to date")}
           lines={[
-            s.imported === 1 ? t("Imported 1 trade from {source}", { source: s.source }) : t("Imported {n} trades from {source}", { n: s.imported, source: s.source }),
-            ...(s.skippedRows > 0 ? [s.skippedRows === 1 ? t("Skipped 1 unreadable row") : t("Skipped {n} unreadable rows", { n: s.skippedRows })] : []),
+            summary.imported === 1 ? t("Imported 1 trade from {source}", { source: summary.source }) : t("Imported {n} trades from {source}", { n: summary.imported, source: summary.source }),
+            ...(summary.skippedRows > 0 ? [summary.skippedRows === 1 ? t("Skipped 1 unreadable row") : t("Skipped {n} unreadable rows", { n: summary.skippedRows })] : []),
             t("Re-importing the same file later is safe — trades already on file are skipped."),
           ]}
           actions={
@@ -239,7 +220,7 @@ export function ConnectionWorkspace({
           initial={{ platform: def.id, server: selection.initial?.server, login: selection.initial?.login }}
           onStage={onMtStage}
           onDone={done}
-          onBack={() => onSelect(null)}
+          onBack={onClose}
         />
       )
     } else if (def.id === "tradingview") {
@@ -256,27 +237,8 @@ export function ConnectionWorkspace({
         />
       )
     }
-
-    content = (
-      <>
-        <button
-          type="button"
-          onClick={() => onSelect(null)}
-          className="-ms-2 inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        >
-          <ArrowLeft className="size-4" /> {t("Back")}
-        </button>
-        <div className="mt-3 flex items-center gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">{def.icon}</span>
-          <h2 ref={headingRef} tabIndex={-1} className="min-w-0 text-xl leading-7 font-semibold tracking-[-0.3px] text-foreground outline-none @[900px]/ws:text-[22px]">
-            {t(copy.title)}
-          </h2>
-        </div>
-        {copy.description && <p className="mt-2 max-w-[600px] text-sm text-muted-foreground">{t(copy.description)}</p>}
-        <div className="mt-6 max-w-[640px]">{body}</div>
-      </>
-    )
   }
+  const copy = def ? CONNECT_COPY[def.id] : null
 
   return (
     <section
@@ -285,12 +247,55 @@ export function ConnectionWorkspace({
       className="@container/ws scroll-mt-4 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[560px]/ws:p-6 @[900px]/ws:p-8"
     >
       <div className="mb-5 flex flex-col items-start gap-2.5 @[480px]/ws:flex-row @[480px]/ws:items-center @[480px]/ws:gap-5 @[900px]/ws:mb-6">
-        <p className="text-[11px] font-bold tracking-[0.7px] whitespace-nowrap text-primary uppercase">{t("Step {n} of 3", { n: step })}</p>
-        <ConnectionStepper current={step} completed={completed} />
+        <p className="text-[11px] font-bold tracking-[0.7px] whitespace-nowrap text-primary uppercase">{t("Step {n} of 3", { n: 1 })}</p>
+        <ConnectionStepper current={1} />
       </div>
-      <div key={`${platform ?? "choose"}-${outcome ? "result" : "form"}`} className="animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none">
-        {content}
+      <h2 ref={headingRef} tabIndex={-1} className="text-[22px] leading-7 font-semibold tracking-[-0.4px] text-foreground outline-none @[560px]/ws:text-2xl @[900px]/ws:text-[26px] @[900px]/ws:leading-8">
+        {t("Connect a trading account")}
+      </h2>
+      <p className="mt-2 max-w-[650px] text-sm text-muted-foreground">
+        {t("Select a platform to get started. Live connections keep your journal in sync automatically, while file imports let you bring in historical trades.")}
+      </p>
+      <h3 className="mt-6 text-base font-semibold text-foreground @[900px]/ws:mt-7">{t("Choose your platform")}</h3>
+      <div className="mt-3 grid grid-cols-1 gap-3 @[560px]/ws:grid-cols-2 @[840px]/ws:grid-cols-3">
+        {PLATFORMS.map((p) => (
+          <PlatformCard
+            key={p.id}
+            icon={p.icon}
+            name={t(p.name)}
+            description={t(p.description)}
+            badge={p.badge}
+            pro={p.live && !p.disabled && !isPro}
+            selected={p.id === platform}
+            disabled={p.disabled}
+            onSelect={() => onSelect(p.id)}
+          />
+        ))}
       </div>
+
+      {/* The chosen platform's details open in a window over the page. */}
+      <Dialog open={def != null} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className={cn("max-h-[calc(100svh-2rem)] gap-0 overflow-y-auto p-0 sm:max-w-xl", def?.id === "rithmic" && !outcome && !locked && "sm:max-w-3xl")}>
+          {def && copy && (
+            <div className="@container/ws p-5 sm:p-6">
+              <DialogHeader className="flex-row items-center gap-3 pe-8 text-start">
+                <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">{def.icon}</span>
+                <div className="min-w-0">
+                  <DialogTitle className="text-lg leading-6 font-semibold">{t(copy.title)}</DialogTitle>
+                  {copy.description && <DialogDescription className="mt-0.5 text-[13px]">{t(copy.description)}</DialogDescription>}
+                </div>
+              </DialogHeader>
+              <div className="mt-4 mb-5 flex flex-col items-start gap-2.5 border-y py-3 @[480px]/ws:flex-row @[480px]/ws:items-center @[480px]/ws:gap-5">
+                <p className="text-[11px] font-bold tracking-[0.7px] whitespace-nowrap text-primary uppercase">{t("Step {n} of 3", { n: step })}</p>
+                <ConnectionStepper current={step} completed={completed} />
+              </div>
+              <div key={outcome ? "result" : "form"} className="animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none">
+                {body}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }
