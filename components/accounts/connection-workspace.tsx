@@ -251,20 +251,21 @@ export function ConnectionWorkspace({
     <section
       ref={rootRef}
       aria-label={t("Connect a trading account")}
-      className="@container/ws scroll-mt-4 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[560px]/ws:p-6 @[900px]/ws:p-8"
+      className="@container/ws scroll-mt-4 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[640px]/page:p-5"
     >
-      <div className="mb-5 flex flex-col items-start gap-2.5 @[480px]/ws:flex-row @[480px]/ws:items-center @[480px]/ws:gap-5 @[900px]/ws:mb-6">
-        <p className="text-[11px] font-bold tracking-[0.7px] whitespace-nowrap text-primary uppercase">{t("Step {n} of 3", { n: 1 })}</p>
-        <ConnectionStepper current={1} />
-      </div>
-      <h2 ref={headingRef} tabIndex={-1} className="text-[22px] leading-7 font-semibold tracking-[-0.4px] text-foreground outline-none @[560px]/ws:text-2xl @[900px]/ws:text-[26px] @[900px]/ws:leading-8">
+      {/* Step label, heading and intro, then the steps; the platforms below. */}
+      <p className="text-[11px] font-bold tracking-[0.7px] text-primary uppercase">{t("Step {n} of 3", { n: 1 })}</p>
+      <h2 ref={headingRef} tabIndex={-1} className="mt-1.5 text-lg leading-7 font-semibold tracking-[-0.3px] text-foreground outline-none @[560px]/ws:text-xl">
         {t("Connect a trading account")}
       </h2>
-      <p className="mt-2 max-w-[650px] text-sm text-muted-foreground">
+      <p className="mt-1 max-w-[620px] text-[13px] leading-5 text-muted-foreground @[560px]/ws:text-sm">
         {t("Select a platform to get started. Live connections keep your journal in sync automatically, while file imports let you bring in historical trades.")}
       </p>
-      <h3 className="mt-6 text-base font-semibold text-foreground @[900px]/ws:mt-7">{t("Choose your platform")}</h3>
-      <div className="mt-3 grid grid-cols-1 gap-3 @[560px]/ws:grid-cols-2 @[840px]/ws:grid-cols-3">
+      <div className="mt-4">
+        <ConnectionStepper current={1} fill />
+      </div>
+      <h3 className="mt-6 text-sm font-semibold text-foreground @[560px]/ws:text-[15px]">{t("Choose your platform")}</h3>
+      <div className="mt-3 grid grid-cols-1 gap-2.5 @[520px]/ws:grid-cols-2 @[520px]/ws:gap-3 @[880px]/ws:grid-cols-3">
         {PLATFORMS.map((p) => (
           <PlatformCard
             key={p.id}

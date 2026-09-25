@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ChevronRight, KeyRound, LayoutDashboard, Link2, Plus, RefreshCw } from "lucide-react"
+import { Info, KeyRound, LayoutDashboard, Link2, Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { disconnectRithmic, syncRithmic } from "@/app/actions/rithmic"
 import { disconnectMetaTrader, syncMetaTraderNow } from "@/app/actions/metatrader"
@@ -18,19 +18,21 @@ import { ConfirmDialog, CreateManualAccountDialog, EditAccountDialog } from "@/c
 import { useRelativeTime } from "@/components/accounts/use-relative-time"
 import type { HubAccount, HubConnection } from "@/components/accounts/types"
 
-// The Accounts page's list of trade sources: one compact row per account
-// (identity · platform · status · balance · last sync · ⋯), expandable for the
-// rest of what that platform reports. Live connections first, then accounts
-// with no live connection (manual entry, file imports).
+// The Accounts page's list of trade sources, as one card: title, count and
+// "Sync all"; a compact table with one row per account (identity · platform ·
+// status · balance · last sync · ⋯), each expandable for the rest of what that
+// platform reports; and a hint + "Connect another account" underneath. Live
+// connections first, then accounts with no live connection (manual entry,
+// file imports).
 //
-// Columns follow the list's own width (@container/list):
-//   ≥ 880px   Account | Platform | Status | Balance | Last sync | ⋯
-//   620–879   Account (last sync underneath) | Platform | Status | Balance | ⋯
-//   480–619   Account (platform + last sync underneath) | Status | Balance | ⋯
-//   < 480     stacked: name + ⋯ / platform / status + balance / last sync
+// Columns follow the card's own width (@container/list):
+//   ≥ 760px   Account | Platform | Status | Balance | Last sync | Actions
+//   620–759   Account (last sync underneath) | Platform | Status | Balance | ⋯
+//   480–619   Account (last sync underneath) | Status | Balance | ⋯
+//   < 480     stacked: name + ⋯ / status + balance / last sync
 
 const GRID =
-  "grid-cols-[minmax(0,1fr)_auto] @[480px]/list:grid-cols-[minmax(0,1fr)_128px_112px_40px] @[620px]/list:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_128px_112px_40px] @[880px]/list:grid-cols-[minmax(220px,2fr)_minmax(120px,1fr)_136px_128px_136px_40px]"
+  "grid-cols-[minmax(0,1fr)_auto] @[480px]/list:grid-cols-[minmax(0,1fr)_120px_104px_36px] @[620px]/list:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_120px_104px_36px] @[760px]/list:grid-cols-[minmax(180px,3fr)_minmax(96px,1fr)_112px_108px_108px_56px]"
 
 type Confirm = { kind: "disconnect"; connection: HubConnection } | { kind: "delete"; account: HubAccount; brokerLinked: boolean }
 
@@ -204,22 +206,22 @@ export function AccountsList({
   const otherRows = otherAccounts.map(accountRow)
 
   return (
-    <section aria-labelledby="accounts-list-title">
+    <section aria-labelledby="accounts-list-title" className="@container/list rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[640px]/page:p-5">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex items-baseline gap-2">
-          <h2 id="accounts-list-title" className="text-base leading-6 font-semibold text-foreground">
-            {t("Connected accounts")}
-          </h2>
-          <span className="text-[13px] text-muted-foreground tabular-nums">
+        <h2 id="accounts-list-title" className="text-base leading-6 font-semibold text-foreground @[480px]/list:text-lg">
+          {t("Connected accounts")}
+        </h2>
+        <div className="flex items-center gap-1.5">
+          <span className="me-1 text-[13px] whitespace-nowrap text-muted-foreground tabular-nums">
             {connections.length === 1 ? t("1 account") : t("{n} accounts", { n: connections.length })}
           </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button variant="ghost" onClick={() => setManualOpen(true)} className="h-9 px-2.5 text-[13px] text-muted-foreground hover:text-foreground">
-            <Plus className="size-3.5" /> {t("Manual account")}
+          <Button variant="ghost" onClick={() => setManualOpen(true)} aria-label={t("Manual account")} className="h-9 px-2.5 text-[13px] text-muted-foreground hover:text-foreground">
+            <Plus className="size-3.5" />
+            <span className="@[480px]/list:hidden">{t("Manual")}</span>
+            <span className="hidden @[480px]/list:inline">{t("Manual account")}</span>
           </Button>
           {syncable.length > 0 && (
-            <Button onClick={syncAll} disabled={syncAllPending} variant="secondary" className="h-9 rounded-lg bg-primary/10 px-3 text-[13px] font-semibold text-primary hover:bg-primary/15">
+            <Button onClick={syncAll} disabled={syncAllPending} variant="outline" className="h-9 rounded-lg border-primary/30 px-3 text-[13px] font-semibold text-primary hover:bg-primary/5 hover:text-primary">
               <RefreshCw className={cn("size-3.5", syncAllPending && "animate-spin [animation-duration:800ms]")} />
               {syncAllPending ? t("Syncing…") : t("Sync all")}
             </Button>
@@ -227,15 +229,17 @@ export function AccountsList({
         </div>
       </div>
 
-      <div className="@container/list mt-3 overflow-hidden rounded-[14px] border bg-card shadow-[0_1px_2px_rgba(20,21,42,0.03)]">
+      <div className="mt-4 overflow-hidden rounded-xl border">
         {liveRows.length > 0 && (
-          <div aria-hidden className={cn("hidden items-center gap-x-4 border-b bg-muted/40 px-5 py-2.5 text-[11px] font-semibold tracking-[0.3px] text-muted-foreground uppercase @[480px]/list:grid", GRID)}>
-            <span className="ps-7">{t("Account")}</span>
+          <div aria-hidden className={cn("hidden items-center gap-x-3 border-b bg-muted/40 px-4 py-2.5 text-[11px] font-semibold tracking-[0.3px] text-muted-foreground uppercase @[480px]/list:grid", GRID)}>
+            <span>{t("Account")}</span>
             <span className="hidden @[620px]/list:block">{t("Platform")}</span>
             <span>{t("Status")}</span>
-            <span className="text-end">{t("Balance")}</span>
-            <span className="hidden @[880px]/list:block">{t("Last sync")}</span>
-            <span />
+            <span>{t("Balance")}</span>
+            <span className="hidden @[760px]/list:block">{t("Last sync")}</span>
+            <span className="text-end">
+              <span className="hidden @[760px]/list:inline">{t("Actions")}</span>
+            </span>
           </div>
         )}
 
@@ -267,7 +271,7 @@ export function AccountsList({
 
         {otherRows.length > 0 && (
           <>
-            <p className="border-y bg-muted/40 px-5 py-2 text-[11px] font-semibold tracking-[0.3px] text-muted-foreground uppercase first:border-t-0">
+            <p className="border-y bg-muted/40 px-4 py-2 text-[11px] font-semibold tracking-[0.3px] text-muted-foreground uppercase first:border-t-0">
               {t("Manual & imported")}
             </p>
             <ul className="divide-y">
@@ -285,10 +289,18 @@ export function AccountsList({
         )}
       </div>
 
-      {liveRows.length > 0 && (
-        <Button variant="ghost" onClick={onConnect} className="mt-2 h-11 px-2.5 text-[13px] font-semibold text-primary hover:bg-primary/5 hover:text-primary">
-          <Plus className="size-4" /> {t("Connect another account")}
-        </Button>
+      {liveRows.length + otherRows.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-lg border border-primary/15 bg-primary/[0.04] px-3 py-1">
+          <p className="flex min-w-0 items-center gap-2 py-1.5 text-xs text-muted-foreground">
+            <Info className="size-4 shrink-0 text-primary" aria-hidden />
+            {t("Click any account to view details, sync status and more options.")}
+          </p>
+          {liveRows.length > 0 && (
+            <Button variant="ghost" onClick={onConnect} className="-mx-1.5 h-9 px-1.5 text-xs font-semibold text-primary hover:bg-primary/5 hover:text-primary">
+              <Plus className="size-3.5" /> {t("Connect another account")}
+            </Button>
+          )}
+        </div>
       )}
 
       <EditAccountDialog
@@ -360,7 +372,7 @@ function AccountRow({
       {/* The whole row toggles its details for the mouse; the name is the
           real (keyboard-reachable) control, and the ⋯ menu stops its own
           clicks from reaching the row. */}
-      <div onClick={onToggle} className={cn("grid min-h-[72px] cursor-pointer items-center gap-x-4 px-4 py-3 @[480px]/list:px-5", GRID)}>
+      <div onClick={onToggle} className={cn("grid min-h-[60px] cursor-pointer items-center gap-x-3 px-4 py-2.5", GRID)}>
         <button
           type="button"
           onClick={(e) => {
@@ -369,23 +381,18 @@ function AccountRow({
           }}
           aria-expanded={expanded}
           aria-controls={detailsId}
-          className="-m-1 flex min-w-0 items-center gap-2 rounded-lg p-1 text-start focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="-m-1 flex min-w-0 items-center gap-3 rounded-lg p-1 text-start focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
-          <ChevronRight aria-hidden className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200", expanded && "rotate-90")} />
-          <AccountAvatar name={row.title} logoName={row.logoName} className="size-9 text-xs @[480px]/list:size-10" />
-          <span className="min-w-0 ps-1">
-            <span className="block truncate text-sm font-semibold text-foreground">{row.title}</span>
-            {/* Platform lives in its own column from 620px; below it, here. */}
+          <AccountAvatar name={row.title} logoName={row.logoName} className="size-8 rounded-lg text-xs" />
+          <span className="min-w-0">
+            <span className="block truncate text-[13px] font-semibold text-foreground @[480px]/list:text-sm">{row.title}</span>
             <span className="block truncate text-xs text-muted-foreground">
-              <span className="@[620px]/list:hidden">
-                {platform}
-                {row.meta ? ` · ${row.meta}` : ""}
-              </span>
-              {row.meta && <span className="hidden @[620px]/list:inline">{row.meta}</span>}
+              {platform}
+              {row.meta ? ` · ${row.meta}` : ""}
             </span>
-            {/* Last sync gets its own column from 880px. */}
+            {/* Last sync gets its own column from 760px. */}
             {row.connection && (
-              <span className="hidden truncate text-[11px] text-muted-foreground @[480px]/list:block @[880px]/list:hidden">{syncedLine}</span>
+              <span className="hidden truncate text-[11px] text-muted-foreground @[480px]/list:block @[760px]/list:hidden">{syncedLine}</span>
             )}
           </span>
         </button>
@@ -394,18 +401,18 @@ function AccountRow({
         <span className="hidden @[480px]/list:block">
           <HealthPill health={status} />
         </span>
-        <span className="hidden text-end text-sm font-semibold tabular-nums text-foreground @[480px]/list:block">{balance}</span>
-        <span className="hidden truncate text-xs text-muted-foreground @[880px]/list:block">{synced}</span>
+        <span className="hidden text-sm font-semibold tabular-nums text-foreground @[480px]/list:block">{balance}</span>
+        <span className="hidden truncate text-xs text-muted-foreground @[760px]/list:block">{synced}</span>
         <span className="flex justify-end">
           <AccountMenu label={row.title} account={row.account} actions={actions} syncing={syncing} />
         </span>
 
         {/* Phones: status and balance on their own line under the name. */}
-        <div className="col-span-2 mt-2 flex items-center justify-between gap-3 ps-7 @[480px]/list:hidden">
+        <div className="col-span-2 mt-2 flex items-center justify-between gap-3 ps-11 @[480px]/list:hidden">
           <HealthPill health={status} />
           <span className="text-sm font-semibold tabular-nums text-foreground">{balance}</span>
         </div>
-        {row.connection && <p className="col-span-2 mt-1 ps-7 text-[11px] text-muted-foreground @[480px]/list:hidden">{lastSyncedLine}</p>}
+        {row.connection && <p className="col-span-2 mt-1 ps-11 text-[11px] text-muted-foreground @[480px]/list:hidden">{lastSyncedLine}</p>}
       </div>
 
       <div id={detailsId} className={cn("grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
@@ -435,7 +442,7 @@ function RowDetails({ row, syncing, lastSynced, actions }: { row: RowModel; sync
   const messageTone = c?.health === "error" ? "bg-loss/10 text-loss" : c?.health === "warning" ? "bg-warning/10 text-foreground" : "bg-muted text-muted-foreground"
 
   return (
-    <div className="space-y-3 border-t border-dashed px-4 py-4 @[480px]/list:px-5 @[480px]/list:ps-[72px]">
+    <div className="space-y-3 border-t border-dashed px-4 py-4 @[480px]/list:ps-[60px]">
       {c?.message && !syncing && (
         <p className={cn("rounded-lg px-3 py-2 text-xs leading-[18px]", messageTone)} role={c.health === "error" ? "alert" : undefined}>
           {t(c.message)}

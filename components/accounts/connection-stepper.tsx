@@ -14,8 +14,10 @@ type StepState = "done" | "active" | "upcoming"
 
 // A compact horizontal step indicator for the connection card:
 // ① Choose platform ── ② Connect account ── ③ Verify & sync
-// (short labels when the card is narrow). `completed` marks the last step done.
-export function ConnectionStepper({ current, completed = false }: { current: 1 | 2 | 3; completed?: boolean }) {
+// (short labels when the card is narrow). `completed` marks the last step done;
+// `fill` stretches the links across the available width (up to 560px) instead
+// of keeping them short.
+export function ConnectionStepper({ current, completed = false, fill = false }: { current: 1 | 2 | 3; completed?: boolean; fill?: boolean }) {
   const t = useT()
   const states: StepState[] = STEPS.map((_, i) => {
     const n = i + 1
@@ -24,9 +26,9 @@ export function ConnectionStepper({ current, completed = false }: { current: 1 |
   })
 
   return (
-    <ol className="flex w-full min-w-0 items-center @[480px]/ws:w-auto @[480px]/ws:flex-1 @[640px]/ws:flex-none" aria-label={t("Connection steps")}>
+    <ol className={cn("flex w-full min-w-0 items-center", fill ? "max-w-[560px]" : "@[480px]/ws:w-auto @[480px]/ws:flex-1 @[640px]/ws:flex-none")} aria-label={t("Connection steps")}>
       {STEPS.map((step, i) => (
-        <li key={step.title} className={cn("flex min-w-0 items-center", i < STEPS.length - 1 && "flex-1 @[640px]/ws:flex-none")} aria-current={states[i] === "active" ? "step" : undefined}>
+        <li key={step.title} className={cn("flex min-w-0 items-center", i < STEPS.length - 1 && (fill ? "flex-1" : "flex-1 @[640px]/ws:flex-none"))} aria-current={states[i] === "active" ? "step" : undefined}>
           <span
             className={cn(
               "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors duration-200",
@@ -42,7 +44,7 @@ export function ConnectionStepper({ current, completed = false }: { current: 1 |
             <span className="hidden @[640px]/ws:inline">{t(step.title)}</span>
           </span>
           {i < STEPS.length - 1 && (
-            <span aria-hidden className={cn("mx-2 h-px min-w-3 flex-1 transition-colors @[640px]/ws:mx-3 @[640px]/ws:w-14 @[640px]/ws:flex-none", states[i] === "done" ? "bg-gain/40" : "bg-border")} />
+            <span aria-hidden className={cn("mx-2 h-px min-w-3 flex-1 transition-colors @[640px]/ws:mx-3", !fill && "@[640px]/ws:w-14 @[640px]/ws:flex-none", states[i] === "done" ? "bg-gain/40" : "bg-border")} />
           )}
         </li>
       ))}

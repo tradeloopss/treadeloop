@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Plus } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/components/locale-provider"
@@ -11,14 +12,14 @@ import { AccountsList } from "@/components/accounts/accounts-list"
 import { SecurityCard } from "@/components/accounts/security-card"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
 
-// Accounts = where trades come from. One column, top to bottom: the page
-// header (with "+ Add account"), the connection card (choose a platform →
-// connect → verify, reusing each platform's own form), the full-width list of
-// accounts with their health, and a short note on how syncing works.
+// Accounts = where trades come from: the page header (breadcrumb, "+ Add
+// account"), the connection card (choose a platform → connect → verify,
+// reusing each platform's own form), the list of accounts with their health,
+// and a short note on how syncing works.
 //
-// Spacing follows the width actually available to the page (container
+// Layout follows the width actually available to the page (container
 // queries), since the sidebar may be a 240px panel or a 72px rail at the same
-// screen size: 16px padding on phones, 24px on tablets, 32px on desktop.
+// screen size: 16px padding on phones, 24px from tablets up.
 export function AccountsHub({
   connections,
   otherAccounts,
@@ -53,40 +54,60 @@ export function AccountsHub({
 
   return (
     <div className="@container/page min-h-full bg-background">
-      <div className="space-y-6 p-4 @[640px]/page:p-6 @[1100px]/page:space-y-8 @[1100px]/page:p-8">
+      <div className="space-y-5 p-4 @[640px]/page:p-6">
         <header className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl leading-[30px] font-semibold tracking-[-0.6px] text-foreground @[768px]/page:text-[30px] @[768px]/page:leading-9">{t("Accounts")}</h1>
+            <nav aria-label={t("Breadcrumb")} className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+              <Link href="/settings" className="rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+                {t("Settings")}
+              </Link>
+              <ChevronRight className="size-3" aria-hidden />
+              <span aria-current="page" className="font-medium text-foreground">
+                {t("Accounts")}
+              </span>
+            </nav>
+            <h1 className="text-2xl leading-8 font-semibold tracking-[-0.5px] text-foreground @[768px]/page:text-[26px]">{t("Accounts")}</h1>
             <p className="mt-1 max-w-[640px] text-sm text-muted-foreground">
               <span className="@[640px]/page:hidden">{t("Manage your trading connections.")}</span>
               <span className="hidden @[640px]/page:inline">{t("Manage your connected trading accounts and choose where TradeLoop gets your trades.")}</span>
             </p>
           </div>
-          <Button onClick={() => select(null)} aria-label={t("Add account")} className="size-11 shrink-0 rounded-[9px] p-0 font-semibold hover:bg-primary/90 @[640px]/page:h-10 @[640px]/page:w-auto @[640px]/page:px-4">
+          <Button onClick={() => select(null)} className="h-10 shrink-0 rounded-[9px] px-3 font-semibold hover:bg-primary/90 @[640px]/page:px-4">
             <Plus className="size-4" />
-            <span className="hidden @[640px]/page:inline">{t("Add account")}</span>
+            {t("Add account")}
           </Button>
         </header>
 
-        <ConnectionWorkspace
-          selection={selection}
-          onSelect={(p) => select(p)}
-          // Closing a platform's window just returns to the grid (no nonce
-          // bump, so the page doesn't jump).
-          onClose={() => setSelection((s) => ({ ...s, platform: null, initial: undefined }))}
-          isPro={isPro}
-          pairings={pairings}
-          importAccounts={importAccounts}
-        />
+        {/* ≥ 1180px: connect + accounts on the left, the "how it works" note in
+            a side column that stays in view. 1000–1179: connect | accounts side
+            by side, the note underneath. Narrower: one column. */}
+        <div className="grid items-start gap-5 @[1000px]/page:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] @[1180px]/page:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="min-w-0 @[1180px]/page:col-start-1">
+            <ConnectionWorkspace
+              selection={selection}
+              onSelect={(p) => select(p)}
+              // Closing a platform's window just returns to the grid (no nonce
+              // bump, so the page doesn't jump).
+              onClose={() => setSelection((s) => ({ ...s, platform: null, initial: undefined }))}
+              isPro={isPro}
+              pairings={pairings}
+              importAccounts={importAccounts}
+            />
+          </div>
 
-        <AccountsList
-          connections={connections}
-          otherAccounts={otherAccounts}
-          onConnect={() => select(null)}
-          onReconnect={(target) => select(target.platform, { server: target.server, login: target.login })}
-        />
+          <div className="min-w-0 @[1180px]/page:col-start-1">
+            <AccountsList
+              connections={connections}
+              otherAccounts={otherAccounts}
+              onConnect={() => select(null)}
+              onReconnect={(target) => select(target.platform, { server: target.server, login: target.login })}
+            />
+          </div>
 
-        <SecurityCard />
+          <div className="min-w-0 @[1000px]/page:col-span-2 @[1180px]/page:sticky @[1180px]/page:top-6 @[1180px]/page:col-span-1 @[1180px]/page:col-start-2 @[1180px]/page:row-span-2 @[1180px]/page:row-start-1">
+            <SecurityCard />
+          </div>
+        </div>
       </div>
     </div>
   )

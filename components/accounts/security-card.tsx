@@ -17,20 +17,21 @@ const POINTS = [
 export function SecurityCard() {
   const t = useT()
   return (
-    <section aria-labelledby="security-card-title" className="@container/sec rounded-xl border border-primary/15 bg-primary/[0.03] px-4 py-4 @[480px]/page:px-5">
-      <h2 id="security-card-title" className="flex items-center gap-2 text-sm font-semibold text-foreground">
-        <ShieldCheck className="size-4 text-primary" aria-hidden />
+    <section aria-labelledby="security-card-title" className="@container/sec rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[640px]/page:p-5">
+      <h2 id="security-card-title" className="flex items-start gap-2.5 text-[15px] leading-6 font-semibold text-foreground">
+        <ShieldCheck className="size-6 shrink-0 text-primary" aria-hidden />
         {t("How TradeLoop keeps your journal current")}
       </h2>
-      <ul className="mt-3 grid gap-3 @[720px]/sec:grid-cols-3 @[720px]/sec:gap-6">
+      {/* Stacked in the side column; three across when the card is wide. */}
+      <ul className="mt-4 grid gap-4 @[720px]/sec:grid-cols-3 @[720px]/sec:gap-6">
         {POINTS.map((p) => (
-          <li key={p.title} className="flex gap-2.5">
-            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-gain/15 text-gain">
-              <Check className="size-3" aria-hidden />
+          <li key={p.title} className="flex gap-3">
+            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <Check className="size-3" strokeWidth={3} aria-hidden />
             </span>
             <div className="min-w-0">
               <p className="text-[13px] font-semibold text-foreground">{t(p.title)}</p>
-              <p className="text-xs leading-[18px] text-muted-foreground">{t(p.body)}</p>
+              <p className="mt-0.5 text-xs leading-[18px] text-muted-foreground">{t(p.body)}</p>
             </div>
           </li>
         ))}

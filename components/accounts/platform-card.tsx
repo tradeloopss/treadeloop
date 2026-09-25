@@ -19,7 +19,7 @@ export function Badge({ kind }: { kind: PlatformBadge }) {
   const t = useT()
   const b = BADGE[kind]
   return (
-    <span className={cn("inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold whitespace-nowrap", b.className)}>
+    <span className={cn("inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-semibold whitespace-nowrap", b.className)}>
       {b.dot && <span aria-hidden className="size-1.5 rounded-full bg-current" />}
       {t(b.label)}
     </span>
@@ -54,7 +54,6 @@ export function PlatformCard({
   disabled?: boolean
   onSelect: () => void
 }) {
-  const t = useT()
   return (
     <button
       type="button"
@@ -62,7 +61,7 @@ export function PlatformCard({
       disabled={disabled}
       aria-pressed={selected}
       className={cn(
-        "group @container/pcard flex min-h-[68px] w-full min-w-0 items-center gap-3 rounded-[10px] border bg-card px-3.5 py-3 text-start transition-[background-color,border-color,transform,box-shadow] duration-150 ease-out @md:min-h-[76px] @md:px-4",
+        "group flex min-h-14 w-full min-w-0 items-center gap-3 rounded-xl border bg-card px-3.5 py-2.5 text-start transition-[background-color,border-color,transform,box-shadow] duration-150 ease-out @[480px]/ws:min-h-[76px] @[480px]/ws:py-3",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
         disabled
           ? "cursor-not-allowed opacity-50"
@@ -70,22 +69,18 @@ export function PlatformCard({
         selected && "border-primary bg-primary/[0.03] ring-[0.5px] ring-primary",
       )}
     >
-      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">{icon}</span>
+      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-[9px] @[480px]/ws:size-10 @[480px]/ws:rounded-[10px]">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {/* Name left, status top-right; a narrow card wraps the status under the name. */}
+        <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
           <span className="text-sm font-semibold text-foreground">{name}</span>
-          {/* Narrow card: badges sit beside the name. */}
-          <span className="contents @[380px]/pcard:hidden">
-            <Badge kind={badge} />
+          <span className="flex shrink-0 items-center gap-1.5">
             {pro && <ProBadge />}
+            <Badge kind={badge} />
           </span>
         </span>
-        <span className="mt-0.5 block text-xs leading-[18px] text-muted-foreground">{description}</span>
-      </span>
-      {/* Wide card: badges on the right, beside the chevron. */}
-      <span className="hidden shrink-0 items-center gap-2 @[380px]/pcard:flex">
-        {pro && <ProBadge />}
-        <Badge kind={badge} />
+        {/* Phones get a compact row (name + status); the description from 480px. */}
+        <span className="mt-0.5 hidden text-xs leading-[18px] text-muted-foreground @[480px]/ws:block">{description}</span>
       </span>
       {!disabled && <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5" />}
     </button>
