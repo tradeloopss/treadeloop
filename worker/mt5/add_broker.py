@@ -72,7 +72,10 @@ def run_installer(url, exe_name):
     path = f"{ROOT}/dl/{os.path.basename(url)}"
     if not os.path.exists(path):
         log("downloading", url)
-        subprocess.run(["curl", "-4", "-fsSL", "-m", "300", "-o", path, url], check=True)
+        if subprocess.run(["curl", "-4", "-fsSL", "-m", "300", "-o", path, url]).returncode != 0:
+            if os.path.exists(path):
+                os.remove(path)
+            sys.exit("download failed (MetaQuotes may be refusing this server for now) — nothing changed; try again later")
     before = install_dirs()
     log("installing (this takes a minute or two)…")
     proc = subprocess.Popen([WINE, path, "/auto"], env=ENV, cwd=ROOT)
