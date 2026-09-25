@@ -2,6 +2,7 @@ import Papa from "papaparse"
 import { and, eq, inArray, isNotNull } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { importEvents, trades, tradingAccounts } from "@/lib/db/schema"
+import { accountLimitError, PlanLimitError } from "@/lib/plan-limits"
 import { isTradovateCsv, parseTradovateOrdersCsv, reconstructTrades } from "@/lib/tradovate-csv"
 import { isNinjaTraderCsv, parseNinjaTraderTradesCsv } from "@/lib/ninjatrader-csv"
 import { isMetaTraderReport, parseMetaTraderReport } from "@/lib/metatrader-report"
@@ -124,6 +125,20 @@ export async function importCsvText(
   // still import into a different account the user picks for this file).
   const accountIdByName = new Map<string, number>()
   if (fixedAccountId == null) {
+    // The accounts this file would add must fit the plan (Essential: 3) —
+    // checked before any is created.
+    const names = [...new Set(imported.map((t) => t.account))]
+    const known = await db
+      .select({ name: tradingAccounts.name })
+      .from(tradingAccounts)
+      .where(and(eq(tradingAccounts.userId, userId), inArray(tradingAccounts.name, names)))
+    const adding = names.length - new Set(known.map((k) => k.name)).size
+    const limit = await accountLimitError(userId, adding)
+    if (limit) {
+      throw new PlanLimitError(
+        `${adding === 1 ? "This file adds a new account." : `This file adds ${adding} new accounts.`} ${limit} Or choose one of your accounts under "Import into".`,
+      )
+    }
     for (const t of imported) {
       if (accountIdByName.has(t.account)) continue
       const existingAccount = await db

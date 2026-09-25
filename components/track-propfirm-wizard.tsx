@@ -172,7 +172,11 @@ function ManualDetailsForm({
     }
     startTransition(async () => {
       try {
-        await createManualPropFirmAccount(formData)
+        const result = await createManualPropFirmAccount(formData)
+        if (!result.ok) {
+          toast.error(t(result.error))
+          return
+        }
         toast.success(t("Tracking started"))
         onDone()
       } catch (err) {

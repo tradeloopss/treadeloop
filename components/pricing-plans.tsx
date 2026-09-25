@@ -34,12 +34,13 @@ const PLANS: Plan[] = [
     annualPrice: 18.75,
     cta: "Start free trial",
     groups: [
-      { title: "Accounts", items: [{ text: "Connect 1 trading account", included: true }] },
+      { title: "Accounts", items: [{ text: "Up to 3 trading accounts", included: true }] },
       {
         title: "Import & Sync",
         items: [
           { text: "CSV / file import", included: true },
-          { text: "Live broker & prop firm sync", included: false },
+          { text: "Live sync for 1 MetaTrader 4/5 account", included: true },
+          { text: "Rithmic & TradingView live sync", included: false },
         ],
       },
       {
@@ -76,7 +77,7 @@ const PLANS: Plan[] = [
         items: [
           { text: "CSV / file import", included: true },
           { text: "Live broker & prop firm sync (Rithmic)", included: true },
-          { text: "MetaTrader 4 & 5 live sync", included: true },
+          { text: "MetaTrader 4 & 5 live sync, any number of accounts", included: true },
         ],
       },
       {

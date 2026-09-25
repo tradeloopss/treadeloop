@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { importCsvText, logImport } from "@/lib/trade-importer"
+import { PlanLimitError } from "@/lib/plan-limits"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -11,7 +12,9 @@ async function getUserId() {
   return session.user.id
 }
 
-export async function importTradeCsv(formData: FormData) {
+export async function importTradeCsv(
+  formData: FormData,
+): Promise<({ ok: true } & Awaited<ReturnType<typeof importCsvText>>) | { ok: false; error: string }> {
   const userId = await getUserId()
   const file = formData.get("file") as File | null
   if (!file || file.size === 0) throw new Error("Choose a CSV file first")
@@ -33,6 +36,8 @@ export async function importTradeCsv(formData: FormData) {
   try {
     result = await importCsvText(userId, csvText, fixedAccountId, newAccountStartingBalance)
   } catch (err) {
+    // Over the plan's account limit: nothing was imported, and the file is fine.
+    if (err instanceof PlanLimitError) return { ok: false, error: err.message }
     await logImport({ userId, fileName: file.name, csvText, accountId: fixedAccountId, error: err })
     throw err
   }
@@ -44,6 +49,7 @@ export async function importTradeCsv(formData: FormData) {
   revalidatePath("/calendar")
   revalidatePath("/reports")
   revalidatePath("/settings")
+  revalidatePath("/accounts")
 
-  return result
+  return { ok: true, ...result }
 }

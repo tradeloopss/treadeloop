@@ -6,7 +6,7 @@ import { tradingAccounts, trades, metatraderConnections, rithmicConnections, pro
 import { and, desc, eq } from "drizzle-orm"
 import { headers, cookies } from "next/headers"
 import { revalidatePath } from "next/cache"
-import { isPro } from "@/lib/subscription"
+import { accountLimitError } from "@/lib/plan-limits"
 import { repriceAccountTrades } from "@/lib/trade-commission"
 
 async function getUserId() {
@@ -159,17 +159,12 @@ export async function getManualEntryLockedAccountIds(): Promise<number[]> {
   return [...ids]
 }
 
-export async function createAccount(formData: FormData) {
+export async function createAccount(formData: FormData): Promise<{ ok: true } | { ok: false; error: string }> {
   const userId = await getUserId()
 
-  // Essential is capped at 1 account; existing accounts beyond that (from
-  // before this limit existed) are grandfathered in, only new ones are blocked.
-  if (!(await isPro(userId))) {
-    const existing = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(eq(tradingAccounts.userId, userId))
-    if (existing.length >= 1) {
-      throw new Error("You've reached the maximum number of accounts for your plan (1) — upgrade to Pro at /pricing to connect more.")
-    }
-  }
+  // Essential's account cap (lib/plan-limits.ts).
+  const limit = await accountLimitError(userId)
+  if (limit) return { ok: false, error: limit }
 
   await db.insert(tradingAccounts).values({
     userId,
@@ -181,6 +176,8 @@ export async function createAccount(formData: FormData) {
   revalidatePath("/dashboard")
   revalidatePath("/trades")
   revalidatePath("/settings")
+  revalidatePath("/accounts")
+  return { ok: true }
 }
 
 export async function deleteAccount(id: number) {

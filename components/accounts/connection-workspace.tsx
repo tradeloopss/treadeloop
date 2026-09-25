@@ -18,6 +18,7 @@ import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { ConnectionStepper } from "@/components/accounts/connection-stepper"
 import { PlatformCard, type PlatformBadge } from "@/components/accounts/platform-card"
 import type { PlatformId } from "@/components/accounts/types"
+import type { PlanUsage } from "@/lib/plan-allowance"
 
 // What the hub asks the workspace to show; `nonce` re-applies the same
 // request (e.g. "Connect another account" pressed twice).
@@ -53,8 +54,23 @@ interface PlatformDef {
   description: string
   badge: PlatformBadge
   icon: React.ReactNode
-  live: boolean // needs Pro
+  live: boolean // syncs by itself (Pro; on Essential, MetaTrader only)
   disabled?: boolean
+}
+
+// Why the viewer's plan can't connect this platform, or null if it can.
+// Essential's one live sync is MetaTrader (lib/plan-allowance.ts): available
+// while its MetaTrader slot and an account slot are free. Any other live sync
+// needs Pro.
+type Lock = "pro" | "metatrader" | "accounts"
+
+function lockFor(p: PlatformDef, isPro: boolean, usage: PlanUsage | null): Lock | null {
+  if (isPro || !p.live) return null
+  if (p.id !== "mt5" && p.id !== "mt4") return "pro"
+  if (!usage) return null
+  if (usage.metatrader >= usage.metatraderLimit) return "metatrader"
+  if (usage.accounts >= usage.accountLimit) return "accounts"
+  return null
 }
 
 const PLATFORMS: PlatformDef[] = [
@@ -80,6 +96,7 @@ export function ConnectionWorkspace({
   onSelect,
   onClose,
   isPro,
+  usage,
   pairings,
   importAccounts,
 }: {
@@ -87,6 +104,7 @@ export function ConnectionWorkspace({
   onSelect: (platform: PlatformId) => void
   onClose: () => void
   isPro: boolean
+  usage: PlanUsage | null
   pairings: TradingViewPairingView[]
   importAccounts: { id: number; name: string }[]
 }) {
@@ -129,16 +147,25 @@ export function ConnectionWorkspace({
     router.refresh()
   }
 
-  const locked = def != null && def.live && !isPro
+  // Reconnecting an account you already have is always allowed (the server
+  // checks it's the same login).
+  const lock = def && !selection.initial?.login ? lockFor(def, isPro, usage) : null
+  const locked = lock != null
 
   // The window for the chosen platform: its own form, or the result.
   let body: React.ReactNode = null
   if (def) {
-    if (locked) {
+    if (lock) {
       body = (
         <LiveSyncUpgradeBanner
           title={t("{platform} sync", { platform: t(def.name) })}
-          description={t("Connect once and every trade lands in your journal automatically — no files needed. Live sync is included with Pro.")}
+          description={
+            lock === "metatrader"
+              ? t("Essential includes live sync for 1 MetaTrader account, and yours is in use. Disconnect it to connect a different one, or upgrade to Pro to sync as many as you like.")
+              : lock === "accounts"
+                ? t("Essential includes up to {n} trading accounts, and you have {n}. Remove one to connect this account, or upgrade to Pro for unlimited accounts.", { n: usage?.accountLimit ?? 0 })
+                : t("Connect once and every trade lands in your journal automatically — no files needed. {platform} sync is included with Pro; Essential includes live sync for one MetaTrader account.", { platform: t(def.name) })
+          }
         />
       )
     } else if (outcome?.kind === "rithmic" && outcome.ok) {
@@ -273,7 +300,7 @@ export function ConnectionWorkspace({
             name={t(p.name)}
             description={t(p.description)}
             badge={p.badge}
-            pro={p.live && !p.disabled && !isPro}
+            pro={!p.disabled && lockFor(p, isPro, usage) != null}
             selected={p.id === platform}
             disabled={p.disabled}
             onSelect={() => onSelect(p.id)}

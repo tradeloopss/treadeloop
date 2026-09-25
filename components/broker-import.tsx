@@ -51,6 +51,10 @@ export function BrokerImport({
     startTransition(async () => {
       try {
         const result = await importTradeCsv(formData)
+        if (!result.ok) {
+          toast.error(t(result.error))
+          return
+        }
         if (onImported) {
           onImported({ imported: result.imported, source: result.source, skippedRows: result.skippedRows })
           setFileName(null)

@@ -8,7 +8,7 @@ import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { randomBytes } from "node:crypto"
 import { requirePro } from "@/lib/subscription"
-import { isPro } from "@/lib/subscription"
+import { accountLimitError } from "@/lib/plan-limits"
 import { parseTradingViewCsv } from "@/lib/tradingview-csv"
 import { reconstructTrades as reconstructFills } from "@/lib/fill-reconstruction"
 import { TRADINGVIEW_DEFAULT_ACCOUNT } from "@/lib/trade-importer"
@@ -156,15 +156,6 @@ export async function connectTradingView(formData: FormData): Promise<void> {
   const market = ["futures", "stocks", "options", "future_option", "forex", "crypto", "cfd"].includes(marketRaw) ? marketRaw : "stocks"
   const startingBalanceRaw = formData.get("startingBalance")
   const startingBalance = startingBalanceRaw != null && String(startingBalanceRaw).trim() !== "" ? Number(startingBalanceRaw) : 0
-
-  // Same Essential-plan cap as createAccount — this creates a trading
-  // account too, so it respects the same limit.
-  if (!(await isPro(userId))) {
-    const existing = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(eq(tradingAccounts.userId, userId))
-    if (existing.length >= 1) {
-      throw new Error("You've reached the maximum number of accounts for your plan (1) — upgrade to Pro at /pricing to connect more.")
-    }
-  }
 
   // Reconnecting under a name already used here reuses that account rather
   // than splitting one paper account's history across two.
@@ -343,12 +334,8 @@ async function defaultTradingViewAccount(userId: string): Promise<{ id: number; 
     .where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.name, TRADINGVIEW_DEFAULT_ACCOUNT)))
   if (existing) return { ...existing, market: null }
 
-  if (!(await isPro(userId))) {
-    const owned = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(eq(tradingAccounts.userId, userId))
-    if (owned.length >= 1) {
-      throw new Error("You've reached the maximum number of accounts for your plan (1) — upgrade to Pro at /pricing to connect more.")
-    }
-  }
+  const limit = await accountLimitError(userId)
+  if (limit) throw new Error(limit)
 
   const [created] = await db
     .insert(tradingAccounts)

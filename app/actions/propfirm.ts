@@ -8,7 +8,7 @@ import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { evaluatePropFirmAccount, type PropFirmEvaluation, type PropFirmRules } from "@/lib/propfirm-rules"
 import { findPreset, resolvePresetRules } from "@/lib/propfirm-presets"
-import { isPro } from "@/lib/subscription"
+import { accountLimitError } from "@/lib/plan-limits"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -335,17 +335,13 @@ export async function getPropFirmTransactions(): Promise<PropFirmTransaction[]> 
 // Creates a new trading account AND its prop firm rules in one step — the
 // guided manual-entry flow (firm -> plan -> size/balance/situation) doesn't
 // require an existing account the way "track an existing account" does.
-export async function createManualPropFirmAccount(formData: FormData): Promise<number> {
+export async function createManualPropFirmAccount(formData: FormData): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
   const userId = await getUserId()
 
-  // Same Essential-plan cap as createAccount (app/actions/accounts.ts) — this
-  // path creates a tradingAccounts row too, so it must respect the same limit.
-  if (!(await isPro(userId))) {
-    const existing = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(eq(tradingAccounts.userId, userId))
-    if (existing.length >= 1) {
-      throw new Error("You've reached the maximum number of accounts for your plan (1) — upgrade to Pro at /pricing to connect more.")
-    }
-  }
+  // This creates a trading account too, so Essential's account cap applies
+  // (lib/plan-limits.ts).
+  const limit = await accountLimitError(userId)
+  if (limit) return { ok: false, error: limit }
 
   const firmNameRaw = String(formData.get("firmName") ?? "").trim()
   const firmName = firmNameRaw !== "" ? firmNameRaw : null
@@ -391,5 +387,5 @@ export async function createManualPropFirmAccount(formData: FormData): Promise<n
   revalidatePath("/trades")
   revalidatePath("/settings")
 
-  return account.id
+  return { ok: true, id: account.id }
 }

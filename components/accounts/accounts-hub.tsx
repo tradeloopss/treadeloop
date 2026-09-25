@@ -11,6 +11,7 @@ import { ConnectionWorkspace, type WorkspaceSelection } from "@/components/accou
 import { AccountsList } from "@/components/accounts/accounts-list"
 import { SecurityCard } from "@/components/accounts/security-card"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
+import type { PlanUsage } from "@/lib/plan-allowance"
 
 // Accounts = where trades come from: the page header (breadcrumb, "+ Add
 // account"), the connection card (choose a platform → connect → verify,
@@ -24,6 +25,7 @@ export function AccountsHub({
   connections,
   otherAccounts,
   isPro,
+  usage,
   pairings,
   importAccounts,
   initialPlatform = null,
@@ -32,6 +34,7 @@ export function AccountsHub({
   connections: HubConnection[]
   otherAccounts: HubAccount[]
   isPro: boolean
+  usage: PlanUsage | null // Essential's allowance; null on Pro
   pairings: TradingViewPairingView[]
   importAccounts: { id: number; name: string }[]
 }) {
@@ -90,6 +93,7 @@ export function AccountsHub({
               // bump, so the page doesn't jump).
               onClose={() => setSelection((s) => ({ ...s, platform: null, initial: undefined }))}
               isPro={isPro}
+              usage={usage}
               pairings={pairings}
               importAccounts={importAccounts}
             />
@@ -99,6 +103,7 @@ export function AccountsHub({
             <AccountsList
               connections={connections}
               otherAccounts={otherAccounts}
+              usage={usage}
               onConnect={() => select(null)}
               onReconnect={(target) => select(target.platform, { server: target.server, login: target.login })}
             />

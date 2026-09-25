@@ -9,6 +9,7 @@ import { AccountsHub } from "@/components/accounts/accounts-hub"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
 import { recordRequestTiming } from "@/lib/telemetry"
 import { brokerLogo } from "@/lib/broker-logos"
+import { ESSENTIAL_ACCOUNT_LIMIT, ESSENTIAL_METATRADER_LIMIT, type PlanUsage } from "@/lib/plan-allowance"
 import { getT } from "@/lib/i18n/server"
 
 // Connecting Rithmic (login + account discovery + history) and "Sync all"
@@ -34,6 +35,13 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     session?.user ? isPro(session.user.id) : Promise.resolve(false),
     session?.user ? isOwner(session.user.id) : Promise.resolve(false),
   ])
+
+  // Essential's allowance (lib/plan-allowance.ts), counted the way
+  // lib/plan-limits.ts enforces it: every account, archived ones included.
+  const isProPlan = pro || owner
+  const usage: PlanUsage | null = isProPlan
+    ? null
+    : { accounts: accounts.length, accountLimit: ESSENTIAL_ACCOUNT_LIMIT, metatrader: metatrader.length, metatraderLimit: ESSENTIAL_METATRADER_LIMIT }
 
   const byId = new Map<number, HubAccount>(
     accounts.map((a) => [
@@ -147,6 +155,14 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
 
   void recordRequestTiming("/accounts", Date.now() - startedAt)
   return (
-      <AccountsHub initialPlatform={initialPlatform} connections={connections} otherAccounts={otherAccounts} isPro={pro || owner} pairings={pairings} importAccounts={importAccounts} />
+      <AccountsHub
+        initialPlatform={initialPlatform}
+        connections={connections}
+        otherAccounts={otherAccounts}
+        isPro={isProPlan}
+        usage={usage}
+        pairings={pairings}
+        importAccounts={importAccounts}
+      />
   )
 }

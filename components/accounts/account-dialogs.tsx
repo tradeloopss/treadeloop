@@ -116,7 +116,11 @@ export function CreateManualAccountDialog({ open, onOpenChange }: { open: boolea
     const formData = new FormData(e.currentTarget)
     startTransition(async () => {
       try {
-        await createAccount(formData)
+        const result = await createAccount(formData)
+        if (!result.ok) {
+          toast.error(t(result.error))
+          return
+        }
         toast.success(t("Account added"))
         onOpenChange(false)
       } catch (err) {

@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
-import { isPro } from "@/lib/subscription"
+import { metatraderLimitError } from "@/lib/plan-limits"
 
 // MetaTrader accounts are synced by our own MT5 terminals on the sync VPS
 // (worker/mt5): these actions only record what the user asked for — the
@@ -85,9 +85,6 @@ const HISTORY_DAYS: Record<string, number | null> = { "30d": 30, "90d": 90, "1y"
 
 export async function connectMetaTrader(formData: FormData): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
   const userId = await getUserId()
-  if (!(await isPro(userId))) {
-    return { ok: false, error: "Live broker & prop firm sync is a Pro feature — upgrade at /pricing to unlock it." }
-  }
   const login = String(formData.get("login") ?? "").trim()
   const investorPassword = String(formData.get("investorPassword") ?? "")
   const server = String(formData.get("server") ?? "").trim()
@@ -97,6 +94,10 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   if (!/^\d{3,15}$/.test(login)) return { ok: false, error: "Enter your MetaTrader account number (digits only)." }
   if (!investorPassword) return { ok: false, error: "Enter your investor (read-only) password." }
   if (!server) return { ok: false, error: "Enter your broker's server name, exactly as it appears in MetaTrader." }
+
+  // Pro syncs any number of accounts; Essential one (lib/plan-limits.ts).
+  const limit = await metatraderLimitError(userId, { platform, login, server })
+  if (limit) return { ok: false, error: limit }
 
   const days = range in HISTORY_DAYS ? HISTORY_DAYS[range] : null
   const historyFrom = days == null ? null : new Date(Date.now() - days * 86_400_000)

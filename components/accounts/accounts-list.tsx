@@ -18,6 +18,7 @@ import { ConfirmDialog, CreateManualAccountDialog, EditAccountDialog } from "@/c
 import { AccountDetailsSheet } from "@/components/accounts/account-details-sheet"
 import { accountRow, connectionRow, messageTone, useRowMetrics, useSyncWords, type RowModel } from "@/components/accounts/account-rows"
 import type { HubAccount, HubConnection } from "@/components/accounts/types"
+import { ACCOUNT_LIMIT_MESSAGE, type PlanUsage } from "@/lib/plan-allowance"
 
 // The Accounts page's list of trade sources, as one card: title, count and
 // "Sync all"; a compact table with one row per account (identity · platform ·
@@ -40,11 +41,13 @@ type Confirm = { kind: "disconnect"; connection: HubConnection } | { kind: "dele
 export function AccountsList({
   connections,
   otherAccounts,
+  usage,
   onConnect,
   onReconnect,
 }: {
   connections: HubConnection[]
   otherAccounts: HubAccount[]
+  usage: PlanUsage | null // Essential's allowance; null on Pro
   onConnect: () => void
   onReconnect: (target: NonNullable<HubConnection["reconnect"]>) => void
 }) {
@@ -216,10 +219,20 @@ export function AccountsList({
           {t("Connected accounts")}
         </h2>
         <div className="flex items-center gap-1.5">
+          {/* Essential shows its allowance ("2 of 3 accounts"), Pro just the count. */}
           <span className="me-1 text-[13px] whitespace-nowrap text-muted-foreground tabular-nums">
-            {connections.length === 1 ? t("1 account") : t("{n} accounts", { n: connections.length })}
+            {usage
+              ? t("{n} of {max} accounts", { n: usage.accounts, max: usage.accountLimit })
+              : connections.length === 1
+                ? t("1 account")
+                : t("{n} accounts", { n: connections.length })}
           </span>
-          <Button variant="ghost" onClick={() => setManualOpen(true)} aria-label={t("Manual account")} className="h-9 px-2.5 text-[13px] text-muted-foreground hover:text-foreground">
+          <Button
+            variant="ghost"
+            onClick={() => (usage && usage.accounts >= usage.accountLimit ? toast.error(t(ACCOUNT_LIMIT_MESSAGE)) : setManualOpen(true))}
+            aria-label={t("Manual account")}
+            className="h-9 px-2.5 text-[13px] text-muted-foreground hover:text-foreground"
+          >
             <Plus className="size-3.5" />
             <span className="@[480px]/list:hidden">{t("Manual")}</span>
             <span className="hidden @[480px]/list:inline">{t("Manual account")}</span>
