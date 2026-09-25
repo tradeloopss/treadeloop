@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { toast } from "sonner"
-import { AlertCircle, CheckCircle2, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, Unplug, Wifi } from "lucide-react"
+import { AlertCircle, CheckCircle2, Clock, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, Unplug, Wifi } from "lucide-react"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export type Connection = MetaTraderConnectionView
@@ -151,6 +151,21 @@ function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: s
         </div>
       )
     }
+    // The worker says this account is waiting for a terminal (e.g. MT4 still
+    // being set up): no point spinning — say so and let them close.
+    if (status === "pending" && result?.statusMessage) {
+      return (
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg border bg-muted/50 p-3 text-sm">
+            <Clock className="mt-0.5 size-4 shrink-0 text-primary" />
+            <p>{t(result.statusMessage)}</p>
+          </div>
+          <Button className="w-full" onClick={onDone}>
+            {t("Close")}
+          </Button>
+        </div>
+      )
+    }
     const slow = Date.now() - watching.startedAt > 90_000
     return (
       <div className="space-y-3 py-2 text-center">
@@ -232,8 +247,14 @@ function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: s
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, queued }: { status: string; queued?: boolean }) {
   const t = useT()
+  if (status === "pending" && queued)
+    return (
+      <Badge variant="outline" className="gap-1.5">
+        <Clock className="size-3" /> {t("Queued")}
+      </Badge>
+    )
   if (status === "connected")
     return (
       <Badge variant="outline" className="gap-1.5 border-[var(--gain)]/40 text-[var(--gain)]">
@@ -299,7 +320,7 @@ function ConnectionRow({ connection, onReconnect }: { connection: Connection; on
             </p>
           </div>
         </div>
-        <StatusBadge status={connection.status} />
+        <StatusBadge status={connection.status} queued={!!connection.statusMessage} />
       </div>
 
       {connection.status === "connected" && (
@@ -314,7 +335,7 @@ function ConnectionRow({ connection, onReconnect }: { connection: Connection; on
         {connection.status === "error" ? (
           <p className="text-[var(--loss)]">{connection.statusMessage ? t(connection.statusMessage) : t("MetaTrader rejected the login.")}</p>
         ) : connection.status === "pending" ? (
-          <p className="text-muted-foreground">{t("Logging in from our sync server…")}</p>
+          <p className="text-muted-foreground">{connection.statusMessage ? t(connection.statusMessage) : t("Logging in from our sync server…")}</p>
         ) : (
           <p className="text-muted-foreground">
             {connection.lastSyncedAt ? t("Synced {ago} · updates automatically every minute", { ago: ago(connection.lastSyncedAt) ?? "" }) : t("Waiting for the first sync…")}

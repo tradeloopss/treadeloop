@@ -460,6 +460,25 @@ async function checkBridges() {
   )
 }
 
+// New accounts on a platform with no live terminal (MT4 before its terminal
+// is installed, or every bridge down) would otherwise sit on "logging in"
+// with no explanation. They stay pending and connect by themselves once a
+// terminal is back; this just tells the user so.
+const QUEUED_MESSAGE: Record<Platform, string> = {
+  mt5: "Our MetaTrader 5 sync is briefly unavailable — your account is queued and will connect automatically.",
+  mt4: "MetaTrader 4 sync is still being set up on our sync server — your account is queued and will connect automatically once it's ready. You can close this.",
+}
+
+async function flagQueued() {
+  for (const platform of ["mt5", "mt4"] as const) {
+    if (bridges.some((b) => b.platform === platform && b.alive)) continue
+    const message = QUEUED_MESSAGE[platform]
+    await db.execute(sql`
+      update metatrader_connections set "statusMessage" = ${message}
+       where platform = ${platform} and status = 'pending' and "statusMessage" is distinct from ${message}`)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main loop
 
@@ -469,7 +488,10 @@ let ticks = 0
 async function tick() {
   ticks++
   if (ticks % 5 === 0) closeStrayWindows()
-  if (ticks % 8 === 1) await checkBridges()
+  if (ticks % 8 === 1) {
+    await checkBridges()
+    await flagQueued()
+  }
   for (const platform of ["mt5", "mt4"] as const) {
     const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)
     if (free.length === 0) continue
