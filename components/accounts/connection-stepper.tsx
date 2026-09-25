@@ -12,42 +12,48 @@ const STEPS = [
 
 type StepState = "done" | "active" | "upcoming"
 
-// A compact horizontal step indicator for the connection card:
-// ① Choose platform ── ② Connect account ── ③ Verify & sync
-// (short labels when the card is narrow). `completed` marks the last step done;
-// `fill` stretches the links across the available width (up to 560px) instead
-// of keeping them short.
-export function ConnectionStepper({ current, completed = false, fill = false }: { current: 1 | 2 | 3; completed?: boolean; fill?: boolean }) {
+// The Add account window's steps: three numbered circles on one line with
+// their labels underneath (① Choose platform ── ② Connect account ── ③ Verify
+// & sync). `completed` marks the current step done. Short labels when the
+// stepper's own box is narrow (@container/steps).
+export function ConnectionStepper({ current, completed = false, className }: { current: 1 | 2 | 3; completed?: boolean; className?: string }) {
   const t = useT()
   const states: StepState[] = STEPS.map((_, i) => {
     const n = i + 1
     if (n < current || (completed && n === current)) return "done"
     return n === current ? "active" : "upcoming"
   })
+  // How far the connecting line is filled: up to the current step's circle.
+  const progress = Math.min(1, (completed ? current : current - 1) / (STEPS.length - 1))
 
   return (
-    <ol className={cn("flex w-full min-w-0 items-center", fill ? "max-w-[560px]" : "@[480px]/ws:w-auto @[480px]/ws:flex-1 @[640px]/ws:flex-none")} aria-label={t("Connection steps")}>
-      {STEPS.map((step, i) => (
-        <li key={step.title} className={cn("flex min-w-0 items-center", i < STEPS.length - 1 && (fill ? "flex-1" : "flex-1 @[640px]/ws:flex-none"))} aria-current={states[i] === "active" ? "step" : undefined}>
-          <span
-            className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors duration-200",
-              states[i] === "active" && "bg-primary text-primary-foreground",
-              states[i] === "done" && "border border-gain bg-gain/10 text-gain",
-              states[i] === "upcoming" && "border bg-card text-muted-foreground",
-            )}
+    <div className={cn("@container/steps", className)}>
+      <ol className="relative flex items-start justify-between" aria-label={t("Connection steps")}>
+        <span aria-hidden className="absolute inset-x-3 top-3 h-px bg-border" />
+        <span aria-hidden className="absolute start-3 top-3 h-px bg-primary transition-[width] duration-300 ease-out" style={{ width: `calc((100% - 1.5rem) * ${progress})` }} />
+        {STEPS.map((step, i) => (
+          <li
+            key={step.title}
+            aria-current={states[i] === "active" ? "step" : undefined}
+            className={cn("relative flex flex-col gap-1.5", i === 0 ? "items-start" : i === STEPS.length - 1 ? "items-end" : "items-center")}
           >
-            {states[i] === "done" ? <Check className="size-3.5" aria-hidden /> : i + 1}
-          </span>
-          <span className={cn("ms-2 text-[13px] font-medium whitespace-nowrap", states[i] === "upcoming" ? "text-muted-foreground" : "text-foreground")}>
-            <span className="@[640px]/ws:hidden">{t(step.short)}</span>
-            <span className="hidden @[640px]/ws:inline">{t(step.title)}</span>
-          </span>
-          {i < STEPS.length - 1 && (
-            <span aria-hidden className={cn("mx-2 h-px min-w-3 flex-1 transition-colors @[640px]/ws:mx-3", !fill && "@[640px]/ws:w-14 @[640px]/ws:flex-none", states[i] === "done" ? "bg-gain/40" : "bg-border")} />
-          )}
-        </li>
-      ))}
-    </ol>
+            <span
+              className={cn(
+                "flex size-6 items-center justify-center rounded-full text-[11px] font-semibold transition-colors duration-200",
+                states[i] === "active" && "bg-primary text-primary-foreground ring-4 ring-primary/15",
+                states[i] === "done" && "bg-primary text-primary-foreground",
+                states[i] === "upcoming" && "border bg-card text-muted-foreground",
+              )}
+            >
+              {states[i] === "done" ? <Check className="size-3.5" aria-hidden /> : i + 1}
+            </span>
+            <span className={cn("text-[11px] font-medium whitespace-nowrap", states[i] === "upcoming" ? "text-muted-foreground" : states[i] === "active" ? "text-primary" : "text-foreground")}>
+              <span className="@[270px]/steps:hidden">{t(step.short)}</span>
+              <span className="hidden @[270px]/steps:inline">{t(step.title)}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
   )
 }

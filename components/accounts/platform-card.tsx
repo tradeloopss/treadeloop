@@ -26,63 +26,58 @@ export function Badge({ kind }: { kind: PlatformBadge }) {
   )
 }
 
-function ProBadge() {
-  const t = useT()
-  return (
-    <span className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-primary/30 px-2 text-[11px] font-semibold text-primary">
-      <Lock className="size-3" aria-hidden /> {t("Pro")}
-    </span>
-  )
-}
-
+// One platform in the Add account window's grid: logo, name, a two-line
+// description and a chevron. Selecting it shows its details beside the grid;
+// "Continue" goes on to connect. A plan lock shows as a small lock.
 export function PlatformCard({
   icon,
   name,
   description,
-  badge,
   pro,
+  soon,
   selected,
-  disabled,
   onSelect,
+  onOpen,
 }: {
   icon: React.ReactNode
   name: string
   description: string
-  badge: PlatformBadge
-  pro?: boolean // needs a Pro plan and the viewer isn't on one
+  pro?: boolean // the viewer's plan can't connect it
+  soon?: boolean // not connectable yet
   selected?: boolean
-  disabled?: boolean
   onSelect: () => void
+  onOpen?: () => void // double-click: straight on to connecting
 }) {
+  const t = useT()
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onSelect}
-      disabled={disabled}
+      onClick={onSelect}
+      onDoubleClick={onOpen}
       aria-pressed={selected}
       className={cn(
-        "group flex min-h-14 w-full min-w-0 items-center gap-3 rounded-xl border bg-card px-3.5 py-2.5 text-start transition-[background-color,border-color,transform,box-shadow] duration-150 ease-out @[480px]/ws:min-h-[76px] @[480px]/ws:py-3",
+        "group flex min-h-[76px] w-full min-w-0 items-center gap-3.5 rounded-xl border bg-card px-4 py-3.5 text-start transition-[background-color,border-color,box-shadow] duration-150 ease-out",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
-        disabled
-          ? "cursor-not-allowed opacity-50"
-          : "hover:-translate-y-px hover:border-primary/40 hover:bg-primary/[0.02] hover:shadow-[0_4px_12px_rgba(20,21,42,0.05)]",
-        selected && "border-primary bg-primary/[0.03] ring-[0.5px] ring-primary",
+        selected ? "border-primary bg-primary/[0.035] ring-1 ring-primary" : "hover:border-primary/40 hover:bg-primary/[0.02]",
       )}
     >
-      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-[9px] @[480px]/ws:size-10 @[480px]/ws:rounded-[10px]">{icon}</span>
+      <span className={cn("flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]", soon && "opacity-70")}>{icon}</span>
       <span className="min-w-0 flex-1">
-        {/* Name left, status top-right; a narrow card wraps the status under the name. */}
-        <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-          <span className="text-sm font-semibold text-foreground">{name}</span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {pro && <ProBadge />}
-            <Badge kind={badge} />
-          </span>
+        <span className="flex items-center gap-1.5">
+          <span className={cn("truncate text-sm font-semibold", soon ? "text-muted-foreground" : "text-foreground")}>{name}</span>
+          {pro && (
+            <span title={t("Needs Pro")} className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Lock className="size-3" aria-hidden />
+              <span className="sr-only">{t("Needs Pro")}</span>
+            </span>
+          )}
         </span>
-        {/* Phones get a compact row (name + status); the description from 480px. */}
-        <span className="mt-0.5 hidden text-xs leading-[18px] text-muted-foreground @[480px]/ws:block">{description}</span>
+        <span className="mt-0.5 line-clamp-2 block text-xs leading-[17px] text-muted-foreground">{description}</span>
       </span>
-      {!disabled && <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5" />}
+      <ChevronRight
+        aria-hidden
+        className={cn("size-4 shrink-0 transition-[color,transform] duration-150", selected ? "text-primary" : "text-muted-foreground/70 group-hover:translate-x-0.5 group-hover:text-primary")}
+      />
     </button>
   )
 }

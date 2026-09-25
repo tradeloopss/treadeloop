@@ -7,16 +7,17 @@ import { ChevronRight, Plus } from "lucide-react"
 import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/components/locale-provider"
-import { ConnectionWorkspace, type WorkspaceSelection } from "@/components/accounts/connection-workspace"
+import { AddAccountModal, type AddAccountRequest } from "@/components/accounts/add-account-modal"
 import { AccountsList } from "@/components/accounts/accounts-list"
 import { SecurityCard } from "@/components/accounts/security-card"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
 import type { PlanUsage } from "@/lib/plan-allowance"
 
 // Accounts = where trades come from: the page header (breadcrumb, "+ Add
-// account"), the connection card (choose a platform → connect → verify,
-// reusing each platform's own form), the list of accounts with their health,
-// and a short note on how syncing works.
+// account"), the list of accounts with their health, and a short note on how
+// syncing works. Adding an account — from the header, the list, Reconnect or
+// /accounts?connect= — happens in the Add account window (choose a platform →
+// connect → verify, reusing each platform's own form).
 //
 // Layout follows the width actually available to the page (container
 // queries), since the sidebar may be a 240px panel or a 72px rail at the same
@@ -40,10 +41,12 @@ export function AccountsHub({
 }) {
   const t = useT()
   const router = useRouter()
-  const [selection, setSelection] = useState<WorkspaceSelection>({ platform: initialPlatform, nonce: 0 })
+  const [modalOpen, setModalOpen] = useState(initialPlatform != null)
+  const [request, setRequest] = useState<AddAccountRequest>({ platform: initialPlatform, nonce: 0 })
 
-  const select = useCallback((platform: PlatformId | null, initial?: WorkspaceSelection["initial"]) => {
-    setSelection((s) => ({ platform, initial, nonce: s.nonce + 1 }))
+  const openModal = useCallback((platform: PlatformId | null = null, initial?: AddAccountRequest["initial"]) => {
+    setRequest((r) => ({ platform, initial, nonce: r.nonce + 1 }))
+    setModalOpen(true)
   }, [])
 
   // Statuses, balances and "last synced" come from the server; refresh them
@@ -75,45 +78,40 @@ export function AccountsHub({
               <span className="hidden @[640px]/page:inline">{t("Manage your connected trading accounts and choose where TradeLoop gets your trades.")}</span>
             </p>
           </div>
-          <Button onClick={() => select(null)} className="h-10 shrink-0 rounded-[9px] px-3 font-semibold hover:bg-primary/90 @[640px]/page:px-4">
+          <Button onClick={() => openModal()} className="h-10 shrink-0 rounded-[9px] px-3 font-semibold hover:bg-primary/90 @[640px]/page:px-4">
             <Plus className="size-4" />
             {t("Add account")}
           </Button>
         </header>
 
-        {/* ≥ 1180px: connect + accounts on the left, the "how it works" note in
-            a side column that stays in view. 1000–1179: connect | accounts side
-            by side, the note underneath. Narrower: one column. */}
-        <div className="grid items-start gap-5 @[1000px]/page:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] @[1180px]/page:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="min-w-0 @[1180px]/page:col-start-1">
-            <ConnectionWorkspace
-              selection={selection}
-              onSelect={(p) => select(p)}
-              // Closing a platform's window just returns to the grid (no nonce
-              // bump, so the page doesn't jump).
-              onClose={() => setSelection((s) => ({ ...s, platform: null, initial: undefined }))}
-              isPro={isPro}
-              usage={usage}
-              pairings={pairings}
-              importAccounts={importAccounts}
-            />
-          </div>
-
-          <div className="min-w-0 @[1180px]/page:col-start-1">
+        {/* ≥ 1100px: the list, with the "how it works" note in a side column
+            that stays in view. Narrower: the note under the list. */}
+        <div className="grid items-start gap-5 @[1100px]/page:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="min-w-0">
             <AccountsList
               connections={connections}
               otherAccounts={otherAccounts}
               usage={usage}
-              onConnect={() => select(null)}
-              onReconnect={(target) => select(target.platform, { server: target.server, login: target.login })}
+              onConnect={() => openModal()}
+              onReconnect={(target) => openModal(target.platform, { server: target.server, login: target.login })}
             />
           </div>
 
-          <div className="min-w-0 @[1000px]/page:col-span-2 @[1180px]/page:sticky @[1180px]/page:top-6 @[1180px]/page:col-span-1 @[1180px]/page:col-start-2 @[1180px]/page:row-span-2 @[1180px]/page:row-start-1">
+          <div className="min-w-0 @[1100px]/page:sticky @[1100px]/page:top-6">
             <SecurityCard />
           </div>
         </div>
       </div>
+
+      <AddAccountModal
+        open={modalOpen}
+        request={request}
+        onOpenChange={setModalOpen}
+        isPro={isPro}
+        usage={usage}
+        pairings={pairings}
+        importAccounts={importAccounts}
+      />
     </div>
   )
 }

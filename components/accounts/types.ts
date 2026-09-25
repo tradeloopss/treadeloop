@@ -1,7 +1,7 @@
 // View models for the Accounts page (app/(app)/accounts/page.tsx builds them
 // from real rows; nothing here is ever filled with placeholder data).
 
-export type PlatformId = "rithmic" | "mt5" | "mt4" | "tradingview" | "file" | "topstep"
+export type PlatformId = "rithmic" | "mt5" | "mt4" | "tradingview" | "file" | "tradovate"
 
 // connected: syncing normally · syncing: first sync or a sync in flight ·
 // queued: waiting on our side (e.g. MT4 being set up) · warning: last sync
