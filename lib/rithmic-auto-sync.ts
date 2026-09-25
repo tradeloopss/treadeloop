@@ -45,7 +45,19 @@ const backoff = new Map<number, { failures: number; nextAttempt: number }>()
 // cheap insurance against dev-mode module re-evaluation stacking up timers.
 let started = false
 
-async function runAllConnections() {
+export interface AutoSyncSummary {
+  total: number
+  due: number
+  synced: number
+  failed: number
+  imported: number
+}
+
+// One pass over every Rithmic connection: syncs the ones that are due (not
+// synced in the last MIN_RESYNC_GAP_MS and not backing off). Called on an
+// interval by startRithmicAutoSync where the in-process loop is enabled, and
+// by /api/cron/rithmic-sync when the sync VPS's 60-second timer drives it.
+export async function runAllConnections(): Promise<AutoSyncSummary> {
   const connections = await db.select().from(rithmicConnections)
   const now = Date.now()
   const due = connections.filter((c) => {
@@ -57,11 +69,13 @@ async function runAllConnections() {
   // grow without bound as connections come and go.
   const liveIds = new Set(connections.map((c) => c.id))
   for (const id of backoff.keys()) if (!liveIds.has(id)) backoff.delete(id)
-  if (due.length === 0) return
+  if (due.length === 0) return { total: connections.length, due: 0, synced: 0, failed: 0, imported: 0 }
+  let imported = 0
   const results = await Promise.allSettled(
     due.map(async (connection) => {
       try {
-        await syncRithmicConnection(connection)
+        const result = await syncRithmicConnection(connection)
+        imported += result.imported
         backoff.delete(connection.id)
       } catch (err) {
         const failures = (backoff.get(connection.id)?.failures ?? 0) + 1
@@ -76,6 +90,7 @@ async function runAllConnections() {
   if (failed > 0) {
     console.log(`[rithmic-auto-sync] synced ${due.length - failed}/${due.length} due connections (${failed} failed)`)
   }
+  return { total: connections.length, due: due.length, synced: due.length - failed, failed, imported }
 }
 
 export function startRithmicAutoSync() {
