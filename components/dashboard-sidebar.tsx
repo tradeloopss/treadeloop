@@ -45,7 +45,6 @@ import { useT } from "@/components/locale-provider"
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
-  { href: "/accounts", label: "Accounts", icon: Wallet },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
@@ -317,6 +316,10 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
               <DropdownMenuItem render={<Link href="/support" />}>
                 <HelpCircle className="size-4" />
                 {t("Help & support")}
+              </DropdownMenuItem>
+              <DropdownMenuItem render={<Link href="/accounts" />}>
+                <Wallet className="size-4" />
+                {t("Accounts")}
               </DropdownMenuItem>
               <DropdownMenuItem render={<Link href="/settings" />}>
                 <Plug className="size-4" />

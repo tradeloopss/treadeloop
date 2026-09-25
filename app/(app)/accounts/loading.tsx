@@ -7,18 +7,16 @@ function Bar({ className }: { className: string }) {
 export default function AccountsLoading() {
   return (
     <div aria-busy="true" aria-label="Loading accounts">
-      <div className="border-b px-4 py-4 sm:px-6 sm:py-5">
-        <Bar className="h-3 w-28" />
-        <Bar className="mt-2 h-6 w-40" />
-        <Bar className="mt-2 h-4 w-72 max-w-full" />
+      <div className="flex h-14 items-center border-b px-4 md:h-16 md:px-5">
+        <Bar className="h-3.5 w-36" />
       </div>
       <div className="@container/page">
-        <div className="mx-auto grid max-w-[1280px] items-start gap-4 p-4 @[640px]/page:p-5 @[768px]/page:p-6 @[900px]/page:grid-cols-[minmax(0,1fr)_340px] @[1180px]/page:grid-cols-[minmax(0,1fr)_420px] @[1180px]/page:p-8">
+        <div className="grid items-start gap-4 p-4 @[640px]/page:p-5 @[900px]/page:grid-cols-[minmax(0,1fr)_340px] @[1180px]/page:grid-cols-[minmax(0,1fr)_420px] @[1500px]/page:grid-cols-[minmax(0,1fr)_440px]">
           <div className="rounded-[14px] border bg-card p-4 @[640px]/page:p-6">
             <Bar className="h-3 w-20" />
             <Bar className="mt-3 h-8 w-72 max-w-full" />
             <Bar className="mt-3 h-4 w-96 max-w-full" />
-            <div className="mt-8 grid gap-3 @[760px]/page:grid-cols-2">
+            <div className="mt-8 grid gap-3">
               {Array.from({ length: 6 }, (_, i) => (
                 <div key={i} className="flex min-h-[72px] items-center gap-3 rounded-[10px] border p-4">
                   <Bar className="size-11 shrink-0 rounded-[10px]" />

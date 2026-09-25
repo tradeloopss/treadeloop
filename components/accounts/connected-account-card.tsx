@@ -160,8 +160,12 @@ export function ConnectedAccountCard({ connection, syncing, actions }: { connect
 
       {metrics.length > 0 && (
         <dl className={cn("grid gap-x-3 gap-y-3 border-t px-4 py-3", metrics.length >= 3 ? "grid-cols-2 @[300px]/card:grid-cols-3" : "grid-cols-2")}>
-          {metrics.map((m) => (
-            <div key={m.label} className="min-w-0">
+          {metrics.map((m, i) => (
+            <div
+              key={m.label}
+              // Divider between columns once they sit side by side, as in a ledger row.
+              className={cn("min-w-0", i > 0 && (metrics.length >= 3 ? "@[300px]/card:border-s @[300px]/card:ps-3" : "border-s ps-3"))}
+            >
               <dt className="truncate text-[11px] text-muted-foreground">{m.label}</dt>
               <dd className="truncate text-sm font-semibold tabular-nums text-foreground">{m.value}</dd>
             </div>

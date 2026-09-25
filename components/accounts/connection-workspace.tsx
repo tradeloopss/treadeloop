@@ -128,7 +128,7 @@ export function ConnectionWorkspace({
           {t("Select your trading platform to get started. Live connections keep your journal in sync on their own; file imports cover everything else.")}
         </p>
         <h3 className="mt-8 text-base font-semibold text-foreground">{t("Choose your platform")}</h3>
-        <div className="@container/grid mt-4 grid grid-cols-1 gap-3 @[560px]/content:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 @[900px]/content:grid-cols-2">
           {PLATFORMS.map((p) => (
             <PlatformCard
               key={p.id}

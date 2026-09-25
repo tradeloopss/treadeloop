@@ -26,6 +26,15 @@ export function Badge({ kind }: { kind: PlatformBadge }) {
   )
 }
 
+function ProBadge() {
+  const t = useT()
+  return (
+    <span className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-primary/30 px-2 text-[11px] font-semibold text-primary">
+      <Lock className="size-3" aria-hidden /> {t("Pro")}
+    </span>
+  )
+}
+
 export function PlatformCard({
   icon,
   name,
@@ -53,7 +62,7 @@ export function PlatformCard({
       disabled={disabled}
       aria-pressed={selected}
       className={cn(
-        "group flex min-h-[68px] w-full min-w-0 items-center gap-3 rounded-[10px] border bg-card p-3 text-start transition-[background-color,border-color,transform,box-shadow] duration-150 ease-out @md:min-h-[74px] @md:gap-3.5 @md:p-4",
+        "group @container/pcard flex min-h-[68px] w-full min-w-0 items-center gap-3 rounded-[10px] border bg-card p-3 text-start transition-[background-color,border-color,transform,box-shadow] duration-150 ease-out @md:min-h-[74px] @md:gap-4 @md:p-4",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
         disabled
           ? "cursor-not-allowed opacity-50"
@@ -61,18 +70,22 @@ export function PlatformCard({
         selected && "border-primary bg-primary/[0.03] ring-[0.5px] ring-primary",
       )}
     >
-      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] @md:size-11">{icon}</span>
+      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] @md:size-11 @[560px]/pcard:size-12">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-semibold text-foreground">{name}</span>
-          <Badge kind={badge} />
-          {pro && (
-            <span className="inline-flex h-6 items-center gap-1 rounded-full border border-primary/30 px-2 text-[11px] font-semibold text-primary">
-              <Lock className="size-3" aria-hidden /> {t("Pro")}
-            </span>
-          )}
+          {/* Narrow card: badges sit beside the name. */}
+          <span className="contents @[460px]/pcard:hidden">
+            <Badge kind={badge} />
+            {pro && <ProBadge />}
+          </span>
         </span>
-        <span className="mt-0.5 block text-xs leading-[18px] text-muted-foreground">{description}</span>
+        <span className="mt-0.5 block text-xs leading-[18px] text-muted-foreground @[460px]/pcard:max-w-[420px]">{description}</span>
+      </span>
+      {/* Wide card: badges on the right, beside the chevron. */}
+      <span className="hidden shrink-0 items-center gap-2 @[460px]/pcard:flex">
+        {pro && <ProBadge />}
+        <Badge kind={badge} />
       </span>
       {!disabled && <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5" />}
     </button>

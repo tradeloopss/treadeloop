@@ -17,7 +17,8 @@ import type { HubAccount, HubConnection, PlatformId } from "@/components/account
 // 72px rail at the same screen size:
 //   < 900px   one column: workspace, accounts, security (tablet portrait, phone)
 //   900–1179  two columns, 340px accounts panel (tablet landscape)
-//   ≥ 1180    two columns, 420px accounts panel, 32px padding (desktop)
+//   ≥ 1180    two columns, 420px accounts panel (440px from 1500) — desktop
+// The page uses the full width (no centred max-width column).
 export function AccountsHub({
   connections,
   otherAccounts,
@@ -51,7 +52,7 @@ export function AccountsHub({
 
   return (
     <div className="@container/page">
-      <div className="mx-auto grid max-w-[1280px] items-start gap-4 p-4 @[640px]/page:p-5 @[768px]/page:p-6 @[900px]/page:grid-cols-[minmax(0,1fr)_340px] @[1180px]/page:grid-cols-[minmax(0,1fr)_420px] @[1180px]/page:p-8">
+      <div className="grid items-start gap-4 p-4 @[640px]/page:p-5 @[900px]/page:grid-cols-[minmax(0,1fr)_340px] @[1180px]/page:grid-cols-[minmax(0,1fr)_420px] @[1500px]/page:grid-cols-[minmax(0,1fr)_440px]">
         <ConnectionWorkspace selection={selection} onSelect={(p) => select(p)} isPro={isPro} pairings={pairings} importAccounts={importAccounts} />
         <div className="min-w-0 space-y-4">
           <ConnectedAccountsPanel
