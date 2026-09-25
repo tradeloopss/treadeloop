@@ -4,11 +4,12 @@
 // chip. Matched case-insensitively against the account's broker label (set
 // from the matched prop firm on Rithmic connect — see app/actions/rithmic.ts —
 // or the broker's company name on MetaTrader). `dark` is an optional variant
-// for dark mode (e.g. TradingView's black tile would vanish on a dark card).
+// for dark mode (e.g. TradingView's and FTMO's black marks would vanish on a
+// dark card).
 const LOGOS: { match: string[]; file: string; dark?: string }[] = [
   { match: ["topstep"], file: "topstep.png" },
   { match: ["tradeify"], file: "tradeify.png" },
-  { match: ["ftmo"], file: "FTMO.png" },
+  { match: ["ftmo"], file: "FTMO.png", dark: "FTMO-dark.png" },
   { match: ["alpha capital"], file: "alphacapital.png" },
   { match: ["lucid"], file: "lucid.png" },
   { match: ["rithmic"], file: "rithmic.png" },
