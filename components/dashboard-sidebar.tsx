@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   Banknote,
   CandlestickChart,
+  Wallet,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -44,6 +45,7 @@ import { useT } from "@/components/locale-provider"
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
+  { href: "/accounts", label: "Accounts", icon: Wallet },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
@@ -63,13 +65,34 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
   const [open, setOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
+  // An explicit choice (the Collapse button) always wins. Without one, the
+  // sidebar is a 72px icon rail below 1280px (tablet landscape, small
+  // laptops) so pages keep their width, and a full panel above.
   useEffect(() => {
     setMounted(true)
+    let stored: string | null = null
     try {
-      setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1")
+      stored = localStorage.getItem(COLLAPSED_KEY)
     } catch {
-      // private browsing / storage disabled — just stay expanded
+      // private browsing / storage disabled — fall back to the width rule
     }
+    if (stored === "1" || stored === "0") {
+      setCollapsed(stored === "1")
+      return
+    }
+    const narrow = window.matchMedia("(max-width: 1279px)")
+    setCollapsed(narrow.matches)
+    const onChange = (e: MediaQueryListEvent) => {
+      try {
+        const choice = localStorage.getItem(COLLAPSED_KEY)
+        if (choice === "1" || choice === "0") return // chose since load
+      } catch {
+        // storage unavailable — keep following the width
+      }
+      setCollapsed(e.matches)
+    }
+    narrow.addEventListener("change", onChange)
+    return () => narrow.removeEventListener("change", onChange)
   }, [])
 
   // Close the mobile drawer whenever the route changes.
@@ -158,7 +181,7 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
 
         <nav className={cn("flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2", collapsed && "md:px-2")}>
           {links.map((link) => {
-            const active = pathname === link.href
+            const active = pathname === link.href || pathname.startsWith(`${link.href}/`)
             const Icon = link.icon
             return (
               <Tooltip key={link.href}>

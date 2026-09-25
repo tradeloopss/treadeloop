@@ -129,6 +129,7 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
       .returning({ id: metatraderConnections.id })
   }
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   return { ok: true, id }
 }
 
@@ -153,6 +154,7 @@ export async function disconnectMetaTrader(connectionId: number): Promise<{ ok: 
     .returning({ id: metatraderConnections.id })
   if (row) await db.delete(metatraderDeals).where(eq(metatraderDeals.connectionId, row.id))
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/settings")
   return { ok: true }
 }

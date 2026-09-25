@@ -122,6 +122,7 @@ export async function updateAccount(
   revalidatePath("/calendar")
   revalidatePath("/reports")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
 }
 
 // Hide an account from active views without losing it (or bring it back).
@@ -131,6 +132,7 @@ export async function setAccountArchived(id: number, archived: boolean) {
   revalidatePath("/settings")
   revalidatePath("/dashboard")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/trades")
 }
 
@@ -211,5 +213,6 @@ export async function deleteAccount(id: number) {
   revalidatePath("/trades")
   revalidatePath("/settings")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/propfirm")
 }

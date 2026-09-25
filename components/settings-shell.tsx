@@ -5,7 +5,6 @@ import { useState } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
-import { AccountManager, type AccountCard } from "@/components/account-manager"
 import { ChangePasswordForm } from "@/components/change-password-form"
 import { DangerZone } from "@/components/danger-zone"
 import { SubscriptionPanel, type SubscriptionInfo } from "@/components/subscription-panel"
@@ -13,25 +12,21 @@ import { TwoFactorPanel } from "@/components/two-factor-panel"
 import { User, UserRound, Settings, Lock, CreditCard, Wallet, TriangleAlert } from "lucide-react"
 import { useT } from "@/components/locale-provider"
 
-type Tab = "accounts" | "security" | "subscription" | "danger"
+type Tab = "security" | "subscription" | "danger"
 
 export function SettingsShell({
-  accounts,
   subscription,
   isOwner,
-  isPro,
   twoFactorEnabled,
   hasPassword,
 }: {
-  accounts: AccountCard[]
   subscription: SubscriptionInfo | null
   isOwner: boolean
-  isPro: boolean
   twoFactorEnabled: boolean
   hasPassword: boolean
 }) {
   const t = useT()
-  const [tab, setTab] = useState<Tab>("accounts")
+  const [tab, setTab] = useState<Tab>("security")
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
@@ -56,14 +51,19 @@ export function SettingsShell({
             <Settings className="size-3.5" /> {t("General")}
           </div>
           <div className="ms-3.5 flex flex-col gap-0.5 border-s ps-3">
-            <NavButton icon={Wallet} label={t("Accounts")} active={tab === "accounts"} onClick={() => setTab("accounts")} />
+            {/* Accounts has its own page: connections, sync health, editing. */}
+            <Link
+              href="/accounts"
+              className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Wallet className="size-4" /> {t("Accounts")}
+            </Link>
             <NavButton icon={TriangleAlert} label={t("Danger zone")} active={tab === "danger"} onClick={() => setTab("danger")} />
           </div>
         </div>
       </Card>
 
       <div className="min-w-0 flex-1">
-        {tab === "accounts" && <AccountManager accounts={accounts} isPro={isPro || isOwner} />}
         {tab === "security" && (
           <>
             {hasPassword && <ChangePasswordForm />}

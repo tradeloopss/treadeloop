@@ -167,8 +167,8 @@ export function TradingViewPair({
               <Button render={<a href="https://www.tradingview.com/chart/" target="_blank" rel="noreferrer" />} size="sm">
                 {t("Open TradingView")} <ExternalLink className="size-3.5" />
               </Button>
-              <Button render={<Link href="/add-trade" />} variant="outline" size="sm">
-                {t("Back to Broker Sync")}
+              <Button render={<Link href="/accounts" />} variant="outline" size="sm">
+                {t("Back to Accounts")}
               </Button>
             </div>
           </div>

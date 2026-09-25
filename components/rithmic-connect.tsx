@@ -3,24 +3,14 @@
 import type React from "react"
 import { useEffect, useState, useTransition } from "react"
 import Image from "next/image"
-import { connectRithmic, disconnectRithmic, syncRithmic, listAvailableRithmicSystems } from "@/app/actions/rithmic"
+import { connectRithmic, listAvailableRithmicSystems } from "@/app/actions/rithmic"
 import { brokerLogo } from "@/lib/broker-logos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { toast } from "sonner"
-import { ArrowLeft, Plus, RefreshCw, Search, Unplug, Wifi } from "lucide-react"
-import { useIntlLocale, useT } from "@/components/locale-provider"
+import { ArrowLeft, Plus, Search } from "lucide-react"
+import { useT } from "@/components/locale-provider"
 
 // Matches lib/rithmic-client.ts's PRODUCTION_RITHMIC_GATEWAY / TEST_RITHMIC_GATEWAY
 // — duplicated here since that module pulls in server-only deps (ws,
@@ -64,7 +54,21 @@ function FirmTile({ name, custom, onClick }: { name: string; custom?: boolean; o
   )
 }
 
-export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; initialFirmHint?: string }) {
+export type RithmicConnected = { accounts: number; trades: number; diagnostic?: string }
+
+// onConnected / onFailed let a host show its own success and error screens
+// (the Accounts page does); without them the form reports through toasts.
+export function ConnectForm({
+  onDone,
+  initialFirmHint,
+  onConnected,
+  onFailed,
+}: {
+  onDone: () => void
+  initialFirmHint?: string
+  onConnected?: (result: RithmicConnected) => void
+  onFailed?: (message: string) => void
+}) {
   const t = useT()
   const [systems, setSystems] = useState<string[]>([])
   const [loadingSystems, setLoadingSystems] = useState(true)
@@ -113,6 +117,14 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
     startTransition(async () => {
       try {
         const result = await connectRithmic(formData)
+        if (result.ok && onConnected) {
+          onConnected({ accounts: result.accounts, trades: result.trades, diagnostic: result.diagnostic })
+          return
+        }
+        if (!result.ok && onFailed) {
+          onFailed(t(result.error))
+          return
+        }
         if (result.ok) {
           const acct = result.accounts === 1 ? t("Rithmic connected — 1 account") : t("Rithmic connected — {n} accounts", { n: result.accounts })
           const trades = result.trades === 0 ? t("no past trades found in the last 2 years") : result.trades === 1 ? t("1 past trade imported") : t("{n} past trades imported", { n: result.trades })
@@ -132,7 +144,9 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
       } catch {
         // A rejected promise here means the request itself failed (e.g. it
         // ran past the function's time limit) rather than a handled error.
-        toast.error(t("Connecting took too long — Rithmic may be slow or unreachable right now. Please try again in a moment."))
+        const message = t("Connecting took too long — Rithmic may be slow or unreachable right now. Please try again in a moment.")
+        if (onFailed) onFailed(message)
+        else toast.error(message)
       }
     })
   }
@@ -140,7 +154,7 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
   // Step 1 — pick the prop firm from the ones Rithmic serves.
   if (step === "firm") {
     return (
-      <div className="space-y-4">
+      <div className="@container space-y-4">
         <div className="text-center">
           <h3 className="text-base font-semibold">{t("Select your prop firm")}</h3>
           <p className="text-sm text-muted-foreground">{t("Pick the prop firm your Rithmic login belongs to.")}</p>
@@ -152,7 +166,7 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
         {loadingSystems ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("Loading…")}</div>
         ) : (
-          <div className="grid max-h-[52vh] grid-cols-2 gap-2.5 overflow-y-auto p-0.5 sm:grid-cols-4">
+          <div className="grid max-h-[52vh] grid-cols-2 gap-2.5 overflow-y-auto p-0.5 @md:grid-cols-3 @2xl:grid-cols-4">
             {filtered.map((s) => (
               <FirmTile key={s} name={s} onClick={() => selectFirm(s)} />
             ))}
@@ -170,7 +184,7 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
   const selectedLogo = isCustom ? null : brokerLogo(systemChoice)
   return (
     <form onSubmit={onConnect} className="space-y-3">
-      <button type="button" onClick={() => setStep("firm")} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+      <button type="button" onClick={() => setStep("firm")} disabled={pending} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
         <ArrowLeft className="size-4" /> {t("Back")}
       </button>
 
@@ -202,141 +216,25 @@ export function ConnectForm({ onDone, initialFirmHint }: { onDone: () => void; i
         </>
       )}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="rithmic-login">{t("Username")}</Label>
-        <Input id="rithmic-login" name="login" required autoComplete="off" />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="rithmic-password">{t("Password")}</Label>
-        <Input id="rithmic-password" name="password" type="password" required autoComplete="off" />
-      </div>
-      <Button type="submit" disabled={pending || !canSubmit} className="w-full">
+      {/* Disabled while connecting so the form can't be sent twice. */}
+      <fieldset disabled={pending} className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="rithmic-login">{t("Username")}</Label>
+          <Input id="rithmic-login" name="login" required autoComplete="off" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rithmic-password">{t("Password")}</Label>
+          <Input id="rithmic-password" name="password" type="password" required autoComplete="off" />
+        </div>
+      </fieldset>
+      <Button type="submit" disabled={pending || !canSubmit} className="h-11 w-full">
         {pending ? t("Connecting…") : t("Connect")}
       </Button>
-    </form>
-  )
-}
-
-export type RithmicConnection = {
-  id: number
-  login: string
-  systemName: string
-  rithmicAccountId: string
-  accountName: string
-  lastSyncedAt: Date | null
-  lastSyncStatus: string | null
-  lastSyncError: string | null
-  lastSyncCount: number | null
-}
-
-function ConnectionRow({ connection }: { connection: RithmicConnection }) {
-  const t = useT()
-  const dateLocale = useIntlLocale()
-  const [pending, startTransition] = useTransition()
-  const [syncing, startSync] = useTransition()
-
-  function onSync() {
-    startSync(async () => {
-      try {
-        const result = await syncRithmic(connection.id)
-        toast.success(result.imported > 0 ? (result.imported === 1 ? t("Imported 1 trade") : t("Imported {n} trades", { n: result.imported })) : t("Already up to date"))
-      } catch (err) {
-        toast.error(err instanceof Error ? t(err.message) : t("Sync failed"))
-      }
-    })
-  }
-
-  function onDisconnect() {
-    startTransition(async () => {
-      try {
-        await disconnectRithmic(connection.id)
-        toast.success(t("Disconnected"))
-      } catch {
-        toast.error(t("Could not disconnect"))
-      }
-    })
-  }
-
-  return (
-    <div className="space-y-3 rounded-md border p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="font-medium">{connection.accountName}</p>
-          <p className="text-sm text-muted-foreground">{connection.rithmicAccountId} · {connection.systemName}</p>
-        </div>
-        <Badge variant="outline">RITHMIC</Badge>
-      </div>
-
-      <div className="rounded-md bg-accent/40 p-3 text-sm">
-        {connection.lastSyncedAt ? (
-          <>
-            <p>
-              {t("Last synced {time}", { time: new Date(connection.lastSyncedAt).toLocaleString(dateLocale) })}
-              {connection.lastSyncStatus === "ok" && connection.lastSyncCount != null && (
-                <> — {connection.lastSyncCount === 1 ? t("imported 1 trade") : t("imported {n} trades", { n: connection.lastSyncCount })}</>
-              )}
-            </p>
-            {connection.lastSyncStatus === "error" && (
-              <p className="mt-1 text-[var(--loss)]">{connection.lastSyncError}</p>
-            )}
-          </>
-        ) : (
-          <p className="text-muted-foreground">{t("Not synced yet — click “Sync now” to pull your trade history.")}</p>
-        )}
-      </div>
-
-      <div className="flex gap-2">
-        <Button onClick={onSync} disabled={syncing} className="flex-1">
-          <RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />
-          {syncing ? t("Syncing…") : t("Sync now")}
-        </Button>
-        <Button onClick={onDisconnect} disabled={pending} variant="outline">
-          <Unplug className="size-4" /> {t("Disconnect")}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-export function RithmicConnect({ connections }: { connections: RithmicConnection[] }) {
-  const t = useT()
-  const [open, setOpen] = useState(false)
-
-  return (
-    <Card className="max-w-2xl space-y-4 p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-medium">{t("Rithmic (live)")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("Connects directly to your Rithmic account — every account under that login syncs automatically.")}
-          </p>
-        </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger render={<Button size="sm"><Plus className="size-4" /> {t("Connect")}</Button>} />
-          <DialogContent className="sm:max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>{t("Connect Rithmic")}</DialogTitle>
-              <DialogDescription>
-                {t("Use your Rithmic trading login. Every account found under it is added and synced.")}
-              </DialogDescription>
-            </DialogHeader>
-            <ConnectForm onDone={() => setOpen(false)} />
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {connections.length === 0 ? (
-        <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
-          <Wifi className="size-6 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">{t("No Rithmic accounts connected yet.")}</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} />
-          ))}
-        </div>
+      {pending && (
+        <p className="text-center text-xs text-muted-foreground" role="status">
+          {t("Securely checking your account and importing your history — this can take up to a minute.")}
+        </p>
       )}
-    </Card>
+    </form>
   )
 }

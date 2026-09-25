@@ -18,7 +18,19 @@ import { toast } from "sonner"
 import { Upload, FileSpreadsheet } from "lucide-react"
 import { useT } from "@/components/locale-provider"
 
-export function BrokerImport({ accounts }: { accounts: { id: number; name: string }[] }) {
+export type ImportSummary = { imported: number; source: string; skippedRows: number }
+
+// `bare` drops the card chrome for embedding (the Accounts page workspace);
+// `onImported` lets that host show its own result instead of toasts.
+export function BrokerImport({
+  accounts,
+  bare,
+  onImported,
+}: {
+  accounts: { id: number; name: string }[]
+  bare?: boolean
+  onImported?: (summary: ImportSummary) => void
+}) {
   const t = useT()
   const [pending, startTransition] = useTransition()
   const [fileName, setFileName] = useState<string | null>(null)
@@ -38,6 +50,12 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
     startTransition(async () => {
       try {
         const result = await importTradeCsv(formData)
+        if (onImported) {
+          onImported({ imported: result.imported, source: result.source, skippedRows: result.skippedRows })
+          setFileName(null)
+          if (inputRef.current) inputRef.current.value = ""
+          return
+        }
         if (result.imported > 0) {
           toast.success(result.imported === 1 ? t("Imported 1 trade from {source}", { source: result.source }) : t("Imported {n} trades from {source}", { n: result.imported, source: result.source }))
         } else {
@@ -54,10 +72,11 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
     })
   }
 
+  const Wrapper = bare ? "div" : Card
   return (
-    <Card className="max-w-2xl space-y-4 p-5">
+    <Wrapper className={bare ? "space-y-4" : "max-w-2xl space-y-4 p-5"}>
       <div>
-        <h2 className="font-medium">{t("Import trades")}</h2>
+        {!bare && <h2 className="font-medium">{t("Import trades")}</h2>}
         <p className="mt-1 text-sm text-muted-foreground">
           {t("Works with any of these exports — no login or API key needed.")}
         </p>
@@ -140,7 +159,7 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
           onChange={onFileChange}
           className="sr-only"
         />
-        <Button type="submit" disabled={pending || !fileName} className="w-full">
+        <Button type="submit" disabled={pending || !fileName} className="h-11 w-full">
           {pending ? t("Importing…") : t("Import trades")}
         </Button>
       </form>
@@ -148,6 +167,6 @@ export function BrokerImport({ accounts }: { accounts: { id: number; name: strin
       <p className="text-xs text-muted-foreground">
         {t("Re-uploading the same (or a wider) date range is safe — already-imported trades are skipped automatically. Trades still open at export time won't appear until they're closed and re-exported.")}
       </p>
-    </Card>
+    </Wrapper>
   )
 }

@@ -65,6 +65,7 @@ export async function getRithmicConnections() {
     .orderBy(rithmicConnections.createdAt)
   return rows.map((row) => ({
     id: row.id,
+    accountId: row.accountId,
     login: row.login,
     systemName: row.systemName,
     rithmicAccountId: row.rithmicAccountId,
@@ -310,6 +311,7 @@ async function runConnectRithmic(
 
   revalidatePath("/settings")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/propfirm")
   return { ok: true, accounts: accounts.length, trades: importedTrades, diagnostic: fillDiagnostic || undefined }
 }
@@ -321,6 +323,7 @@ export async function disconnectRithmic(connectionId: number) {
     .where(and(eq(rithmicConnections.id, connectionId), eq(rithmicConnections.userId, userId)))
   revalidatePath("/settings")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
 }
 
 // Sync now from the account row's own menu, which knows the account id rather
@@ -340,6 +343,7 @@ export async function syncRithmicAccount(accountId: number): Promise<{ imported:
   revalidatePath("/reports")
   revalidatePath("/settings")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   return result
 }
 
@@ -360,6 +364,7 @@ export async function syncRithmic(connectionId: number) {
   revalidatePath("/reports")
   revalidatePath("/settings")
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
 
   return result
 }

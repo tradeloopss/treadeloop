@@ -139,6 +139,7 @@ export async function unpairTradingView(pairingId: number): Promise<void> {
   const userId = await getUserId()
   await db.delete(tradingviewPairings).where(and(eq(tradingviewPairings.id, pairingId), eq(tradingviewPairings.userId, userId)))
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/settings")
 }
 
@@ -195,6 +196,7 @@ export async function connectTradingView(formData: FormData): Promise<void> {
   })
 
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/settings")
 }
 
@@ -207,6 +209,7 @@ export async function regenerateTradingViewWebhook(connectionId: number): Promis
     .set({ webhookToken: randomBytes(32).toString("hex"), lastStatus: null, lastError: null })
     .where(and(eq(tradingviewConnections.id, connectionId), eq(tradingviewConnections.userId, userId)))
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
 }
 
 // Stops the webhook and forgets the raw fills. Trades already journaled stay
@@ -221,6 +224,7 @@ export async function disconnectTradingView(connectionId: number): Promise<void>
   await db.delete(tradingviewFills).where(eq(tradingviewFills.connectionId, connection.id))
   await db.delete(tradingviewConnections).where(eq(tradingviewConnections.id, connection.id))
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/settings")
 }
 
@@ -307,6 +311,7 @@ export async function importTradingViewPaste(pasted: string, accountId: number |
   }
 
   revalidatePath("/add-trade")
+  revalidatePath("/accounts")
   revalidatePath("/trades")
   revalidatePath("/dashboard")
   revalidatePath("/journal")

@@ -40,6 +40,7 @@
   --color-gain-foreground: var(--gain-foreground);
   --color-loss: var(--loss);
   --color-loss-foreground: var(--loss-foreground);
+  --color-warning: var(--warning);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --radius-sm: calc(var(--radius) * 0.6);
@@ -75,6 +76,7 @@
   --gain-foreground: oklch(0.99 0 0);
   --loss: oklch(0.6 0.22 25);
   --loss-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.74 0.15 70);
   --chart-1: oklch(0.54 0.22 285);
   --chart-2: oklch(0.62 0.17 155);
   --chart-3: oklch(0.6 0.22 25);
@@ -129,6 +131,7 @@
   --gain-foreground: oklch(0.15 0.02 155);
   --loss: oklch(0.68 0.2 25);
   --loss-foreground: oklch(0.15 0.02 25);
+  --warning: oklch(0.8 0.15 75);
   --chart-1: oklch(0.65 0.2 285);
   --chart-2: oklch(0.72 0.17 155);
   --chart-3: oklch(0.68 0.2 25);

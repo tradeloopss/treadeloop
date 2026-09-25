@@ -466,7 +466,7 @@ async function checkBridges() {
 // terminal is back; this just tells the user so.
 const QUEUED_MESSAGE: Record<Platform, string> = {
   mt5: "Our MetaTrader 5 sync is briefly unavailable — your account is queued and will connect automatically.",
-  mt4: "MetaTrader 4 sync is still being set up on our sync server — your account is queued and will connect automatically once it's ready. You can close this.",
+  mt4: "MetaTrader 4 sync is still being set up on our sync server — your account is queued and will connect automatically once it's ready.",
 }
 
 async function flagQueued() {

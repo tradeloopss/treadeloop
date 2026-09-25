@@ -1,41 +1,23 @@
-import { auth } from "@/lib/auth"
-import { headers } from "next/headers"
-import { isPro } from "@/lib/subscription"
+import Link from "next/link"
 import { getAccounts, getManualEntryLockedAccountIds } from "@/app/actions/accounts"
 import { getPlaybooks } from "@/app/actions/playbooks"
-import { getMetaTraderConnections } from "@/app/actions/metatrader"
-import { getRithmicConnections } from "@/app/actions/rithmic"
-import { getTradingViewConnections, getTradingViewPairings } from "@/app/actions/tradingview"
 import { PageHeader } from "@/components/page-header"
 import { BrokerImport } from "@/components/broker-import"
-import { MetaTraderConnect } from "@/components/metatrader-connect"
-import { TradingViewConnect } from "@/components/tradingview-connect"
-import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
-import { PropFirmSync } from "@/components/prop-firm-sync"
 import { ManualTradeForm } from "@/components/manual-trade-form"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Wifi, Building2, PenLine } from "lucide-react"
+import { ArrowRight, Link2, PenLine, Upload } from "lucide-react"
 import { getT } from "@/lib/i18n/server"
 
-// Connecting a broker (Rithmic login + account list + fill history + balances,
-// each with its own R|Protocol round trips) can take longer than the default
-// function limit, so this route is given more room.
+// Add Trade is for adding trades: a file, or by hand. Connecting a platform
+// so trades arrive on their own lives on the Accounts page (/accounts).
+
+// A large statement import can take a while to parse and insert.
 export const maxDuration = 60
 
 export default async function AddTradePage() {
   const t = await getT()
-  const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, playbooks, mtConnections, rithmicConnections, tvConnections, tvPairings, pro, lockedAccountIds] = await Promise.all([
-    getAccounts(),
-    getPlaybooks(),
-    getMetaTraderConnections(),
-    getRithmicConnections(),
-    getTradingViewConnections(),
-    getTradingViewPairings(),
-    session?.user ? isPro(session.user.id) : Promise.resolve(false),
-    getManualEntryLockedAccountIds(),
-  ])
+  const [accounts, playbooks, lockedAccountIds] = await Promise.all([getAccounts(), getPlaybooks(), getManualEntryLockedAccountIds()])
 
   // Prop firm / live-synced accounts are import-only, so they're not offered
   // for manual entry (enforced again server-side in createTrade).
@@ -44,7 +26,21 @@ export default async function AddTradePage() {
   return (
     <div>
       <PageHeader title={t("Add Trade")} description={t("Bring your trades in however works best for you")} />
-      <div className="p-4 sm:p-6">
+      <div className="space-y-5 p-4 sm:p-6">
+        <Link
+          href="/accounts"
+          className="flex max-w-2xl items-center gap-3 rounded-xl border bg-primary/[0.03] p-4 transition-colors hover:border-primary/40 hover:bg-primary/[0.05] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary/10 text-primary">
+            <Link2 className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-foreground">{t("Want trades to arrive on their own?")}</span>
+            <span className="block text-xs text-muted-foreground">{t("Connect Rithmic, MetaTrader or TradingView on the Accounts page — every trade syncs automatically.")}</span>
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+        </Link>
+
         <Tabs defaultValue="upload" className="items-start gap-5">
           <TabsList className="group-data-horizontal/tabs:h-auto w-full max-w-2xl flex-wrap justify-start gap-2 rounded-xl border bg-muted/30 p-2">
             <TabsTrigger
@@ -55,24 +51,6 @@ export default async function AddTradePage() {
                 <Upload className="size-3.5" />
               </span>
               {t("File Upload")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="broker"
-              className="h-10 shrink-0 gap-2.5 rounded-lg border border-transparent px-3.5 text-sm font-medium text-muted-foreground data-active:border-border data-active:bg-background data-active:text-foreground data-active:shadow-sm"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-500">
-                <Wifi className="size-3.5" />
-              </span>
-              {t("Broker Sync")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="propfirm"
-              className="h-10 shrink-0 gap-2.5 rounded-lg border border-transparent px-3.5 text-sm font-medium text-muted-foreground data-active:border-border data-active:bg-background data-active:text-foreground data-active:shadow-sm"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-500">
-                <Building2 className="size-3.5" />
-              </span>
-              {t("Prop Firm Sync")}
             </TabsTrigger>
             <TabsTrigger
               value="manual"
@@ -87,34 +65,6 @@ export default async function AddTradePage() {
 
           <TabsContent value="upload" className="w-full">
             <BrokerImport accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} />
-          </TabsContent>
-
-          <TabsContent value="broker" className="w-full space-y-5">
-            <p className="max-w-lg text-sm text-muted-foreground">
-              {t("Connect your personal broker account — trades sync automatically, no file exports needed.")}
-            </p>
-            {/* The TradingView card carries the paste route, which every plan
-                can use, so it shows whether or not they're on Pro. */}
-            <TradingViewConnect connections={tvConnections} pairings={tvPairings} accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} isPro={pro} />
-            {pro ? (
-              <MetaTraderConnect connections={mtConnections} />
-            ) : (
-              <LiveSyncUpgradeBanner
-                title={t("MetaTrader Connection")}
-                description={t("Connect your MetaTrader 4/5 account and every trade lands in your journal automatically — no CSV needed. Live sync into the journal is included with Pro.")}
-              />
-            )}
-          </TabsContent>
-
-          <TabsContent value="propfirm" className="w-full">
-            <PropFirmSync
-              accounts={accounts.map((a) => ({ id: a.id, name: a.name }))}
-              mtConnections={mtConnections}
-              rithmicConnections={rithmicConnections}
-              tradingviewConnections={tvConnections}
-              tradingviewPairings={tvPairings}
-              isPro={pro}
-            />
           </TabsContent>
 
           <TabsContent value="manual" className="w-full">
