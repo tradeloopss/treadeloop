@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useRef, useState, useTransition } from "react"
+import Image from "next/image"
 import { importTradeCsv } from "@/app/actions/broker"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -82,12 +83,15 @@ export function BrokerImport({
         </p>
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           <li>
+            <Image src="/brokers/sm/tradovate.png" alt="" width={16} height={16} className="me-1.5 inline-block size-4 rounded-[4px] align-[-3px]" />
             <span className="font-medium text-foreground">Tradovate:</span> {t("Reports → Orders → pick a date range → Download CSV")}
           </li>
           <li>
+            <Image src="/brokers/sm/ninjatrader.png" alt="" width={16} height={16} className="me-1.5 inline-block size-4 rounded-[4px] align-[-3px]" />
             <span className="font-medium text-foreground">NinjaTrader:</span> {t("Control Center → Trade Performance → Trades tab → right-click → Export")}
           </li>
           <li>
+            <Image src="/brokers/sm/metatrader.png" alt="" width={16} height={16} className="me-1.5 inline-block size-4 rounded-[4px] align-[-3px]" />
             <span className="font-medium text-foreground">MetaTrader 4/5:</span> {t("Terminal → Account History → right-click → Save as Report (HTML)")}
           </li>
         </ul>

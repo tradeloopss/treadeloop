@@ -8,6 +8,7 @@ import { getTradingViewConnections, getTradingViewPairings } from "@/app/actions
 import { AccountsHub } from "@/components/accounts/accounts-hub"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
 import { recordRequestTiming } from "@/lib/telemetry"
+import { brokerLogo } from "@/lib/broker-logos"
 import { getT } from "@/lib/i18n/server"
 
 // Connecting Rithmic (login + account discovery + history) and "Sync all"
@@ -98,7 +99,8 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         connectionId: c.id,
         title: acct?.name ?? `${c.brokerName ?? c.server} - ${c.login}`,
         subtitle: c.server,
-        logoName: c.brokerName,
+        // The broker's own logo when we ship one (Exness…), else MetaTrader's.
+        logoName: brokerLogo(c.brokerName) ? c.brokerName : "MetaTrader",
         health,
         message: c.status === "connected" ? (c.lastSyncStatus === "error" ? c.lastSyncError : null) : c.statusMessage,
         currency: c.currency ?? acct?.currency ?? "USD",
@@ -124,7 +126,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           connectionId: c.id,
           title: acct?.name ?? c.name,
           subtitle: t("Paper"),
-          logoName: null,
+          logoName: "TradingView",
           health: c.lastStatus === "error" ? "warning" : "connected",
           message: c.lastStatus === "error" ? c.lastError : null,
           currency: c.currency,

@@ -4,7 +4,7 @@ import type React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
-import { AlertCircle, CandlestickChart, CheckCircle2, FileUp, LineChart } from "lucide-react"
+import { AlertCircle, CheckCircle2, FileUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -36,8 +36,15 @@ function TintIcon({ children }: { children: React.ReactNode }) {
   return <span className="flex size-full items-center justify-center bg-primary/10 text-primary">{children}</span>
 }
 
-function Logo({ src }: { src: string }) {
-  return <Image src={src} alt="" width={44} height={44} className="size-full object-cover" />
+// `dark` swaps in a variant in dark mode (TradingView's black tile would
+// disappear on a dark card).
+function Logo({ src, dark }: { src: string; dark?: string }) {
+  return (
+    <>
+      <Image src={src} alt="" width={44} height={44} className={cn("size-full object-cover", dark && "dark:hidden")} />
+      {dark && <Image src={dark} alt="" width={44} height={44} className="hidden size-full object-cover dark:block" />}
+    </>
+  )
 }
 
 interface PlatformDef {
@@ -52,9 +59,9 @@ interface PlatformDef {
 
 const PLATFORMS: PlatformDef[] = [
   { id: "rithmic", name: "Rithmic", description: "Futures prop firms — Apex, Bulenox, Tradeify & more.", badge: "live", icon: <Logo src="/brokers/sm/rithmic.png" />, live: true },
-  { id: "mt5", name: "MetaTrader 5", description: "Forex & CFD brokers, read-only investor password.", badge: "live", icon: <TintIcon><CandlestickChart className="size-5" /></TintIcon>, live: true },
-  { id: "tradingview", name: "TradingView", description: "Paper trading via the TradeLoop extension.", badge: "paper", icon: <TintIcon><LineChart className="size-5" /></TintIcon>, live: true },
-  { id: "mt4", name: "MetaTrader 4", description: "Accounts queue until MT4 sync goes live.", badge: "setup", icon: <TintIcon><span className="text-[11px] font-bold">MT4</span></TintIcon>, live: true },
+  { id: "mt5", name: "MetaTrader 5", description: "Forex & CFD brokers, read-only investor password.", badge: "live", icon: <Logo src="/brokers/sm/metatrader.png" />, live: true },
+  { id: "tradingview", name: "TradingView", description: "Paper trading via the TradeLoop extension.", badge: "paper", icon: <Logo src="/brokers/sm/tradingview.png" dark="/brokers/sm/tradingview-dark.png" />, live: true },
+  { id: "mt4", name: "MetaTrader 4", description: "Accounts queue until MT4 sync goes live.", badge: "setup", icon: <Logo src="/brokers/sm/metatrader.png" />, live: true },
   { id: "file", name: "File import", description: "Tradovate, NinjaTrader, TradingView & MT reports.", badge: "file", icon: <TintIcon><FileUp className="size-5" /></TintIcon>, live: false },
   { id: "topstep", name: "Topstep", description: "Direct Topstep sync is on the way.", badge: "soon", icon: <Logo src="/brokers/sm/topstep.png" />, live: true, disabled: true },
 ]

@@ -3,7 +3,7 @@
 import Image from "next/image"
 import Link from "next/link"
 import { AlertTriangle, Archive, ArchiveRestore, Clock, KeyRound, LayoutDashboard, Loader2, MoreHorizontal, PenLine, Pencil, RefreshCw, SlidersHorizontal, Trash2, Unplug, XCircle } from "lucide-react"
-import { brokerLogo } from "@/lib/broker-logos"
+import { brokerLogo, brokerLogoDark } from "@/lib/broker-logos"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -35,9 +35,17 @@ export function HealthPill({ health }: { health: ConnectionHealth | "manual" | "
 
 export function AccountAvatar({ name, logoName, className }: { name: string; logoName: string | null; className?: string }) {
   const logo = brokerLogo(logoName ?? name)
+  const dark = brokerLogoDark(logoName ?? name)
   return (
     <span className={cn("flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-primary/10 text-sm font-semibold text-primary", className)}>
-      {logo ? <Image src={logo} alt="" width={40} height={40} className="size-full object-cover" /> : (name.trim().charAt(0) || "?").toUpperCase()}
+      {logo ? (
+        <>
+          <Image src={logo} alt="" width={40} height={40} className={cn("size-full object-cover", dark && "dark:hidden")} />
+          {dark && <Image src={dark} alt="" width={40} height={40} className="hidden size-full object-cover dark:block" />}
+        </>
+      ) : (
+        (name.trim().charAt(0) || "?").toUpperCase()
+      )}
     </span>
   )
 }
