@@ -6,28 +6,27 @@
 // the VPS relay (RITHMIC_RELAY), so Rithmic still sees one static IP. The VPS
 // never overlaps two calls (it waits for this response before the next tick),
 // and Vercel runs with RITHMIC_AUTOSYNC=off so there's exactly one sync loop.
-import { timingSafeEqual } from "node:crypto"
+import { cronAuthorized } from "@/lib/cron-auth"
 import { runAllConnections } from "@/lib/rithmic-auto-sync"
+import { normalizeDueConnections } from "@/lib/metatrader-sync"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 // One trigger syncs every due connection, one Rithmic session at a time.
 export const maxDuration = 300
 
-function authorized(req: Request): boolean {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return false
-  const got = Buffer.from(req.headers.get("authorization") ?? "")
-  const want = Buffer.from(`Bearer ${secret}`)
-  return got.length === want.length && timingSafeEqual(got, want)
-}
-
 export async function POST(req: Request) {
-  if (!authorized(req)) return new Response("unauthorized", { status: 401 })
+  if (!cronAuthorized(req)) return new Response("unauthorized", { status: 401 })
   const startedAt = Date.now()
   try {
     const summary = await runAllConnections()
-    return Response.json({ ok: true, ms: Date.now() - startedAt, at: new Date().toISOString(), ...summary })
+    // Fallback for MT5: the worker triggers /api/cron/metatrader-sync itself
+    // when deals land, but if that call was lost this minute's tick catches it.
+    const mt5 = await normalizeDueConnections().catch((err) => {
+      console.error("[cron/rithmic-sync] MT5 normalize fallback failed:", err)
+      return null
+    })
+    return Response.json({ ok: true, ms: Date.now() - startedAt, at: new Date().toISOString(), ...summary, mt5 })
   } catch (err) {
     console.error("[cron/rithmic-sync] run failed:", err)
     return Response.json({ ok: false, ms: Date.now() - startedAt, error: err instanceof Error ? err.message : "run failed" }, { status: 500 })

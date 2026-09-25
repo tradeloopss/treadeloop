@@ -2,16 +2,17 @@
 
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { metatraderConnections, tradingAccounts, trades } from "@/lib/db/schema"
-import { and, eq, inArray, isNotNull } from "drizzle-orm"
+import { metatraderConnections, metatraderDeals } from "@/lib/db/schema"
+import { and, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
-import { encrypt, decrypt } from "@/lib/crypto"
-import { provisionAccount, fetchAccountSnapshot, searchServers, type MtPlatform, type BrokerServer } from "@/lib/metaapi-client"
-import { computePnl } from "@/lib/calc"
-import { regenerateJournalForDay } from "@/app/actions/trades"
-import { requirePro } from "@/lib/subscription"
-import { recordSyncRun } from "@/lib/sync-runs"
+import { encrypt } from "@/lib/crypto"
+import { isPro } from "@/lib/subscription"
+
+// MetaTrader accounts are synced by our own MT5 terminals on the sync VPS
+// (worker/mt5): these actions only record what the user asked for — the
+// worker picks a "pending" row up within seconds, logs in with the investor
+// password, and reports back on the same row, which the UI polls.
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -19,223 +20,133 @@ async function getUserId() {
   return session.user.id
 }
 
-export async function searchMetaTraderServers(query: string, platform: MtPlatform): Promise<BrokerServer[]> {
-  await getUserId()
-  const trimmed = query.trim()
-  if (trimmed.length < 2) return []
-
-  const token = process.env.METAAPI_TOKEN
-  if (!token) throw new Error("MetaTrader connections aren't configured on this server yet (missing METAAPI_TOKEN)")
-
-  return searchServers(token, trimmed, platform)
+export type MetaTraderConnectionView = {
+  id: number
+  login: string
+  server: string
+  platform: string
+  status: string // pending | connected | error
+  statusMessage: string | null
+  brokerName: string | null
+  currency: string | null
+  balance: number | null
+  equity: number | null
+  openPositions: number | null
+  accountId: number | null
+  lastSyncedAt: Date | null
+  lastSyncStatus: string | null
+  lastSyncError: string | null
+  lastSyncCount: number | null
 }
 
-// A user can connect multiple MetaTrader accounts (e.g. a live and a demo,
-// or several prop-firm accounts) — every lookup here is scoped by the
-// connection's own id, not just userId, so one connect/sync/disconnect never
-// clobbers another.
-export async function getMetaTraderConnections() {
+function view(row: typeof metatraderConnections.$inferSelect): MetaTraderConnectionView {
+  return {
+    id: row.id,
+    login: row.login,
+    server: row.server,
+    platform: row.platform,
+    status: row.status,
+    statusMessage: row.statusMessage,
+    brokerName: row.brokerName,
+    currency: row.currency,
+    balance: row.balance == null ? null : Number(row.balance),
+    equity: row.equity == null ? null : Number(row.equity),
+    openPositions: row.openPositions,
+    accountId: row.accountId,
+    lastSyncedAt: row.lastSyncedAt,
+    lastSyncStatus: row.lastSyncStatus,
+    lastSyncError: row.lastSyncError,
+    lastSyncCount: row.lastSyncCount,
+  }
+}
+
+// A user can connect several MetaTrader accounts; every lookup is scoped by
+// the connection's id and the user, so one never touches another.
+export async function getMetaTraderConnections(): Promise<MetaTraderConnectionView[]> {
   const userId = await getUserId()
   const rows = await db
     .select()
     .from(metatraderConnections)
     .where(eq(metatraderConnections.userId, userId))
     .orderBy(metatraderConnections.createdAt)
-  return rows.map((row) => ({
-    id: row.id,
-    login: row.login,
-    server: row.server,
-    platform: row.platform,
-    tokenExpiresAt: row.tokenExpiresAt,
-    lastSyncedAt: row.lastSyncedAt,
-    lastSyncStatus: row.lastSyncStatus,
-    lastSyncError: row.lastSyncError,
-    lastSyncCount: row.lastSyncCount,
-  }))
+  return rows.map(view)
 }
 
-export async function connectMetaTrader(formData: FormData) {
+export async function getMetaTraderConnection(connectionId: number): Promise<MetaTraderConnectionView | null> {
   const userId = await getUserId()
-  await requirePro(userId, "Live broker & prop firm sync")
-  const login = String(formData.get("login") ?? "").trim()
-  const investorPassword = String(formData.get("investorPassword") ?? "").trim()
-  const server = String(formData.get("server") ?? "").trim()
-  const platform = (String(formData.get("platform") ?? "mt5") === "mt4" ? "mt4" : "mt5") as MtPlatform
-
-  if (!login || !investorPassword || !server) {
-    throw new Error("All fields are required")
-  }
-
-  // The MetaApi admin token lives server-side only — never asked for in the UI.
-  const token = process.env.METAAPI_TOKEN
-  if (!token) {
-    throw new Error("MetaTrader connections aren't configured on this server yet (missing METAAPI_TOKEN)")
-  }
-
-  const accountName = `MetaTrader ${login}`
-  // The token passed in only needs to be capable of creating the account;
-  // provisionAccount immediately narrows it to a read-only token scoped to
-  // just this account and hands that back — that's the only thing stored below.
-  const { accountId: metaApiAccountId, readOnlyToken, tokenValidityHours } = await provisionAccount(token, {
-    name: accountName,
-    login,
-    investorPassword,
-    server,
-    platform,
-  })
-
-  // Mirror as a trading_accounts row so trades link to something in this app.
-  const existingAccount = await db
-    .select()
-    .from(tradingAccounts)
-    .where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.name, accountName)))
-  const accountId = existingAccount.length
-    ? existingAccount[0].id
-    : (
-        await db
-          .insert(tradingAccounts)
-          .values({ userId, name: accountName, broker: platform === "mt4" ? "MetaTrader 4" : "MetaTrader 5" })
-          .returning({ id: tradingAccounts.id })
-      )[0].id
-
-  const tokenEnc = encrypt(readOnlyToken)
-  const tokenExpiresAt = new Date(Date.now() + tokenValidityHours * 60 * 60 * 1000)
-
-  // Reconnecting the same login+server refreshes that connection instead of
-  // creating a duplicate; a different login/server always adds a new one.
-  const existingConnection = await db
+  const [row] = await db
     .select()
     .from(metatraderConnections)
-    .where(
-      and(
-        eq(metatraderConnections.userId, userId),
-        eq(metatraderConnections.login, login),
-        eq(metatraderConnections.server, server)
-      )
-    )
-
-  let connectionId: number
-  if (existingConnection.length) {
-    connectionId = existingConnection[0].id
-    await db
-      .update(metatraderConnections)
-      .set({ accountId, metaApiAccountId, tokenEnc, tokenExpiresAt, platform, lastSyncStatus: null, lastSyncError: null })
-      .where(eq(metatraderConnections.id, connectionId))
-  } else {
-    const [inserted] = await db
-      .insert(metatraderConnections)
-      .values({ userId, accountId, metaApiAccountId, tokenEnc, tokenExpiresAt, login, server, platform })
-      .returning({ id: metatraderConnections.id })
-    connectionId = inserted.id
-  }
-
-  // Pull the account's current balance and trade history right away, rather
-  // than leaving the account at its default $0 balance until a manual sync.
-  await syncMetaTrader(connectionId, "connect").catch(() => {})
-
-  revalidatePath("/settings")
+    .where(and(eq(metatraderConnections.id, connectionId), eq(metatraderConnections.userId, userId)))
+  return row ? view(row) : null
 }
 
-export async function disconnectMetaTrader(connectionId: number) {
+const HISTORY_DAYS: Record<string, number | null> = { "30d": 30, "90d": 90, "1y": 365, all: null }
+
+export async function connectMetaTrader(formData: FormData): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+  const userId = await getUserId()
+  if (!(await isPro(userId))) {
+    return { ok: false, error: "Live broker & prop firm sync is a Pro feature — upgrade at /pricing to unlock it." }
+  }
+  const login = String(formData.get("login") ?? "").trim()
+  const investorPassword = String(formData.get("investorPassword") ?? "")
+  const server = String(formData.get("server") ?? "").trim()
+  const platform = String(formData.get("platform") ?? "mt5") === "mt4" ? "mt4" : "mt5"
+  const range = String(formData.get("history") ?? "all")
+
+  if (platform === "mt4") return { ok: false, error: "MT4 auto-sync is coming soon — connect an MT5 account, or upload your MT4 statement for now." }
+  if (!/^\d{3,15}$/.test(login)) return { ok: false, error: "Enter your MT5 account number (digits only)." }
+  if (!investorPassword) return { ok: false, error: "Enter your investor (read-only) password." }
+  if (!server) return { ok: false, error: "Enter your broker's server name, exactly as it appears in MT5." }
+
+  const days = range in HISTORY_DAYS ? HISTORY_DAYS[range] : null
+  const historyFrom = days == null ? null : new Date(Date.now() - days * 86_400_000)
+  const passwordEnc = encrypt(investorPassword)
+  const now = new Date()
+
+  // Reconnecting the same login+server (a changed investor password, say)
+  // updates that connection instead of adding a second one.
+  const [existing] = await db
+    .select({ id: metatraderConnections.id })
+    .from(metatraderConnections)
+    .where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.login, login), eq(metatraderConnections.server, server)))
+
+  let id: number
+  const request = { passwordEnc, status: "pending", statusMessage: null, errorCount: 0, nextSyncAt: now, leaseUntil: null }
+  if (existing) {
+    id = existing.id
+    await db.update(metatraderConnections).set(request).where(eq(metatraderConnections.id, id))
+  } else {
+    ;[{ id }] = await db
+      .insert(metatraderConnections)
+      .values({ ...request, userId, login, server, platform, historyFrom })
+      .returning({ id: metatraderConnections.id })
+  }
+  revalidatePath("/add-trade")
+  return { ok: true, id }
+}
+
+// "Sync now": makes the account due immediately; the worker picks it up
+// within a couple of seconds and the card's polling shows the result.
+export async function syncMetaTraderNow(connectionId: number): Promise<{ ok: boolean }> {
   const userId = await getUserId()
   await db
-    .delete(metatraderConnections)
-    .where(and(eq(metatraderConnections.id, connectionId), eq(metatraderConnections.userId, userId)))
-  revalidatePath("/settings")
+    .update(metatraderConnections)
+    .set({ nextSyncAt: new Date() })
+    .where(and(eq(metatraderConnections.id, connectionId), eq(metatraderConnections.userId, userId), eq(metatraderConnections.status, "connected")))
+  return { ok: true }
 }
 
-export async function syncMetaTrader(connectionId: number, trigger: "manual" | "connect" = "manual") {
+// Stops syncing and forgets the password and raw deals. The trading account
+// and its trades stay, like every other broker disconnect.
+export async function disconnectMetaTrader(connectionId: number): Promise<{ ok: boolean }> {
   const userId = await getUserId()
-  const [connection] = await db
-    .select()
-    .from(metatraderConnections)
+  const [row] = await db
+    .delete(metatraderConnections)
     .where(and(eq(metatraderConnections.id, connectionId), eq(metatraderConnections.userId, userId)))
-  if (!connection) throw new Error("Connection not found")
-  if (connection.tokenExpiresAt && connection.tokenExpiresAt.getTime() < Date.now()) {
-    throw new Error("Your MetaTrader connection has expired — reconnect to keep syncing")
-  }
-
-  const startedAt = Date.now()
-  try {
-    const token = decrypt(connection.tokenEnc)
-    const from = connection.lastSyncFrom ?? new Date(0)
-    const to = new Date()
-
-    const snapshot = await fetchAccountSnapshot(token, connection.metaApiAccountId, connection.login, from, to)
-    const imported = snapshot.trades
-
-    if (connection.accountId) {
-      await db
-        .update(tradingAccounts)
-        .set({ currentBalance: String(snapshot.balance), currency: snapshot.currency })
-        .where(eq(tradingAccounts.id, connection.accountId))
-    }
-
-    const existingIds = imported.length
-      ? await db
-          .select({ externalId: trades.externalId })
-          .from(trades)
-          .where(
-            and(
-              eq(trades.userId, userId),
-              isNotNull(trades.externalId),
-              inArray(
-                trades.externalId,
-                imported.map((t) => t.externalId)
-              )
-            )
-          )
-      : []
-    const seen = new Set(existingIds.map((r) => r.externalId))
-    const toImport = imported.filter((t) => !seen.has(t.externalId))
-
-    const affectedDays = new Set<string>()
-    for (const t of toImport) {
-      const pnl = t.pnl ?? computePnl({ side: t.side, quantity: t.quantity, entryPrice: t.entryPrice, exitPrice: t.exitPrice, fees: t.fees, contractMultiplier: 1 })
-      await db.insert(trades).values({
-        userId,
-        accountId: connection.accountId,
-        symbol: t.symbol,
-        market: "forex",
-        side: t.side,
-        status: "closed",
-        quantity: String(t.quantity),
-        entryPrice: String(t.entryPrice),
-        exitPrice: String(t.exitPrice),
-        fees: String(t.fees),
-        pnl: String(pnl),
-        contractMultiplier: "1",
-        entryTime: new Date(t.entryTime),
-        exitTime: new Date(t.exitTime),
-        externalId: t.externalId,
-      })
-      affectedDays.add(t.exitTime.slice(0, 10))
-    }
-
-    for (const day of affectedDays) {
-      await regenerateJournalForDay(userId, day)
-    }
-
-    await db
-      .update(metatraderConnections)
-      .set({ lastSyncFrom: to, lastSyncedAt: to, lastSyncStatus: "ok", lastSyncError: null, lastSyncCount: toImport.length })
-      .where(eq(metatraderConnections.id, connectionId))
-
-    revalidatePath("/dashboard")
-    revalidatePath("/trades")
-    revalidatePath("/journal")
-    revalidatePath("/calendar")
-    revalidatePath("/reports")
-    revalidatePath("/settings")
-
-    await recordSyncRun({ broker: "metatrader", connectionId, userId, trigger, startedAt, imported: toImport.length })
-    return { imported: toImport.length }
-  } catch (err) {
-    await recordSyncRun({ broker: "metatrader", connectionId, userId, trigger, startedAt, error: err })
-    await db
-      .update(metatraderConnections)
-      .set({ lastSyncStatus: "error", lastSyncError: err instanceof Error ? err.message : "Sync failed" })
-      .where(eq(metatraderConnections.id, connectionId))
-    throw err
-  }
+    .returning({ id: metatraderConnections.id })
+  if (row) await db.delete(metatraderDeals).where(eq(metatraderDeals.connectionId, row.id))
+  revalidatePath("/add-trade")
+  revalidatePath("/settings")
+  return { ok: true }
 }

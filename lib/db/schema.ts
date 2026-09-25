@@ -238,23 +238,89 @@ export const propFirmTransactions = pgTable("prop_firm_transactions", {
 // scoped to this one account is stored (encrypted) — the admin token used to
 // create the account, and the investor password, are both used once at
 // connect time and never persisted. See lib/metaapi-client.ts#provisionAccount.
+// A MetaTrader account synced by our own MT5 terminals on the sync VPS
+// (worker/mt5). The app only writes the request — status "pending" plus the
+// encrypted investor password; the VPS worker logs in, fills in the broker's
+// details, and keeps raw deals flowing into metatrader_deals every minute,
+// which lib/metatrader-sync.ts turns into trades.
 export const metatraderConnections = pgTable("metatrader_connections", {
   id: serial("id").primaryKey(),
   userId: text("userId").notNull(),
   accountId: integer("accountId"), // links to trading_accounts
-  metaApiAccountId: text("metaApiAccountId").notNull(),
-  tokenEnc: text("tokenEnc").notNull(),
-  tokenExpiresAt: timestamp("tokenExpiresAt"),
+  // The investor (read-only) password, AES-GCM encrypted (lib/crypto).
+  passwordEnc: text("passwordEnc").notNull(),
   login: text("login").notNull(),
   server: text("server").notNull(),
   platform: text("platform").notNull(), // mt4 | mt5
-  lastSyncFrom: timestamp("lastSyncFrom"), // deals are fetched from here forward on each sync
+  // pending (waiting for the worker's first login) → connected, or error
+  // (login rejected / broker not supported — needs reconnecting; not retried).
+  status: text("status").notNull().default("pending"),
+  statusMessage: text("statusMessage"),
+  // Start of the history to import on first connect; null = all of it.
+  historyFrom: timestamp("historyFrom"),
+  // What the broker reports for the account, refreshed every sync.
+  brokerName: text("brokerName"),
+  holderName: text("holderName"),
+  currency: text("currency"),
+  balance: numeric("balance", { precision: 18, scale: 2 }),
+  equity: numeric("equity", { precision: 18, scale: 2 }),
+  openPositions: integer("openPositions"),
+  // How deal times (broker server time) map to UTC: "ny+7" (the common
+  // New York close = midnight convention, UTC+2/+3 following US DST) or
+  // "fixed:<seconds>". Measured by the worker from the broker's live clock.
+  serverTimeZone: text("serverTimeZone"),
+  // Worker scheduling: when this account is next due, and who holds it.
+  nextSyncAt: timestamp("nextSyncAt"),
+  leaseUntil: timestamp("leaseUntil"),
+  errorCount: integer("errorCount").notNull().default(0),
+  // Newest deal time on file (raw server time) — the next sync reads from a
+  // little before it.
+  lastDealTime: timestamp("lastDealTime"),
+  // New raw deals landed at dealsChangedAt; the app turned them into trades
+  // up to normalizedAt. Normalization runs while dealsChangedAt > normalizedAt.
+  dealsChangedAt: timestamp("dealsChangedAt"),
+  normalizedAt: timestamp("normalizedAt"),
   lastSyncedAt: timestamp("lastSyncedAt"),
   lastSyncStatus: text("lastSyncStatus"), // ok | error
   lastSyncError: text("lastSyncError"),
   lastSyncCount: integer("lastSyncCount"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
+
+// Every MT5 deal exactly as the terminal reported it (`raw`), plus the fields
+// normalization reads, pulled out. Kept so a normalization fix can be re-run
+// over history without asking the broker again. `time` is broker server time,
+// stored as-is — lib/metatrader-sync.ts converts it with serverTimeZone.
+export const metatraderDeals = pgTable(
+  "metatrader_deals",
+  {
+    id: serial("id").primaryKey(),
+    connectionId: integer("connectionId").notNull(),
+    ticket: text("ticket").notNull(),
+    orderTicket: text("orderTicket"),
+    positionId: text("positionId"),
+    time: timestamp("time", { precision: 3 }).notNull(),
+    type: integer("type").notNull(), // DEAL_TYPE_*: 0 buy, 1 sell, 2 balance, …
+    entry: integer("entry").notNull(), // DEAL_ENTRY_*: 0 in, 1 out, 2 in/out, 3 out by
+    symbol: text("symbol"),
+    volume: numeric("volume", { precision: 18, scale: 4 }).notNull().default("0"),
+    price: numeric("price", { precision: 18, scale: 6 }).notNull().default("0"),
+    profit: numeric("profit", { precision: 18, scale: 2 }).notNull().default("0"),
+    commission: numeric("commission", { precision: 18, scale: 2 }).notNull().default("0"),
+    swap: numeric("swap", { precision: 18, scale: 2 }).notNull().default("0"),
+    fee: numeric("fee", { precision: 18, scale: 2 }).notNull().default("0"),
+    // Stop loss / take profit of the order that opened it, when known — for R.
+    stopLoss: numeric("stopLoss", { precision: 18, scale: 6 }),
+    takeProfit: numeric("takeProfit", { precision: 18, scale: 6 }),
+    raw: jsonb("raw").notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("metatrader_deals_connection_ticket").on(t.connectionId, t.ticket),
+    index("metatrader_deals_connection_position").on(t.connectionId, t.positionId),
+    index("metatrader_deals_connection_created").on(t.connectionId, t.createdAt),
+  ],
+)
 
 // Live Rithmic sync — a direct R|Protocol (WebSocket + Protobuf) connection,
 // no third-party token broker involved, so the encrypted password is the
