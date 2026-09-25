@@ -78,8 +78,9 @@ interface Cycle {
 // IN/OUT deal, which closes the open volume and opens the rest the other way.
 // Scale-ins and partial closes blend into the cycle's average prices. A cycle
 // still open is left for a later sync, as is one whose entry fell outside the
-// imported history window.
-export function buildPositionTrades(login: string, positionId: string, deals: DealRow[], zone: string | null): BuiltTrade[] {
+// imported history window. `key` ("mt5:<login>" / "mt4:<login>") prefixes each
+// trade's externalId.
+export function buildPositionTrades(key: string, positionId: string, deals: DealRow[], zone: string | null): BuiltTrade[] {
   const fills = deals
     .filter((d) => d.type === DEAL_BUY || d.type === DEAL_SELL)
     .sort((a, b) => a.time.getTime() - b.time.getTime() || a.ticket.localeCompare(b.ticket, undefined, { numeric: true }))
@@ -88,7 +89,7 @@ export function buildPositionTrades(login: string, positionId: string, deals: De
 
   const emit = (c: Cycle) => {
     out.push({
-      externalId: `mt5:${login}:${positionId}${out.length > 0 ? `:${out.length}` : ""}`,
+      externalId: `${key}:${positionId}${out.length > 0 ? `:${out.length}` : ""}`,
       symbol: c.symbol,
       side: c.side,
       quantity: Number(c.entryQty.toFixed(4)),

@@ -46,7 +46,7 @@ const WORKER_ID = `${os.hostname()}:${process.pid}`
 interface Broker {
   slug: string
   name: string
-  prefixes: string[] // server-name prefixes, e.g. "Exness-"
+  prefixes: string[] // server-name prefixes, compared letters/digits only: "Exness-" ~ "exness"
 }
 
 let brokers: Broker[] = []
@@ -64,9 +64,36 @@ function loadBrokers(): Broker[] {
   return brokers
 }
 
+const letters = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+// The MT5 pack whose prefix matches the most of the server name, so
+// "ICMarketsSC-MT5" picks icmarketssc over icmarkets.
 function brokerFor(server: string): Broker | null {
-  const s = server.toLowerCase()
-  return loadBrokers().find((b) => b.prefixes.some((p) => s.startsWith(p.toLowerCase()))) ?? null
+  const s = letters(server)
+  let best: { broker: Broker; length: number } | null = null
+  for (const broker of loadBrokers()) {
+    for (const prefix of broker.prefixes) {
+      const p = letters(prefix)
+      if (p && s.startsWith(p) && (!best || p.length > best.length)) best = { broker, length: p.length }
+    }
+  }
+  return best?.broker ?? null
+}
+
+// MT4 terminals know every server we have a .srv file for (one terminal
+// serves all MT4 brokers), listed in mt4-servers.json by the pack installer.
+let mt4Servers = new Set<string>()
+let mt4ServersReadAt = 0
+function mt4ServerKnown(server: string): boolean {
+  if (Date.now() - mt4ServersReadAt > 60_000) {
+    try {
+      mt4Servers = new Set((JSON.parse(readFileSync(`${BROKERS_DIR}/mt4-servers.json`, "utf8")) as string[]).map((n) => n.toLowerCase()))
+    } catch {
+      mt4Servers = new Set()
+    }
+    mt4ServersReadAt = Date.now()
+  }
+  return mt4Servers.has(server.trim().toLowerCase())
 }
 
 // The pack as the terminal (under Wine) sees it: / is Z:.
@@ -75,7 +102,10 @@ const wineServersDat = (slug: string) => `Z:${`${BROKERS_DIR}/${slug}/servers.da
 // ---------------------------------------------------------------------------
 // Bridges
 
+type Platform = "mt5" | "mt4"
+
 interface Bridge {
+  platform: Platform
   slot: string
   port: number
   busy: boolean
@@ -83,14 +113,24 @@ interface Bridge {
   login: string | null // account last logged in
   failures: number
   lastError: string | null
+  alive: boolean // answered /health recently; a down bridge gets no work
 }
 
-const bridges: Bridge[] = env("MT5_BRIDGES", "t1:9101,t2:9102")
-  .split(",")
-  .map((entry) => {
-    const [slot, port] = entry.trim().split(":")
-    return { slot, port: Number(port), busy: false, broker: null, login: null, failures: 0, lastError: null }
-  })
+function parseBridges(platform: Platform, spec: string): Bridge[] {
+  return spec
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [slot, port] = entry.split(":")
+      return { platform, slot, port: Number(port), busy: false, broker: null, login: null, failures: 0, lastError: null, alive: false }
+    })
+}
+
+const bridges: Bridge[] = [
+  ...parseBridges("mt5", env("MT5_BRIDGES", "t1:9101,t2:9102")),
+  ...parseBridges("mt4", process.env.MT4_BRIDGES ?? ""),
+]
 
 class BridgeError extends Error {
   constructor(
@@ -134,15 +174,16 @@ async function callBridge<T>(bridge: Bridge, path: string, body?: unknown, timeo
 
 type Connection = typeof metatraderConnections.$inferSelect
 
-// Atomically leases up to `limit` due accounts: new ones first, then the most
-// overdue. SKIP LOCKED keeps a second worker (or an overlapping pass) off them.
-async function claimDue(limit: number): Promise<Connection[]> {
+// Atomically leases up to `limit` due accounts of a platform: new ones first,
+// then the most overdue. SKIP LOCKED keeps a second worker (or an overlapping
+// pass) off them.
+async function claimDue(platform: Platform, limit: number): Promise<Connection[]> {
   const claimed = await db.execute<{ id: number }>(sql`
     update metatrader_connections
        set "leaseUntil" = now() + make_interval(mins => ${LEASE_MINUTES})
      where id in (
        select id from metatrader_connections
-        where platform = 'mt5'
+        where platform = ${platform}
           and status in ('pending', 'connected')
           and "nextSyncAt" <= now()
           and ("leaseUntil" is null or "leaseUntil" < now())
@@ -157,6 +198,7 @@ async function claimDue(limit: number): Promise<Connection[]> {
 
 // Same account's terminal first, then one already holding the broker's pack.
 function pickBridge(free: Bridge[], connection: Connection, broker: Broker | null): Bridge {
+  if (free.length === 0) throw new Error("no free bridge")
   return (
     free.find((b) => b.login === connection.login) ??
     (broker ? free.find((b) => b.broker === broker.slug) : undefined) ??
@@ -181,15 +223,16 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
   const startedAt = Date.now()
   const firstSync = connection.lastDealTime == null && connection.status === "pending"
   try {
-    const broker = brokerFor(connection.server)
-    if (!broker) {
-      console.warn(`[mt5] no broker pack for server "${connection.server}" (connection ${connection.id})`)
+    const broker = bridge.platform === "mt5" ? brokerFor(connection.server) : null
+    const known = bridge.platform === "mt5" ? broker != null : mt4ServerKnown(connection.server)
+    if (!known) {
+      console.warn(`[mt5] no ${bridge.platform} pack for server "${connection.server}" (connection ${connection.id})`)
       throw new BridgeError(
         "unsupported",
-        `We don't have "${connection.server}" set up yet. Double-check the server name in MT5 (File → Login to Trade Account); if it's right, we've been notified and will add your broker.`,
+        `We don't have "${connection.server}" set up yet. Double-check the server name in MetaTrader (File → Login to Trade Account); if it's right, we've been notified and will add your broker.`,
       )
     }
-    if (bridge.broker !== broker.slug) {
+    if (broker && bridge.broker !== broker.slug) {
       await callBridge(bridge, "/reset", { serversDat: wineServersDat(broker.slug) }, 60_000)
       bridge.broker = broker.slug
       bridge.login = null
@@ -390,7 +433,7 @@ function writeStatus(extra: Record<string, unknown> = {}) {
       JSON.stringify({
         worker: WORKER_ID,
         at: new Date().toISOString(),
-        bridges: bridges.map((b) => ({ slot: b.slot, busy: b.busy, broker: b.broker, failures: b.failures, lastError: b.lastError })),
+        bridges: bridges.map((b) => ({ platform: b.platform, slot: b.slot, alive: b.alive, busy: b.busy, broker: b.broker, failures: b.failures, lastError: b.lastError })),
         brokers: loadBrokers().map((b) => b.slug),
         ...extra,
       }),
@@ -398,6 +441,23 @@ function writeStatus(extra: Record<string, unknown> = {}) {
   } catch {
     // status is best-effort
   }
+}
+
+// Idle bridges are pinged so accounts only go to ones that are up (an MT4
+// slot, say, before its terminal has been installed).
+async function checkBridges() {
+  await Promise.all(
+    bridges
+      .filter((b) => !b.busy)
+      .map(async (b) => {
+        const wasAlive = b.alive
+        b.alive = await callBridge(b, "/health", undefined, 5_000).then(
+          () => true,
+          () => false,
+        )
+        if (b.alive !== wasAlive) console.log(`[mt5] bridge ${b.platform}/${b.slot} is ${b.alive ? "up" : "down"}`)
+      }),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -409,13 +469,15 @@ let ticks = 0
 async function tick() {
   ticks++
   if (ticks % 5 === 0) closeStrayWindows()
-  const free = bridges.filter((b) => !b.busy)
-  if (free.length > 0) {
-    const due = await claimDue(free.length)
+  if (ticks % 8 === 1) await checkBridges()
+  for (const platform of ["mt5", "mt4"] as const) {
+    const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)
+    if (free.length === 0) continue
+    const due = await claimDue(platform, free.length)
     for (const connection of due) {
-      const broker = brokerFor(connection.server)
+      const broker = platform === "mt5" ? brokerFor(connection.server) : null
       const bridge = pickBridge(
-        bridges.filter((b) => !b.busy),
+        bridges.filter((b) => b.platform === platform && b.alive && !b.busy),
         connection,
         broker,
       )
@@ -430,7 +492,7 @@ async function tick() {
 }
 
 async function main() {
-  console.log(`[mt5] worker ${WORKER_ID} starting — bridges ${bridges.map((b) => `${b.slot}:${b.port}`).join(", ")}, interval ${SYNC_INTERVAL_MS / 1000}s`)
+  console.log(`[mt5] worker ${WORKER_ID} starting — bridges ${bridges.map((b) => `${b.platform}/${b.slot}:${b.port}`).join(", ")}, interval ${SYNC_INTERVAL_MS / 1000}s`)
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
       stopping = true

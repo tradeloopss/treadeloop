@@ -14,17 +14,13 @@ parallelism. Listens on 127.0.0.1 only and requires the shared token.
 """
 
 import argparse
-import ctypes
-import ctypes.wintypes as wt
-import hmac
-import json
 import os
 import shutil
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import MetaTrader5 as mt5
+
+from bridge_common import BridgeError, kill_process, serve
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--terminal", required=True, help=r"path to terminal64.exe, e.g. C:\mt5\t1\terminal64.exe")
@@ -32,23 +28,13 @@ parser.add_argument("--port", type=int, required=True)
 parser.add_argument("--token-file", required=True)
 args = parser.parse_args()
 
-with open(args.token_file, encoding="utf-8") as fh:
-    TOKEN = fh.read().strip()
-
 TERMINAL_DIR = os.path.dirname(args.terminal)
-LOCK = threading.Lock()
 # MT5 IPC failures (send/receive/init/connect/timeout): the terminal went away
 # (crashed, or restarted itself after an update) — drop the session so the
 # next request starts it again.
 IPC_ERRORS = {-10001, -10002, -10003, -10004, -10005}
 # MT5 fields that are 64-bit ids — sent as strings so JavaScript can't round them.
 ID_FIELDS = {"ticket", "order", "position_id", "position_by_id", "identifier", "magic", "external_id"}
-
-
-class BridgeError(Exception):
-    def __init__(self, status, kind, message, code=None):
-        super().__init__(message)
-        self.status, self.kind, self.message, self.code = status, kind, message, code
 
 
 def last_error():
@@ -176,40 +162,6 @@ def sync(req):
     }
 
 
-def kill_terminal():
-    """Ends this bridge's own terminal process (matched by its full path, so
-    other bridges' terminals are left alone) and waits for it to exit."""
-    k32 = ctypes.windll.kernel32
-    k32.CreateToolhelp32Snapshot.restype = wt.HANDLE
-    k32.OpenProcess.restype = wt.HANDLE
-
-    class ProcessEntry(ctypes.Structure):
-        _fields_ = [
-            ("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("th32ProcessID", wt.DWORD),
-            ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wt.DWORD), ("cntThreads", wt.DWORD),
-            ("th32ParentProcessID", wt.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", wt.DWORD),
-            ("szExeFile", wt.WCHAR * 260),
-        ]
-
-    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
-    entry = ProcessEntry()
-    entry.dwSize = ctypes.sizeof(entry)
-    more = k32.Process32FirstW(snap, ctypes.byref(entry))
-    while more:
-        if entry.szExeFile.lower() == "terminal64.exe":
-            # PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
-            handle = k32.OpenProcess(0x0001 | 0x00100000 | 0x1000, False, entry.th32ProcessID)
-            if handle:
-                buf = ctypes.create_unicode_buffer(1024)
-                size = wt.DWORD(1024)
-                if k32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)) and os.path.normcase(buf.value) == os.path.normcase(args.terminal):
-                    k32.TerminateProcess(handle, 0)
-                    k32.WaitForSingleObject(handle, 15_000)
-                k32.CloseHandle(handle)
-        more = k32.Process32NextW(snap, ctypes.byref(entry))
-    k32.CloseHandle(snap)
-
-
 def reset(req):
     """Stops the terminal and, when given one, installs a broker's server list
     (servers.dat) before the next start. A generic MT5 only knows the servers
@@ -217,7 +169,7 @@ def reset(req):
     restart with that broker's list."""
     servers_dat = req.get("serversDat")
     mt5.shutdown()
-    kill_terminal()
+    kill_process(args.terminal)
     if servers_dat:
         shutil.copyfile(servers_dat, os.path.join(TERMINAL_DIR, "Config", "servers.dat"))
     return {"ok": True}
@@ -234,50 +186,10 @@ def health():
     }
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *a):  # quiet; the worker logs outcomes
-        pass
-
-    def reply(self, status, body):
-        data = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def authorized(self):
-        return hmac.compare_digest(self.headers.get("X-Bridge-Token", ""), TOKEN)
-
-    def handle_call(self, fn, *fn_args):
-        if not self.authorized():
-            return self.reply(401, {"ok": False, "kind": "unauthorized", "message": "bad bridge token"})
-        with LOCK:
-            try:
-                return self.reply(200, fn(*fn_args))
-            except BridgeError as err:
-                if err.code in IPC_ERRORS:
-                    mt5.shutdown()
-                return self.reply(err.status, {"ok": False, "kind": err.kind, "message": err.message, "code": err.code})
-            except Exception as err:  # never let one bad request kill the bridge
-                return self.reply(500, {"ok": False, "kind": "internal", "message": str(err)})
-
-    def do_GET(self):
-        if self.path == "/health":
-            return self.handle_call(health)
-        self.reply(404, {"ok": False, "kind": "not_found", "message": "not found"})
-
-    def do_POST(self):
-        handler = {"/sync": sync, "/reset": reset}.get(self.path)
-        if handler is None:
-            return self.reply(404, {"ok": False, "kind": "not_found", "message": "not found"})
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, json.JSONDecodeError):
-            return self.reply(400, {"ok": False, "kind": "request", "message": "invalid JSON"})
-        return self.handle_call(handler, body)
+def on_bridge_error(err):
+    if err.code in IPC_ERRORS:
+        mt5.shutdown()
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset}, on_bridge_error)

@@ -67,11 +67,12 @@ function money(n: number | null, currency: string | null, locale: string) {
 
 // Form → "logging in" → done/failed, all in the one dialog. The worker on the
 // sync server does the actual login; this just watches the connection row.
-function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: string }; onDone: () => void }) {
+function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: string; platform: string }; onDone: () => void }) {
   const t = useT()
   const router = useRouter()
   const dateLocale = useIntlLocale()
   const [pending, startTransition] = useTransition()
+  const [platform, setPlatform] = useState<"mt5" | "mt4">(initial?.platform === "mt4" ? "mt4" : "mt5")
   const [history, setHistory] = useState("all")
   const [error, setError] = useState<string | null>(null)
   const [watching, setWatching] = useState<{ id: number; startedAt: number } | null>(null)
@@ -101,7 +102,7 @@ function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: s
     e.preventDefault()
     setError(null)
     const formData = new FormData(e.currentTarget)
-    formData.set("platform", "mt5")
+    formData.set("platform", platform)
     formData.set("history", history)
     startTransition(async () => {
       const res = await connectMetaTrader(formData).catch(() => ({ ok: false as const, error: "Could not connect" }))
@@ -171,10 +172,27 @@ function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: s
 
   return (
     <form onSubmit={onSubmit} className="space-y-3">
+      <div role="radiogroup" aria-label={t("Platform")} className="grid grid-cols-2 gap-1 rounded-lg border p-1">
+        {(["mt5", "mt4"] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="radio"
+            aria-checked={platform === p}
+            onClick={() => setPlatform(p)}
+            className={cn(
+              "rounded-md py-1.5 text-sm font-semibold transition-colors",
+              platform === p ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {p === "mt5" ? "MetaTrader 5" : "MetaTrader 4"}
+          </button>
+        ))}
+      </div>
       <div className="space-y-1.5">
         <Label htmlFor="mt-server">{t("Server")}</Label>
-        <Input id="mt-server" name="server" defaultValue={initial?.server} placeholder={t("e.g. Exness-MT5Real8")} autoComplete="off" required />
-        <p className="text-xs text-muted-foreground">{t("Exactly as shown in MT5 → File → Login to Trade Account.")}</p>
+        <Input id="mt-server" name="server" defaultValue={initial?.server} placeholder={platform === "mt5" ? t("e.g. FTMO-Server3") : t("e.g. Exness-Real6")} autoComplete="off" required />
+        <p className="text-xs text-muted-foreground">{t("Exactly as shown in MetaTrader → File → Login to Trade Account.")}</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
@@ -210,7 +228,6 @@ function ConnectFlow({ initial, onDone }: { initial?: { server: string; login: s
         {pending ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
         {t("Connect")}
       </Button>
-      <p className="text-center text-xs text-muted-foreground">{t("MT4 auto-sync is coming soon.")}</p>
     </form>
   )
 }
@@ -338,7 +355,7 @@ export function MetaTraderConnect({ connections: initialConnections }: { connect
   const t = useT()
   const [connections, setConnections] = useState(initialConnections)
   const [open, setOpen] = useState(false)
-  const [reconnect, setReconnect] = useState<{ server: string; login: string } | undefined>()
+  const [reconnect, setReconnect] = useState<{ server: string; login: string; platform: string } | undefined>()
   const [flowKey, setFlowKey] = useState(0)
 
   useEffect(() => setConnections(initialConnections), [initialConnections])
@@ -364,7 +381,7 @@ export function MetaTraderConnect({ connections: initialConnections }: { connect
     }
   }, [])
 
-  function openDialog(initial?: { server: string; login: string }) {
+  function openDialog(initial?: { server: string; login: string; platform: string }) {
     setReconnect(initial)
     setFlowKey((k) => k + 1)
     setOpen(true)
@@ -374,14 +391,14 @@ export function MetaTraderConnect({ connections: initialConnections }: { connect
     <Card className="max-w-2xl space-y-4 p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="font-medium">{t("MetaTrader 5")}</h2>
+          <h2 className="font-medium">{t("MetaTrader 4 & 5")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{t("Connect with your investor (read-only) password — every trade syncs into your journal automatically.")}</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger render={<Button size="sm" onClick={() => openDialog()}><Plus className="size-4" /> {t("Add account")}</Button>} />
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{t("Connect MetaTrader 5")}</DialogTitle>
+              <DialogTitle>{t("Connect MetaTrader")}</DialogTitle>
               <DialogDescription>{t("Use the investor password from your broker or prop firm — never your trading password.")}</DialogDescription>
             </DialogHeader>
             <ConnectFlow key={flowKey} initial={reconnect} onDone={() => setOpen(false)} />
@@ -397,7 +414,7 @@ export function MetaTraderConnect({ connections: initialConnections }: { connect
       ) : (
         <div className="space-y-3">
           {connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} onReconnect={(conn) => openDialog({ server: conn.server, login: conn.login })} />
+            <ConnectionRow key={c.id} connection={c} onReconnect={(conn) => openDialog({ server: conn.server, login: conn.login, platform: conn.platform })} />
           ))}
         </div>
       )}

@@ -94,10 +94,9 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   const platform = String(formData.get("platform") ?? "mt5") === "mt4" ? "mt4" : "mt5"
   const range = String(formData.get("history") ?? "all")
 
-  if (platform === "mt4") return { ok: false, error: "MT4 auto-sync is coming soon — connect an MT5 account, or upload your MT4 statement for now." }
-  if (!/^\d{3,15}$/.test(login)) return { ok: false, error: "Enter your MT5 account number (digits only)." }
+  if (!/^\d{3,15}$/.test(login)) return { ok: false, error: "Enter your MetaTrader account number (digits only)." }
   if (!investorPassword) return { ok: false, error: "Enter your investor (read-only) password." }
-  if (!server) return { ok: false, error: "Enter your broker's server name, exactly as it appears in MT5." }
+  if (!server) return { ok: false, error: "Enter your broker's server name, exactly as it appears in MetaTrader." }
 
   const days = range in HISTORY_DAYS ? HISTORY_DAYS[range] : null
   const historyFrom = days == null ? null : new Date(Date.now() - days * 86_400_000)
@@ -109,7 +108,14 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   const [existing] = await db
     .select({ id: metatraderConnections.id })
     .from(metatraderConnections)
-    .where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.login, login), eq(metatraderConnections.server, server)))
+    .where(
+      and(
+        eq(metatraderConnections.userId, userId),
+        eq(metatraderConnections.platform, platform),
+        eq(metatraderConnections.login, login),
+        eq(metatraderConnections.server, server),
+      ),
+    )
 
   let id: number
   const request = { passwordEnc, status: "pending", statusMessage: null, errorCount: 0, nextSyncAt: now, leaseUntil: null }

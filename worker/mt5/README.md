@@ -1,6 +1,6 @@
-# MT5 sync (sync VPS)
+# MetaTrader sync (sync VPS)
 
-TradeLoop syncs MetaTrader 5 accounts with its own MT5 terminals, running
+TradeLoop syncs MetaTrader 5 and 4 accounts with its own terminals, running
 headless under Wine on the sync VPS (`sync.tradeloop.pro`). No third-party
 service is involved.
 
@@ -35,6 +35,22 @@ connect form ──► metatrader_connections (status "pending", encrypted inves
   broker's live tick clock with UTC and stores `serverTimeZone` ("ny+7" or
   "fixed:<s>"; see `lib/metatrader-time.ts`). A change re-dates all trades.
 
+## MT4
+
+MT4 has no Python API. `bridge_mt4.py` (same HTTP contract as the MT5 bridge)
+starts MT4 per sync with a one-off startup file: login, investor password,
+server, and `Script=TradeLoopExport`. The script (`mql4/TradeLoopExport.mq4`,
+compiled into each slot) waits for the login, writes the account's info,
+history and open orders to `MQL4\Files	radeloop-<login>.json`, and closes the
+terminal. The bridge deletes the startup file (it holds the password) and
+reshapes each closed MT4 order into an entry and an exit deal. From there the
+worker and the app treat it like MT5. Services: `mt4-bridge@m1`,
+`mt4-bridge@m2` (ports 9201, 9202; `MT4_BRIDGES` in the worker's env).
+
+MT4 knows a server from its `config\<server>.srv` file and reads every file in
+that folder, so one terminal serves all MT4 brokers. `mt4-servers.json` lists
+the servers we have.
+
 ## Brokers
 
 A generic MT5 only knows the servers in its `Config\servers.dat`, and the
@@ -51,17 +67,18 @@ A bridge loads a broker's pack before serving it (`POST /reset` kills its
 terminal and copies the file in; the next login starts it again). Accounts
 whose server matches no prefix fail with a "not set up yet" message.
 
-**Adding a broker:** find its MT5 installer on MetaQuotes' CDN (brokers link to
-`https://download.mql5.com/cdn/web/<company-slug>/mt5/<name>5setup.exe`), then on
-the VPS as `mt5` with `. /srv/mt5/env.sh; export DISPLAY=:99`:
+**Adding a broker** (one at a time, when users need it): find its installer
+link (`https://download.mql5.com/cdn/web/<company>/mt{5,4}/<name>{5,4}setup.exe`;
+the company part is the first three words of the broker's legal name), then:
 
 ```sh
-wget -O dl/<name>5setup.exe <url>
-wine dl/<name>5setup.exe /auto        # installs to C:\Program Files\MetaTrader 5 <BRAND>
-mkdir -p /srv/mt5/brokers/<slug>
-cp "wine/drive_c/Program Files/MetaTrader 5 <BRAND>/Config/servers.dat" /srv/mt5/brokers/<slug>/
-# add { slug, name, prefixes } to brokers.json — the worker rereads it within a minute
+sudo -u mt5 /usr/local/bin/add-broker --platform mt5 --url <url> --slug ftmo --name FTMO --prefix FTMO-
+sudo -u mt5 /usr/local/bin/add-broker --platform mt4 --url <url> --slug exness --name Exness
 ```
+
+The worker rereads the lists within a minute. **Don't script bulk downloads or
+link-guessing against download.mql5.com.** MetaQuotes' CDN blocks addresses
+that do (it blocked this VPS for hours once).
 
 ## Runtime notes
 

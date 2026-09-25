@@ -81,7 +81,7 @@ export async function normalizeConnection(connection: Connection): Promise<numbe
       list.push(d)
       byPosition.set(d.positionId!, list)
     }
-    const built = [...byPosition].flatMap(([positionId, list]) => buildPositionTrades(connection.login, positionId, list, connection.serverTimeZone))
+    const built = [...byPosition].flatMap(([positionId, list]) => buildPositionTrades(`${connection.platform}:${connection.login}`, positionId, list, connection.serverTimeZone))
     if (built.length === 0) continue
 
     const existing = await db
@@ -116,7 +116,7 @@ export async function normalizeConnection(connection: Connection): Promise<numbe
           status: "closed",
           contractMultiplier: "1",
           externalId: t.externalId,
-          source: "mt5",
+          source: connection.platform,
         })
         added++
         affectedDays.add(t.exitTime.toISOString().slice(0, 10))
