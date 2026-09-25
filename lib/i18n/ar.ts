@@ -396,8 +396,6 @@ export const ar: Messages = {
   "Clear filters": "مسح الفلاتر",
   "Calendar metric": "مقياس التقويم",
   "Session": "الجلسة",
-  "Journaled": "تم التدوين",
-  "{n}T": "{n} ص",
   "{rate} win rate": "نسبة الربح {rate}",
   "Monthly insights": "رؤى الشهر",
   "Avg trade": "متوسط الصفقة",

@@ -2,10 +2,11 @@
 
 import type React from "react"
 import { Fragment, useEffect, useMemo, useState } from "react"
-import type { TradingSession } from "@/lib/calc"
+import { formatCurrency, type TradingSession } from "@/lib/calc"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { ChevronDown, ChevronLeft, ChevronRight, NotebookPen, SlidersHorizontal } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ChevronDown, ChevronLeft, ChevronRight, Settings, Info, NotebookPen, SlidersHorizontal } from "lucide-react"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
 // One closed trade, trimmed to what the calendar aggregates and filters on.
@@ -33,12 +34,21 @@ const METRICS: { id: Metric; label: string }[] = [
   { id: "execution", label: "Execution" },
 ]
 
-// Compact signed dollars for cells and totals: "+$876", "-$1.2K", "$0".
-const usdSigned = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1, signDisplay: "exceptZero" })
-const money = (n: number) => usdSigned.format(Math.round(n))
-// Phone-width day cells have no room for the "$": "+567", "-1.2K".
-const numSigned = new Intl.NumberFormat("en-US", { notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1, signDisplay: "exceptZero" })
+// Compact dollars for the cells and the monthly stat: "$12.7K", "-$1.16K",
+// "$321". The minimum is spelled out because Node and browsers disagree on
+// the default ("$876.0" vs "$876"), which breaks hydration.
+const usdCompact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1 })
+const compact = (n: number) => usdCompact.format(Math.round(n))
 const rSigned = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, signDisplay: "exceptZero" })
+
+// The reference win-rate style: a whole number keeps one decimal ("50.0%"),
+// otherwise two ("53.85%").
+function winRateLabel(rate: number): string {
+  return `${rate.toFixed(rate % 1 === 0 ? 1 : 2)}%`
+}
+
+type CalOptions = { trades: boolean; winRate: boolean }
+const DEFAULT_OPTIONS: CalOptions = { trades: true, winRate: true }
 
 type Tone = "gain" | "loss" | "neutral"
 
@@ -86,18 +96,17 @@ const signTone = (n: number): Tone => (n > 0 ? "gain" : n < 0 ? "loss" : "neutra
 const winRate = (a: Agg) => (a.trades ? (a.wins / a.trades) * 100 : 0)
 
 // The headline figure for a span under the selected metric, and the colour it
-// earns (`short` is a narrower form for phone-width cells). Spans with no
-// trades return null and render muted.
-function metricValue(a: Agg, metric: Metric): { text: string; short?: string; tone: Tone } | null {
+// earns. Spans with no trades return null and render empty.
+function metricValue(a: Agg, metric: Metric): { text: string; tone: Tone } | null {
   if (a.trades === 0) return null
   switch (metric) {
     case "pnl":
-      return { text: money(a.pnl), short: numSigned.format(Math.round(a.pnl)), tone: signTone(a.pnl) }
+      return { text: compact(a.pnl), tone: signTone(a.pnl) }
     case "r":
       return a.rCount ? { text: `${rSigned.format(a.rSum)}R`, tone: signTone(a.rSum) } : { text: "—", tone: "neutral" }
     case "winRate": {
       const rate = winRate(a)
-      return { text: `${Math.round(rate)}%`, tone: rate > 50 ? "gain" : rate < 50 ? "loss" : "neutral" }
+      return { text: winRateLabel(rate), tone: rate > 50 ? "gain" : rate < 50 ? "loss" : "neutral" }
     }
     case "trades":
       return { text: String(a.trades), tone: signTone(a.pnl) }
@@ -107,6 +116,12 @@ function metricValue(a: Agg, metric: Metric): { text: string; short?: string; to
       return { text: `${avg.toFixed(1)}/5`, tone: avg >= 3.5 ? "gain" : avg < 2.5 ? "loss" : "neutral" }
     }
   }
+}
+
+const TONE_FILL: Record<Tone, { bg: string; border: string }> = {
+  gain: { bg: "var(--cal-gain-bg)", border: "var(--cal-gain-border)" },
+  loss: { bg: "var(--cal-loss-bg)", border: "var(--cal-loss-border)" },
+  neutral: { bg: "var(--cal-neutral-bg)", border: "var(--cal-neutral-border)" },
 }
 
 type FilterKey = "side" | "session" | "symbol" | "playbook" | "tag"
@@ -129,6 +144,23 @@ function byFrequency(values: string[]): string[] {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v)
 }
 
+// Reads a remembered per-viewer choice; storage can be missing or blocked.
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // ignore unavailable storage
+  }
+}
+
 export function PnlCalendar({
   trades,
   noteDates,
@@ -147,23 +179,32 @@ export function PnlCalendar({
     return new Date(d.getFullYear(), d.getMonth(), 1)
   })
 
-  // The selected metric is a per-viewer convenience, remembered across visits.
+  // Which figures to show in a cell, and which metric leads — per-viewer
+  // conveniences, remembered.
+  const [options, setOptions] = useState<CalOptions>(DEFAULT_OPTIONS)
   const [metric, setMetricState] = useState<Metric>("pnl")
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("tl-cal-metric")
-      if (stored && METRICS.some((m) => m.id === stored)) setMetricState(stored as Metric)
-    } catch {
-      // ignore unavailable storage
+    const storedOptions = readStored("tl-cal-options")
+    if (storedOptions) {
+      try {
+        setOptions({ ...DEFAULT_OPTIONS, ...JSON.parse(storedOptions) })
+      } catch {
+        // ignore a malformed value
+      }
     }
+    const storedMetric = readStored("tl-cal-metric")
+    if (storedMetric && METRICS.some((m) => m.id === storedMetric)) setMetricState(storedMetric as Metric)
   }, [])
+  function setOption(key: keyof CalOptions, value: boolean) {
+    setOptions((prev) => {
+      const next = { ...prev, [key]: value }
+      writeStored("tl-cal-options", JSON.stringify(next))
+      return next
+    })
+  }
   function setMetric(next: Metric) {
     setMetricState(next)
-    try {
-      localStorage.setItem("tl-cal-metric", next)
-    } catch {
-      // ignore unavailable storage
-    }
+    writeStored("tl-cal-metric", next)
   }
 
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
@@ -172,7 +213,7 @@ export function PnlCalendar({
   }
   const activeFilterCount = (Object.keys(filters) as FilterKey[]).filter((k) => filters[k].length > 0).length
 
-  const options = useMemo(() => {
+  const filterOptions = useMemo(() => {
     const usedPlaybooks = new Set(trades.map((tr) => tr.playbookId).filter((id): id is number => id != null))
     return {
       symbols: byFrequency(trades.map((tr) => tr.symbol)),
@@ -207,12 +248,13 @@ export function PnlCalendar({
   }
   while (cells.length % 7 !== 0) cells.push(null)
 
-  const weeks: { cells: typeof cells; agg: Agg }[] = []
+  // Calendar-week rows, each with its own totals for the week column.
+  const weeks: { cells: typeof cells; agg: Agg; tradingDays: number }[] = []
   for (let i = 0; i < cells.length; i += 7) {
     const row = cells.slice(i, i + 7)
     const agg = emptyAgg()
     for (const c of row) if (c) mergeAgg(agg, c.agg)
-    weeks.push({ cells: row, agg })
+    weeks.push({ cells: row, agg, tradingDays: row.filter((c) => c != null && c.agg.trades > 0).length })
   }
 
   const monthAgg = emptyAgg()
@@ -224,33 +266,34 @@ export function PnlCalendar({
   const profitFactor = monthAgg.grossLoss > 0 ? (monthAgg.grossProfit / monthAgg.grossLoss).toFixed(2) : monthAgg.grossProfit > 0 ? "∞" : "—"
 
   const now = new Date()
-  // Read after mount: the server renders in UTC and may be on a different day
-  // than the viewer.
-  const [todayKey, setTodayKey] = useState<string | null>(null)
-  useEffect(() => {
-    const d = new Date()
-    setTodayKey(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`)
-  }, [])
   const shortDate = (date: string) => new Date(date + "T00:00:00").toLocaleDateString(dateLocale, { month: "short", day: "numeric" })
-  const tradesShort = (n: number) => t("{n}T", { n })
+  const tradesLabel = (n: number) => (n === 1 ? t("1 trade") : t("{n} trades", { n }))
+  const daysLabel = (n: number) => (n === 1 ? t("1 day") : t("{n} days", { n }))
 
-  // The two small figures under a day's headline — whichever of P&L, trade
-  // count and win rate the headline isn't already showing.
-  function secondary(a: Agg): string[] {
-    const pnl = money(a.pnl)
-    const count = tradesShort(a.trades)
-    const rate = `${Math.round(winRate(a))}%`
-    if (metric === "pnl") return [count, rate]
-    if (metric === "trades") return [pnl, rate]
-    return [pnl, count]
+  const monthPill =
+    monthAgg.pnl > 0
+      ? { backgroundColor: "var(--cal-gain-bg)", color: "var(--cal-gain-line)" }
+      : monthAgg.pnl < 0
+        ? { backgroundColor: "var(--cal-loss-bg)", color: "var(--cal-loss-line)" }
+        : undefined
+
+  // The small lines under a day's headline. The display options pick trade
+  // count and win rate; whichever of those the headline already shows gives
+  // way to the day's P&L, and R/execution days lead with the P&L too.
+  function detailLines(a: Agg): string[] {
+    const out: string[] = []
+    if (metric === "r" || metric === "execution") out.push(compact(a.pnl))
+    if (options.trades) out.push(metric === "trades" ? compact(a.pnl) : tradesLabel(a.trades))
+    if (options.winRate) out.push(metric === "winRate" ? compact(a.pnl) : winRateLabel(winRate(a)))
+    return out
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-card">
-      {/* Month, navigation and the month's headline numbers. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b px-3 py-3 sm:px-5 sm:py-4">
-        <div className="flex items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-0.5 text-muted-foreground">
+    <div>
+      {/* Header: month nav on the left, monthly stats and options on the right. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b pb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 text-sm font-medium text-muted-foreground">
             <button
               type="button"
               onClick={() => setCursor(new Date(year, month - 1, 1))}
@@ -261,6 +304,13 @@ export function PnlCalendar({
             </button>
             <button
               type="button"
+              onClick={() => setCursor(new Date(now.getFullYear(), now.getMonth(), 1))}
+              className="rounded-md px-1.5 py-0.5 text-xs font-semibold tracking-wide uppercase hover:bg-accent hover:text-foreground"
+            >
+              {t("Today")}
+            </button>
+            <button
+              type="button"
               onClick={() => setCursor(new Date(year, month + 1, 1))}
               aria-label={t("Next month")}
               className="rounded-md p-1 hover:bg-accent hover:text-foreground"
@@ -268,37 +318,72 @@ export function PnlCalendar({
               <ChevronRight className="size-4" />
             </button>
           </div>
-          <h2 className="text-lg font-semibold tracking-tight sm:text-2xl">
+          <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {cursor.toLocaleDateString(dateLocale, { month: "long", year: "numeric" })}
           </h2>
-          <button
-            type="button"
-            onClick={() => setCursor(new Date(now.getFullYear(), now.getMonth(), 1))}
-            className="rounded-md border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            {t("Today")}
-          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="hidden text-sm text-muted-foreground sm:inline">{t("Monthly stats:")}</span>
           <span
-            className={cn("rounded-full px-3 py-1 font-semibold tabular-nums", monthAgg.trades === 0 && "bg-muted text-muted-foreground")}
-            style={monthAgg.trades === 0 ? undefined : toneStyle(signTone(monthAgg.pnl), "pill")}
+            className={cn("rounded-full px-2.5 py-1 text-sm font-semibold tabular-nums", !monthPill && "bg-muted text-muted-foreground")}
+            style={monthPill}
           >
-            {money(monthAgg.pnl)}
+            {compact(monthAgg.pnl)}
           </span>
-          <span className="rounded-full bg-muted px-3 py-1 text-muted-foreground tabular-nums">
-            {monthAgg.trades === 1 ? t("1 trade") : t("{n} trades", { n: monthAgg.trades })}
-          </span>
-          <span className="rounded-full bg-muted px-3 py-1 text-muted-foreground tabular-nums">
+          <span className="rounded-full bg-muted px-2.5 py-1 text-sm text-muted-foreground tabular-nums">{tradesLabel(monthAgg.trades)}</span>
+          <span className="rounded-full bg-muted px-2.5 py-1 text-sm text-muted-foreground tabular-nums">
             {t("{rate} win rate", { rate: monthAgg.trades ? `${winRate(monthAgg).toFixed(1)}%` : "—" })}
           </span>
+
+          <Popover>
+            <PopoverTrigger
+              render={
+                <button type="button" aria-label={t("Display options")} className="rounded-md p-1.5 text-primary hover:bg-accent">
+                  <Settings className="size-4" />
+                </button>
+              }
+            />
+            <PopoverContent align="end" className="w-52 p-1">
+              <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{t("Show in each day")}</p>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+                <Checkbox checked={options.trades} onCheckedChange={(v) => setOption("trades", v === true)} />
+                {t("Trade count")}
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+                <Checkbox checked={options.winRate} onCheckedChange={(v) => setOption("winRate", v === true)} />
+                {t("Win rate")}
+              </label>
+            </PopoverContent>
+          </Popover>
+
+          <Popover>
+            <PopoverTrigger
+              render={
+                <button type="button" aria-label={t("About this calendar")} className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                  <Info className="size-4" />
+                </button>
+              }
+            />
+            <PopoverContent align="end" className="w-64 space-y-2 p-3 text-sm">
+              <p className="font-medium">{t("Daily net P&L")}</p>
+              <p className="text-muted-foreground">{t("Each day shows your net profit or loss, how many trades you closed, and your win rate.")}</p>
+              <div className="space-y-1.5 pt-1">
+                <Legend swatch="var(--cal-gain-bg)" border="var(--cal-gain-border)" label={t("Profit")} />
+                <Legend swatch="var(--cal-loss-bg)" border="var(--cal-loss-border)" label={t("Loss")} />
+                <Legend swatch="var(--cal-neutral-bg)" border="var(--cal-neutral-border)" label={t("Breakeven")} />
+              </div>
+              <p className="flex items-center gap-1.5 pt-1 text-xs text-muted-foreground">
+                <NotebookPen className="size-3.5" /> {t("A note icon marks days you've journaled.")}
+              </p>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
-      {/* Which figure the days show, and the trade filters. */}
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2 sm:px-5">
-        <div role="tablist" aria-label={t("Calendar metric")} className="-mx-1 flex min-w-0 items-center gap-0.5 overflow-x-auto px-1 [scrollbar-width:none]">
+      {/* Which figure leads each day, and the trade filters. */}
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div role="tablist" aria-label={t("Calendar metric")} className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-lg border p-1 [scrollbar-width:none]">
           {METRICS.map((m) => (
             <button
               key={m.id}
@@ -307,8 +392,8 @@ export function PnlCalendar({
               aria-selected={metric === m.id}
               onClick={() => setMetric(m.id)}
               className={cn(
-                "shrink-0 rounded-md px-2 py-1.5 text-xs font-medium whitespace-nowrap transition-colors sm:px-2.5 sm:text-sm",
-                metric === m.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                "shrink-0 rounded-md px-2 py-1 text-xs font-semibold whitespace-nowrap transition-colors sm:px-2.5",
+                metric === m.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {t(m.label)}
@@ -323,8 +408,8 @@ export function PnlCalendar({
                 type="button"
                 aria-label={t("Filters")}
                 className={cn(
-                  "flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1.5 text-sm font-medium transition-colors sm:px-2.5",
-                  activeFilterCount > 0 ? "border-primary/40 bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  "flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3",
+                  activeFilterCount > 0 ? "border-primary/40 bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:text-foreground",
                 )}
               >
                 <SlidersHorizontal className="size-4 sm:hidden" />
@@ -351,27 +436,27 @@ export function PnlCalendar({
                 </FilterChip>
               ))}
             </FilterGroup>
-            {options.symbols.length > 0 && (
+            {filterOptions.symbols.length > 0 && (
               <FilterGroup label={t("Symbol")}>
-                {options.symbols.map((s) => (
+                {filterOptions.symbols.map((s) => (
                   <FilterChip key={s} active={filters.symbol.includes(s)} onClick={() => toggleFilter("symbol", s)}>
                     {s}
                   </FilterChip>
                 ))}
               </FilterGroup>
             )}
-            {options.playbooks.length > 0 && (
+            {filterOptions.playbooks.length > 0 && (
               <FilterGroup label={t("Playbook")}>
-                {options.playbooks.map((p) => (
+                {filterOptions.playbooks.map((p) => (
                   <FilterChip key={p.id} active={filters.playbook.includes(String(p.id))} onClick={() => toggleFilter("playbook", String(p.id))}>
                     {p.name}
                   </FilterChip>
                 ))}
               </FilterGroup>
             )}
-            {options.tags.length > 0 && (
+            {filterOptions.tags.length > 0 && (
               <FilterGroup label={t("Tags")}>
-                {options.tags.map((tag) => (
+                {filterOptions.tags.map((tag) => (
                   <FilterChip key={tag} active={filters.tag.includes(tag)} onClick={() => toggleFilter("tag", tag)}>
                     {tag}
                   </FilterChip>
@@ -391,136 +476,123 @@ export function PnlCalendar({
         </Popover>
       </div>
 
-      {/* Days, with each week's total in the column on the right. */}
-      <div className="p-2 sm:p-3">
-        <div className="grid grid-cols-7 gap-1 sm:grid-cols-[repeat(7,minmax(0,1fr))_minmax(0,1.15fr)] sm:gap-1.5">
-          {WEEKDAYS.map((w) => (
-            <div key={w} className="py-1.5 text-center text-xs font-semibold text-muted-foreground sm:text-sm">
-              {t(w)}
-            </div>
-          ))}
-          <div className="hidden py-1.5 text-center text-xs font-semibold text-muted-foreground sm:block sm:text-sm">{t("Week")}</div>
+      {/* Days, with each week's total beside its row on wide screens. */}
+      <div className="grid grid-cols-7 gap-1 sm:gap-2 lg:grid-cols-[repeat(7,minmax(0,1fr))_minmax(0,1.5fr)]">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="rounded-lg border py-1.5 text-center text-xs font-semibold text-muted-foreground sm:rounded-xl sm:py-2.5 sm:text-sm">
+            {t(w)}
+          </div>
+        ))}
+        <div className="hidden rounded-xl border py-2.5 text-center text-sm font-semibold text-muted-foreground lg:block">{t("Week")}</div>
 
-          {weeks.map((week, wi) => (
-            <Fragment key={wi}>
-              {week.cells.map((cell, ci) => {
-                if (!cell) return <div key={`empty-${wi}-${ci}`} className="min-h-28 rounded-lg bg-muted/30" />
-                const value = metricValue(cell.agg, metric)
-                const isToday = cell.date === todayKey
-                return (
-                  <div
-                    key={cell.date}
-                    className={cn(
-                      "flex min-h-28 min-w-0 flex-col justify-between overflow-hidden rounded-lg border p-1 sm:p-2",
-                      !value && "bg-muted/30",
-                    )}
-                    style={value ? toneStyle(value.tone, "cell") : undefined}
-                  >
-                    <div className="flex items-start justify-between gap-1">
-                      <span
-                        className={cn(
-                          "flex size-5 items-center justify-center rounded-full text-[11px] font-medium tabular-nums sm:size-6 sm:text-xs",
-                          isToday ? "bg-primary text-primary-foreground" : value ? "text-foreground/80" : "text-muted-foreground",
-                        )}
-                      >
-                        {cell.day}
-                      </span>
-                      {noted.has(cell.date) && <NotebookPen className="size-3 shrink-0 text-foreground/60 sm:size-3.5" aria-label={t("Journaled")} />}
-                    </div>
-                    {value && (
-                      <div className="min-w-0 space-y-0.5">
-                        <p className="truncate text-[11px] font-bold leading-tight tabular-nums sm:text-base lg:text-lg" style={{ color: `var(--cal-${value.tone}-text)` }}>
-                          {value.short ? (
-                            <>
-                              <span className="sm:hidden">{value.short}</span>
-                              <span className="hidden sm:inline">{value.text}</span>
-                            </>
-                          ) : (
-                            value.text
-                          )}
-                        </p>
-                        {secondary(cell.agg).map((s, i) => (
-                          <p key={i} className="truncate text-[9px] leading-tight tabular-nums sm:text-xs" style={{ color: `var(--cal-${value.tone}-sub)` }}>
-                            {s}
-                          </p>
-                        ))}
-                      </div>
-                    )}
+        {weeks.map((week, wi) => (
+          <Fragment key={wi}>
+            {week.cells.map((cell, ci) => {
+              if (!cell) return <div key={`empty-${wi}-${ci}`} className="min-h-28 rounded-lg border border-border bg-muted/30 sm:rounded-xl" />
+              const value = metricValue(cell.agg, metric)
+              const fill = value ? TONE_FILL[value.tone] : null
+              return (
+                <div
+                  key={cell.date}
+                  className={cn(
+                    "flex min-h-28 min-w-0 flex-col justify-between overflow-hidden rounded-lg border p-1 transition-colors sm:rounded-xl sm:p-2.5",
+                    !value && "border-border bg-muted/30",
+                  )}
+                  style={fill ? { backgroundColor: fill.bg, borderColor: fill.border } : undefined}
+                >
+                  <div className="flex items-start justify-between">
+                    {noted.has(cell.date) ? <NotebookPen className="size-3 text-foreground/70 sm:size-3.5" /> : <span />}
+                    <span className={cn("text-xs font-medium tabular-nums sm:text-sm", value ? "text-foreground/80" : "text-muted-foreground")}>{cell.day}</span>
                   </div>
-                )
-              })}
-              <WeekCell index={wi + 1} agg={week.agg} metric={metric} tradesShort={tradesShort} className="hidden sm:flex" />
-            </Fragment>
-          ))}
-        </div>
+                  {value && (
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="truncate text-[11px] font-bold leading-tight tabular-nums text-foreground sm:text-lg">{value.text}</p>
+                      {detailLines(cell.agg).map((line, i) => (
+                        <p key={i} className="truncate text-[9px] leading-tight text-foreground/70 sm:text-xs">
+                          {line}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            <WeekCard index={wi + 1} agg={week.agg} tradingDays={week.tradingDays} metric={metric} daysLabel={daysLabel} inGrid />
+          </Fragment>
+        ))}
+      </div>
 
-        {/* Phones have no room for an eighth column — weeks go underneath. */}
-        <div className="mt-2 grid grid-cols-2 gap-1.5 sm:hidden">
-          {weeks.map((week, wi) => (
-            <WeekCell key={wi} index={wi + 1} agg={week.agg} metric={metric} tradesShort={tradesShort} className="flex" />
-          ))}
-        </div>
+      {/* Narrower screens have no room for the week column — weeks go underneath. */}
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:hidden">
+        {weeks.map((week, wi) => (
+          <WeekCard key={wi} index={wi + 1} agg={week.agg} tradingDays={week.tradingDays} metric={metric} daysLabel={daysLabel} />
+        ))}
       </div>
 
       {/* The month at a glance. */}
-      <div className="border-t px-3 py-3 sm:px-5 sm:py-4">
-        <p className="mb-3 text-center text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{t("Monthly insights")}</p>
-        <div className="grid grid-cols-3 gap-y-3 sm:grid-cols-5 sm:divide-x sm:rtl:divide-x-reverse">
-          <Insight label={t("Best day")} value={best ? money(best.agg.pnl) : "—"} tone={best ? signTone(best.agg.pnl) : undefined} sub={best ? shortDate(best.date) : undefined} />
-          <Insight label={t("Worst day")} value={worst ? money(worst.agg.pnl) : "—"} tone={worst ? signTone(worst.agg.pnl) : undefined} sub={worst ? shortDate(worst.date) : undefined} />
-          <Insight label={t("Avg trade")} value={monthAgg.trades ? money(monthAgg.pnl / monthAgg.trades) : "—"} tone={monthAgg.trades ? signTone(monthAgg.pnl) : undefined} />
-          <Insight label={t("Profit factor")} value={profitFactor} />
-          <Insight label={t("Winning days")} value={tradedDays.length ? `${winningDays}/${tradedDays.length}` : "—"} />
-        </div>
+      <p className="mt-6 mb-3 text-sm font-semibold">{t("Monthly insights")}</p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <Insight label={t("Best day")} value={best ? formatCurrency(best.agg.pnl) : "—"} tone={best ? signTone(best.agg.pnl) : undefined} sub={best ? shortDate(best.date) : undefined} />
+        <Insight label={t("Worst day")} value={worst ? formatCurrency(worst.agg.pnl) : "—"} tone={worst ? signTone(worst.agg.pnl) : undefined} sub={worst ? shortDate(worst.date) : undefined} />
+        <Insight label={t("Avg trade")} value={monthAgg.trades ? formatCurrency(monthAgg.pnl / monthAgg.trades) : "—"} tone={monthAgg.trades ? signTone(monthAgg.pnl) : undefined} />
+        <Insight label={t("Profit factor")} value={profitFactor} />
+        <Insight label={t("Winning days")} value={tradedDays.length ? `${winningDays}/${tradedDays.length}` : "—"} />
       </div>
     </div>
   )
 }
 
-function WeekCell({
+function WeekCard({
   index,
   agg,
+  tradingDays,
   metric,
-  tradesShort,
-  className,
+  daysLabel,
+  inGrid,
 }: {
   index: number
   agg: Agg
+  tradingDays: number
   metric: Metric
-  tradesShort: (n: number) => string
-  className?: string
+  daysLabel: (n: number) => string
+  // In the grid's week column (wide screens only), where it sits in a
+  // narrower slot than the cards listed under the calendar.
+  inGrid?: boolean
 }) {
   const t = useT()
   const value = metricValue(agg, metric)
-  const sub = agg.trades === 0 ? null : metric === "trades" ? money(agg.pnl) : tradesShort(agg.trades)
+  const text = metric === "pnl" ? formatCurrency(agg.pnl) : value ? value.text : "—"
   return (
-    <div className={cn("min-w-0 flex-col justify-center gap-0.5 rounded-lg border bg-muted/40 px-2.5 py-2 sm:min-h-28", className)}>
-      <p className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase sm:text-[11px]">{t("Week {n}", { n: index })}</p>
+    <div className={cn("min-w-0 rounded-xl border p-4", inGrid && "hidden min-h-28 lg:block lg:p-3 xl:p-4")}>
+      <p className="text-sm font-medium text-indigo-500 dark:text-indigo-400">{t("Week {n}", { n: index })}</p>
       <p
-        className={cn("truncate text-sm font-semibold tabular-nums sm:text-lg", !value && "text-muted-foreground")}
+        className={cn("mt-1 truncate font-semibold tabular-nums", inGrid ? "text-lg xl:text-xl" : "text-xl", !value && "text-muted-foreground")}
         style={value ? { color: `var(--cal-${value.tone}-line)` } : undefined}
       >
-        {value ? value.text : metric === "pnl" ? money(0) : "—"}
+        {text}
       </p>
-      {sub && <p className="truncate text-xs text-muted-foreground tabular-nums">{sub}</p>}
+      <span className="mt-2 inline-block rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{daysLabel(tradingDays)}</span>
     </div>
   )
-}
-
-function toneStyle(tone: Tone, kind: "cell" | "pill"): React.CSSProperties {
-  return kind === "cell"
-    ? { backgroundColor: `var(--cal-${tone}-bg)`, borderColor: `var(--cal-${tone}-border)` }
-    : { backgroundColor: `var(--cal-${tone}-bg)`, color: `var(--cal-${tone}-line)` }
 }
 
 function Insight({ label, value, tone, sub }: { label: string; value: string; tone?: Tone; sub?: string }) {
   return (
-    <div className="min-w-0 px-2 text-center">
-      <p className="truncate text-xs text-muted-foreground">{label}</p>
-      <p className="mt-0.5 truncate text-base font-semibold tabular-nums sm:text-lg" style={tone ? { color: `var(--cal-${tone}-line)` } : undefined}>
+    <div className="min-w-0 rounded-xl border p-4">
+      <p className="truncate text-sm font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate text-xl font-semibold tabular-nums" style={tone ? { color: `var(--cal-${tone}-line)` } : undefined}>
         {value}
       </p>
-      {sub && <p className="truncate text-[11px] text-muted-foreground">{sub}</p>}
+      {sub && <span className="mt-2 inline-block rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{sub}</span>}
+    </div>
+  )
+}
+
+function Legend({ swatch, border, label }: { swatch: string; border: string; label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="size-3.5 rounded border" style={{ backgroundColor: swatch, borderColor: border }} />
+      {label}
     </div>
   )
 }
