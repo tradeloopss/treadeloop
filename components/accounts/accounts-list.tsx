@@ -13,17 +13,18 @@ import { syncAllConnections } from "@/app/actions/connections"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIntlLocale, useT } from "@/components/locale-provider"
-import { AccountAvatar, AccountMenu, HealthPill, PLATFORM_LABEL, formatMoney, type AccountActions } from "@/components/accounts/account-ui"
+import { AccountAvatar, AccountMenu, HealthPill, formatMoney, type AccountActions } from "@/components/accounts/account-ui"
 import { ConfirmDialog, CreateManualAccountDialog, EditAccountDialog } from "@/components/accounts/account-dialogs"
-import { useRelativeTime } from "@/components/accounts/use-relative-time"
+import { AccountDetailsSheet } from "@/components/accounts/account-details-sheet"
+import { accountRow, connectionRow, messageTone, useRowMetrics, useSyncWords, type RowModel } from "@/components/accounts/account-rows"
 import type { HubAccount, HubConnection } from "@/components/accounts/types"
 
 // The Accounts page's list of trade sources, as one card: title, count and
 // "Sync all"; a compact table with one row per account (identity · platform ·
 // status · balance · last sync · ⋯), each expandable for the rest of what that
-// platform reports; and a hint + "Connect another account" underneath. Live
-// connections first, then accounts with no live connection (manual entry,
-// file imports).
+// platform reports (on phones: a details screen of its own); and a hint +
+// "Connect another account" underneath. Live connections first, then accounts
+// with no live connection (manual entry, file imports).
 //
 // Columns follow the card's own width (@container/list):
 //   ≥ 760px   Account | Platform | Status | Balance | Last sync | Actions
@@ -35,52 +36,6 @@ const GRID =
   "grid-cols-[minmax(0,1fr)_auto] @[480px]/list:grid-cols-[minmax(0,1fr)_120px_104px_36px] @[620px]/list:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_120px_104px_36px] @[760px]/list:grid-cols-[minmax(180px,3fr)_minmax(96px,1fr)_112px_108px_108px_56px]"
 
 type Confirm = { kind: "disconnect"; connection: HubConnection } | { kind: "delete"; account: HubAccount; brokerLinked: boolean }
-
-interface RowModel {
-  key: string
-  title: string
-  platform: string
-  meta: string
-  logoName: string | null
-  status: HubConnection["health"] | "manual" | "archived"
-  balance: number | null
-  currency: string
-  lastSyncedAt: Date | null
-  connection: HubConnection | null
-  account: HubAccount | null
-}
-
-function connectionRow(c: HubConnection): RowModel {
-  return {
-    key: c.key,
-    title: c.title,
-    platform: PLATFORM_LABEL[c.kind],
-    meta: c.subtitle,
-    logoName: c.logoName,
-    status: c.health,
-    balance: c.balance,
-    currency: c.currency,
-    lastSyncedAt: c.lastSyncedAt,
-    connection: c,
-    account: c.account,
-  }
-}
-
-function accountRow(a: HubAccount): RowModel {
-  return {
-    key: `acct:${a.id}`,
-    title: a.name,
-    platform: "Manual / file import",
-    meta: a.broker ?? "",
-    logoName: a.broker,
-    status: a.archived ? "archived" : "manual",
-    balance: a.currentBalance != null ? Number(a.currentBalance) : Number(a.startingBalance),
-    currency: a.currency,
-    lastSyncedAt: null,
-    connection: null,
-    account: a,
-  }
-}
 
 export function AccountsList({
   connections,
@@ -96,6 +51,7 @@ export function AccountsList({
   const t = useT()
   const router = useRouter()
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [detail, setDetail] = useState<string | null>(null) // phones: details screen
   const [syncing, setSyncing] = useState<Set<string>>(new Set())
   const [syncAllPending, startSyncAll] = useTransition()
   const [actionPending, startAction] = useTransition()
@@ -165,6 +121,7 @@ export function AccountsList({
         }
         setConfirm(null)
         setExpanded(null)
+        setDetail(null)
         router.refresh()
       } catch {
         toast.error(current.kind === "disconnect" ? t("Could not disconnect") : t("Could not remove account"))
@@ -204,6 +161,53 @@ export function AccountsList({
 
   const liveRows = connections.map(connectionRow)
   const otherRows = otherAccounts.map(accountRow)
+  const detailRow = detail ? ([...liveRows, ...otherRows].find((r) => r.key === detail) ?? null) : null
+
+  // Phones get the account's own details screen; wider screens expand the
+  // row in place.
+  function openRow(key: string) {
+    if (window.matchMedia("(max-width: 639px)").matches) setDetail(key)
+    else setExpanded((k) => (k === key ? null : key))
+  }
+
+  // While a phone's details screen is open these open nested inside it.
+  const dialogs = (
+    <>
+      <EditAccountDialog
+        account={editing?.account ?? null}
+        mode={editing?.mode ?? "edit"}
+        onClose={() => {
+          setEditing(null)
+          router.refresh()
+        }}
+      />
+      <CreateManualAccountDialog
+        open={manualOpen}
+        onOpenChange={(o) => {
+          setManualOpen(o)
+          if (!o) router.refresh()
+        }}
+      />
+      <ConfirmDialog
+        open={confirm != null}
+        pending={actionPending}
+        destructive
+        title={confirm?.kind === "delete" ? t("Delete {name}?", { name: confirm.account.name }) : t("Disconnect {name}?", { name: confirm?.connection.title ?? "" })}
+        description={
+          confirm?.kind === "delete"
+            ? confirm.brokerLinked
+              ? t("This removes the account, its connection and its synced trades. Reconnecting later re-imports the full history.")
+              : t("This removes the account. Its trades stay in your journal, just no longer tagged to an account.")
+            : confirm?.connection.kind === "tradingview"
+              ? t("Sync from this paper account stops. The account and the trades already imported stay in your journal.")
+              : t("Sync stops and the saved login is deleted. The account and the trades already imported stay in your journal.")
+        }
+        confirmLabel={confirm?.kind === "delete" ? t("Delete account") : t("Disconnect")}
+        onConfirm={runConfirmed}
+        onCancel={() => setConfirm(null)}
+      />
+    </>
+  )
 
   return (
     <section aria-labelledby="accounts-list-title" className="@container/list rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[640px]/page:p-5">
@@ -262,7 +266,7 @@ export function AccountsList({
                 row={row}
                 expanded={expanded === row.key}
                 syncing={syncing.has(row.key)}
-                onToggle={() => setExpanded((k) => (k === row.key ? null : row.key))}
+                onToggle={() => openRow(row.key)}
                 actions={actionsFor(row)}
               />
             ))}
@@ -280,7 +284,7 @@ export function AccountsList({
                   key={row.key}
                   row={row}
                   expanded={expanded === row.key}
-                  onToggle={() => setExpanded((k) => (k === row.key ? null : row.key))}
+                  onToggle={() => openRow(row.key)}
                   actions={actionsFor(row)}
                 />
               ))}
@@ -293,7 +297,8 @@ export function AccountsList({
         <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-lg border border-primary/15 bg-primary/[0.04] px-3 py-1">
           <p className="flex min-w-0 items-center gap-2 py-1.5 text-xs text-muted-foreground">
             <Info className="size-4 shrink-0 text-primary" aria-hidden />
-            {t("Click any account to view details, sync status and more options.")}
+            <span className="sm:hidden">{t("Tap any account to view details, sync status and more options.")}</span>
+            <span className="hidden sm:inline">{t("Click any account to view details, sync status and more options.")}</span>
           </p>
           {liveRows.length > 0 && (
             <Button variant="ghost" onClick={onConnect} className="-mx-1.5 h-9 px-1.5 text-xs font-semibold text-primary hover:bg-primary/5 hover:text-primary">
@@ -303,39 +308,16 @@ export function AccountsList({
         </div>
       )}
 
-      <EditAccountDialog
-        account={editing?.account ?? null}
-        mode={editing?.mode ?? "edit"}
-        onClose={() => {
-          setEditing(null)
-          router.refresh()
-        }}
-      />
-      <CreateManualAccountDialog
-        open={manualOpen}
-        onOpenChange={(o) => {
-          setManualOpen(o)
-          if (!o) router.refresh()
-        }}
-      />
-      <ConfirmDialog
-        open={confirm != null}
-        pending={actionPending}
-        destructive
-        title={confirm?.kind === "delete" ? t("Delete {name}?", { name: confirm.account.name }) : t("Disconnect {name}?", { name: confirm?.connection.title ?? "" })}
-        description={
-          confirm?.kind === "delete"
-            ? confirm.brokerLinked
-              ? t("This removes the account, its connection and its synced trades. Reconnecting later re-imports the full history.")
-              : t("This removes the account. Its trades stay in your journal, just no longer tagged to an account.")
-            : confirm?.connection.kind === "tradingview"
-              ? t("Sync from this paper account stops. The account and the trades already imported stay in your journal.")
-              : t("Sync stops and the saved login is deleted. The account and the trades already imported stay in your journal.")
-        }
-        confirmLabel={confirm?.kind === "delete" ? t("Delete account") : t("Disconnect")}
-        onConfirm={runConfirmed}
-        onCancel={() => setConfirm(null)}
-      />
+      <AccountDetailsSheet
+        row={detailRow}
+        syncing={detailRow ? syncing.has(detailRow.key) : false}
+        actions={detailRow ? actionsFor(detailRow) : {}}
+        onClose={() => setDetail(null)}
+        onAddAccount={onConnect}
+      >
+        {detailRow && dialogs}
+      </AccountDetailsSheet>
+      {!detailRow && dialogs}
     </section>
   )
 }
@@ -355,15 +337,9 @@ function AccountRow({
 }) {
   const t = useT()
   const locale = useIntlLocale()
-  const ago = useRelativeTime()
   const status = syncing ? "syncing" : row.status
   const balance = row.balance != null ? formatMoney(row.balance, row.currency, locale) : "—"
-  // The one place sync wording is decided: the column shows "2 minutes ago",
-  // elsewhere it reads "Synced 2 minutes ago" / "Last synced …".
-  const relative = row.lastSyncedAt ? ago(row.lastSyncedAt) : null
-  const synced = !row.connection ? "—" : syncing ? t("Syncing now…") : row.lastSyncedAt ? (relative ?? "") : t("Not synced yet")
-  const syncedLine = !row.connection ? "" : syncing ? t("Syncing now…") : row.lastSyncedAt ? (relative ? t("Synced {ago}", { ago: relative }) : "") : t("Not synced yet")
-  const lastSyncedLine = !row.connection ? "" : syncing ? t("Syncing now…") : row.lastSyncedAt ? (relative ? t("Last synced {ago}", { ago: relative }) : "") : t("Not synced yet")
+  const { synced, syncedLine, lastSyncedLine } = useSyncWords(row, syncing)
   const detailsId = `account-details-${row.key.replace(/[^a-z0-9]/gi, "-")}`
   const platform = t(row.platform)
 
@@ -424,27 +400,14 @@ function AccountRow({
 
 function RowDetails({ row, syncing, lastSynced, actions }: { row: RowModel; syncing?: boolean; lastSynced: string; actions: AccountActions }) {
   const t = useT()
-  const locale = useIntlLocale()
   const c = row.connection
   const a = row.account
-
-  const metrics: { label: string; value: string }[] = []
-  if (c) {
-    if (c.balance != null) metrics.push({ label: t("Balance"), value: formatMoney(c.balance, c.currency, locale) })
-    if (c.equity != null) metrics.push({ label: t("Equity"), value: formatMoney(c.equity, c.currency, locale) })
-    if (c.openPositions != null) metrics.push({ label: t("Open positions"), value: String(c.openPositions) })
-    if (c.tradeCount != null) metrics.push({ label: t("Trades journaled"), value: String(c.tradeCount) })
-  } else if (a) {
-    if (a.currentBalance != null) metrics.push({ label: t("Balance"), value: formatMoney(Number(a.currentBalance), a.currency, locale) })
-    metrics.push({ label: t("Starting balance"), value: formatMoney(Number(a.startingBalance), a.currency, locale) })
-    metrics.push({ label: t("Currency"), value: a.currency })
-  }
-  const messageTone = c?.health === "error" ? "bg-loss/10 text-loss" : c?.health === "warning" ? "bg-warning/10 text-foreground" : "bg-muted text-muted-foreground"
+  const metrics = useRowMetrics(row)
 
   return (
     <div className="space-y-3 border-t border-dashed px-4 py-4 @[480px]/list:ps-[60px]">
       {c?.message && !syncing && (
-        <p className={cn("rounded-lg px-3 py-2 text-xs leading-[18px]", messageTone)} role={c.health === "error" ? "alert" : undefined}>
+        <p className={cn("rounded-lg px-3 py-2 text-xs leading-[18px]", messageTone(c.health))} role={c.health === "error" ? "alert" : undefined}>
           {t(c.message)}
         </p>
       )}
