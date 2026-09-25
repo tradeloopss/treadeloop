@@ -5,8 +5,6 @@ import { getAccounts } from "@/app/actions/accounts"
 import { getRithmicConnections } from "@/app/actions/rithmic"
 import { getMetaTraderConnections } from "@/app/actions/metatrader"
 import { getTradingViewConnections, getTradingViewPairings } from "@/app/actions/tradingview"
-import Link from "next/link"
-import { HelpCircle } from "lucide-react"
 import { AccountsHub } from "@/components/accounts/accounts-hub"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
 import { recordRequestTiming } from "@/lib/telemetry"
@@ -147,24 +145,6 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
 
   void recordRequestTiming("/accounts", Date.now() - startedAt)
   return (
-    <div className="min-h-full bg-background">
-      {/* A slim bar rather than a page header: the workspace below carries the
-          page's own heading, so the content starts right away. */}
-      <div className="flex h-14 items-center justify-between gap-3 border-b px-4 md:h-16 md:px-5">
-        <nav aria-label={t("Breadcrumb")} className="flex min-w-0 items-center gap-2 text-[13px]">
-          <Link href="/settings" className="text-muted-foreground transition-colors hover:text-foreground">
-            {t("Settings")}
-          </Link>
-          <span aria-hidden className="text-muted-foreground">/</span>
-          <h1 className="truncate font-semibold text-foreground" aria-current="page">
-            {t("Accounts")}
-          </h1>
-        </nav>
-        <Link href="/support" className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-          <HelpCircle className="size-4" /> <span className="hidden sm:inline">{t("Need help?")}</span>
-        </Link>
-      </div>
       <AccountsHub initialPlatform={initialPlatform} connections={connections} otherAccounts={otherAccounts} isPro={pro || owner} pairings={pairings} importAccounts={importAccounts} />
-    </div>
   )
 }

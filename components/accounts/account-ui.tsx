@@ -2,20 +2,23 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { AlertTriangle, Archive, ArchiveRestore, Clock, KeyRound, LayoutDashboard, Loader2, MoreHorizontal, Pencil, RefreshCw, SlidersHorizontal, Trash2, Unplug, XCircle } from "lucide-react"
+import { AlertTriangle, Archive, ArchiveRestore, Clock, KeyRound, LayoutDashboard, Loader2, MoreHorizontal, PenLine, Pencil, RefreshCw, SlidersHorizontal, Trash2, Unplug, XCircle } from "lucide-react"
 import { brokerLogo } from "@/lib/broker-logos"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { useIntlLocale, useT } from "@/components/locale-provider"
-import { useRelativeTime } from "@/components/accounts/use-relative-time"
+import { useT } from "@/components/locale-provider"
 import type { ConnectionHealth, HubAccount, HubConnection } from "@/components/accounts/types"
 
-const PLATFORM_LABEL: Record<HubConnection["kind"], string> = { rithmic: "Rithmic", mt5: "MetaTrader 5", mt4: "MetaTrader 4", tradingview: "TradingView" }
+// Shared pieces of the Accounts page's account list (accounts-list.tsx).
 
-export function HealthPill({ health }: { health: ConnectionHealth }) {
+export const PLATFORM_LABEL: Record<HubConnection["kind"], string> = { rithmic: "Rithmic", mt5: "MetaTrader 5", mt4: "MetaTrader 4", tradingview: "TradingView" }
+
+export function HealthPill({ health }: { health: ConnectionHealth | "manual" | "archived" }) {
   const t = useT()
   const spec = {
+    manual: { icon: <PenLine aria-hidden className="size-3" />, label: "Manual", className: "bg-muted text-muted-foreground" },
+    archived: { icon: <Archive aria-hidden className="size-3" />, label: "Archived", className: "bg-muted text-muted-foreground" },
     connected: { icon: <span aria-hidden className="size-1.5 rounded-full bg-current" />, label: "Connected", className: "bg-gain/10 text-gain" },
     syncing: { icon: <Loader2 aria-hidden className="size-3 animate-spin [animation-duration:800ms]" />, label: "Syncing…", className: "bg-primary/10 text-primary" },
     queued: { icon: <Clock aria-hidden className="size-3" />, label: "Queued", className: "bg-muted text-muted-foreground" },
@@ -58,11 +61,14 @@ export interface AccountActions {
 
 export function AccountMenu({ label, account, actions, syncing }: { label: string; account: HubAccount | null; actions: AccountActions; syncing?: boolean }) {
   const t = useT()
+  // Clicks here (including the menu's items, which React bubbles through the
+  // portal) must not reach an expandable row around it.
   return (
+    <div onClick={(e) => e.stopPropagation()} className="contents">
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon" className="size-9 text-muted-foreground" aria-label={t("Actions for {name}", { name: label })}>
+          <Button variant="ghost" size="icon" className="size-11 text-muted-foreground @[480px]/list:size-9" aria-label={t("Actions for {name}", { name: label })}>
             <MoreHorizontal className="size-4" />
           </Button>
         }
@@ -114,74 +120,6 @@ export function AccountMenu({ label, account, actions, syncing }: { label: strin
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-export function ConnectedAccountCard({ connection, syncing, actions }: { connection: HubConnection; syncing?: boolean; actions: AccountActions }) {
-  const t = useT()
-  const locale = useIntlLocale()
-  const ago = useRelativeTime()
-  const health: ConnectionHealth = syncing ? "syncing" : connection.health
-
-  const metrics: { label: string; value: string }[] = []
-  if (connection.balance != null) metrics.push({ label: t("Balance"), value: formatMoney(connection.balance, connection.currency, locale) })
-  if (connection.equity != null) metrics.push({ label: t("Equity"), value: formatMoney(connection.equity, connection.currency, locale) })
-  if (connection.openPositions != null) metrics.push({ label: t("Open positions"), value: String(connection.openPositions) })
-  if (connection.tradeCount != null) metrics.push({ label: t("Trades journaled"), value: String(connection.tradeCount) })
-
-  const synced = ago(connection.lastSyncedAt)
-  const messageTone =
-    connection.health === "error" ? "bg-loss/10 text-loss" : connection.health === "warning" ? "bg-warning/10 text-foreground" : "bg-muted text-muted-foreground"
-
-  return (
-    <article className="@container/card rounded-xl border bg-card shadow-[0_1px_2px_rgba(20,21,42,0.03)]" aria-label={connection.title}>
-      <div className="flex items-start gap-3 p-4">
-        <AccountAvatar name={connection.title} logoName={connection.logoName} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground">{connection.title}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {t(PLATFORM_LABEL[connection.kind])} · {connection.subtitle}
-          </p>
-          {/* Narrow cards: status under the name so the name keeps its width. */}
-          <div className="mt-2 @[340px]/card:hidden">
-            <HealthPill health={health} />
-          </div>
-        </div>
-        <div className="hidden @[340px]/card:block">
-          <HealthPill health={health} />
-        </div>
-      </div>
-
-      {connection.message && !syncing && (
-        <p className={cn("mx-4 mb-3 rounded-lg px-3 py-2 text-xs leading-[18px]", messageTone)} role={connection.health === "error" ? "alert" : undefined}>
-          {t(connection.message)}
-        </p>
-      )}
-
-      {metrics.length > 0 && (
-        <dl className={cn("grid gap-x-3 gap-y-3 border-t px-4 py-3", metrics.length >= 3 ? "grid-cols-2 @[300px]/card:grid-cols-3" : "grid-cols-2")}>
-          {metrics.map((m, i) => (
-            <div
-              key={m.label}
-              // Divider between columns once they sit side by side, as in a ledger row.
-              className={cn("min-w-0", i > 0 && (metrics.length >= 3 ? "@[300px]/card:border-s @[300px]/card:ps-3" : "border-s ps-3"))}
-            >
-              <dt className="truncate text-[11px] text-muted-foreground">{m.label}</dt>
-              <dd className="truncate text-sm font-semibold tabular-nums text-foreground">{m.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-
-      <div className="flex min-h-10 items-center justify-between gap-2 border-t ps-4 pe-2 text-[11px] text-muted-foreground">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <Clock aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">
-            {syncing ? t("Syncing now…") : synced ? t("Last synced {ago}", { ago: synced }) : synced === "" ? "" : t("Waiting for the first sync")}
-          </span>
-        </span>
-        <AccountMenu label={connection.title} account={connection.account} actions={actions} syncing={syncing} />
-      </div>
-    </article>
+    </div>
   )
 }

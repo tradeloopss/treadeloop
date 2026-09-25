@@ -50,11 +50,11 @@ interface PlatformDef {
 }
 
 const PLATFORMS: PlatformDef[] = [
-  { id: "rithmic", name: "Rithmic", description: "Futures prop firms on Rithmic — Apex, Bulenox, Tradeify & more. Syncs every minute.", badge: "live", icon: <Logo src="/brokers/sm/rithmic.png" />, live: true },
-  { id: "mt5", name: "MetaTrader 5", description: "Forex & CFD brokers and prop firms, with your read-only investor password.", badge: "live", icon: <TintIcon><CandlestickChart className="size-5" /></TintIcon>, live: true },
-  { id: "mt4", name: "MetaTrader 4", description: "MT4 accounts are queued until MT4 sync is live on our sync server.", badge: "setup", icon: <TintIcon><span className="text-[11px] font-bold">MT4</span></TintIcon>, live: true },
-  { id: "tradingview", name: "TradingView", description: "Paper trading, synced by the TradeLoop browser extension.", badge: "paper", icon: <TintIcon><LineChart className="size-5" /></TintIcon>, live: true },
-  { id: "file", name: "File import", description: "Tradovate, NinjaTrader, TradingView or MetaTrader report files.", badge: "file", icon: <TintIcon><FileUp className="size-5" /></TintIcon>, live: false },
+  { id: "rithmic", name: "Rithmic", description: "Futures prop firms — Apex, Bulenox, Tradeify & more.", badge: "live", icon: <Logo src="/brokers/sm/rithmic.png" />, live: true },
+  { id: "mt5", name: "MetaTrader 5", description: "Forex & CFD brokers, read-only investor password.", badge: "live", icon: <TintIcon><CandlestickChart className="size-5" /></TintIcon>, live: true },
+  { id: "tradingview", name: "TradingView", description: "Paper trading via the TradeLoop extension.", badge: "paper", icon: <TintIcon><LineChart className="size-5" /></TintIcon>, live: true },
+  { id: "mt4", name: "MetaTrader 4", description: "Accounts queue until MT4 sync goes live.", badge: "setup", icon: <TintIcon><span className="text-[11px] font-bold">MT4</span></TintIcon>, live: true },
+  { id: "file", name: "File import", description: "Tradovate, NinjaTrader, TradingView & MT reports.", badge: "file", icon: <TintIcon><FileUp className="size-5" /></TintIcon>, live: false },
   { id: "topstep", name: "Topstep", description: "Direct Topstep sync is on the way.", badge: "soon", icon: <Logo src="/brokers/sm/topstep.png" />, live: true, disabled: true },
 ]
 
@@ -120,15 +120,14 @@ export function ConnectionWorkspace({
   if (!platform || !def) {
     content = (
       <>
-        <p className="text-[11px] font-bold tracking-[0.7px] text-primary uppercase">{t("Step {n} of 3", { n: 1 })}</p>
-        <h2 ref={headingRef} tabIndex={-1} className="mt-1.5 text-2xl leading-[30px] font-semibold tracking-[-0.5px] text-foreground outline-none @[480px]/ws:text-[28px] @[480px]/ws:leading-[34px] @[860px]/ws:text-[30px] @[860px]/ws:leading-9">
+        <h2 ref={headingRef} tabIndex={-1} className="text-[22px] leading-7 font-semibold tracking-[-0.4px] text-foreground outline-none @[560px]/ws:text-2xl @[900px]/ws:text-[26px] @[900px]/ws:leading-8">
           {t("Connect a trading account")}
         </h2>
-        <p className="mt-2 max-w-[600px] text-sm text-muted-foreground">
-          {t("Select your trading platform to get started. Live connections keep your journal in sync on their own; file imports cover everything else.")}
+        <p className="mt-2 max-w-[650px] text-sm text-muted-foreground">
+          {t("Select a platform to get started. Live connections keep your journal in sync automatically, while file imports let you bring in historical trades.")}
         </p>
-        <h3 className="mt-8 text-base font-semibold text-foreground">{t("Choose your platform")}</h3>
-        <div className="mt-4 grid grid-cols-1 gap-3 @[900px]/content:grid-cols-2">
+        <h3 className="mt-6 text-base font-semibold text-foreground @[900px]/ws:mt-7">{t("Choose your platform")}</h3>
+        <div className="mt-3 grid grid-cols-1 gap-3 @[560px]/ws:grid-cols-2 @[840px]/ws:grid-cols-3">
           {PLATFORMS.map((p) => (
             <PlatformCard
               key={p.id}
@@ -268,13 +267,10 @@ export function ConnectionWorkspace({
           <ArrowLeft className="size-4" /> {t("Back")}
         </button>
         <div className="mt-3 flex items-center gap-3">
-          <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">{def.icon}</span>
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold tracking-[0.7px] text-primary uppercase">{t("Step {n} of 3", { n: step })}</p>
-            <h2 ref={headingRef} tabIndex={-1} className="text-xl leading-7 font-semibold tracking-[-0.3px] text-foreground outline-none @[860px]/ws:text-2xl">
-              {t(copy.title)}
-            </h2>
-          </div>
+          <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">{def.icon}</span>
+          <h2 ref={headingRef} tabIndex={-1} className="min-w-0 text-xl leading-7 font-semibold tracking-[-0.3px] text-foreground outline-none @[900px]/ws:text-[22px]">
+            {t(copy.title)}
+          </h2>
         </div>
         {copy.description && <p className="mt-2 max-w-[600px] text-sm text-muted-foreground">{t(copy.description)}</p>}
         <div className="mt-6 max-w-[640px]">{body}</div>
@@ -286,24 +282,14 @@ export function ConnectionWorkspace({
     <section
       ref={rootRef}
       aria-label={t("Connect a trading account")}
-      className="@container/ws scroll-mt-4 rounded-[14px] border bg-card shadow-[0_1px_2px_rgba(20,21,42,0.03)]"
+      className="@container/ws scroll-mt-4 rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[560px]/ws:p-6 @[900px]/ws:p-8"
     >
-      <div className="@[680px]/ws:grid @[680px]/ws:grid-cols-[195px_minmax(0,1fr)] @[860px]/ws:grid-cols-[225px_minmax(0,1fr)]">
-        <aside className="hidden border-e p-5 @[680px]/ws:block @[860px]/ws:p-6">
-          <p className="text-lg leading-[23px] font-semibold tracking-[-0.2px] text-foreground">{t("Connect your trading account")}</p>
-          <p className="mt-2 text-[13px] leading-[19px] text-muted-foreground">{t("Link your broker or platform to import trades automatically and start journaling.")}</p>
-          <div className="mt-8">
-            <ConnectionStepper current={step} completed={completed} orientation="vertical" />
-          </div>
-        </aside>
-        <div className="@container/content min-w-0 p-4 @[480px]/ws:p-6 @[860px]/ws:p-8">
-          <div className="mb-6 @[680px]/ws:hidden">
-            <ConnectionStepper current={step} completed={completed} orientation="horizontal" />
-          </div>
-          <div key={`${platform ?? "choose"}-${outcome ? "result" : "form"}`} className="animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none">
-            {content}
-          </div>
-        </div>
+      <div className="mb-5 flex flex-col items-start gap-2.5 @[480px]/ws:flex-row @[480px]/ws:items-center @[480px]/ws:gap-5 @[900px]/ws:mb-6">
+        <p className="text-[11px] font-bold tracking-[0.7px] whitespace-nowrap text-primary uppercase">{t("Step {n} of 3", { n: step })}</p>
+        <ConnectionStepper current={step} completed={completed} />
+      </div>
+      <div key={`${platform ?? "choose"}-${outcome ? "result" : "form"}`} className="animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none">
+        {content}
       </div>
     </section>
   )

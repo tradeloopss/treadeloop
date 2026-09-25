@@ -5,68 +5,45 @@ import { cn } from "@/lib/utils"
 import { useT } from "@/components/locale-provider"
 
 const STEPS = [
-  { title: "Choose platform", short: "Choose", hint: "Pick where your trades come from" },
-  { title: "Connect account", short: "Connect", hint: "Sign in with your platform's details" },
-  { title: "Verify & sync", short: "Verify", hint: "We check the account and import trades" },
+  { title: "Choose platform", short: "Choose" },
+  { title: "Connect account", short: "Connect" },
+  { title: "Verify & sync", short: "Verify" },
 ]
 
 type StepState = "done" | "active" | "upcoming"
 
-function stateOf(step: number, current: number, completed: boolean): StepState {
-  if (completed || step < current) return "done"
-  return step === current ? "active" : "upcoming"
-}
-
-function Circle({ n, state }: { n: number; state: StepState }) {
-  return (
-    <span
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200",
-        state === "active" && "bg-primary text-primary-foreground",
-        state === "done" && "border border-gain bg-gain/10 text-gain",
-        state === "upcoming" && "border bg-card text-muted-foreground",
-      )}
-    >
-      {state === "done" ? <Check className="size-4" aria-hidden /> : n}
-    </span>
-  )
-}
-
-// Where the connect flow is. `completed` marks the last step done (success).
-export function ConnectionStepper({ current, completed = false, orientation }: { current: 1 | 2 | 3; completed?: boolean; orientation: "vertical" | "horizontal" }) {
+// A compact horizontal step indicator for the connection card:
+// ① Choose platform ── ② Connect account ── ③ Verify & sync
+// (short labels when the card is narrow). `completed` marks the last step done.
+export function ConnectionStepper({ current, completed = false }: { current: 1 | 2 | 3; completed?: boolean }) {
   const t = useT()
-  const states = STEPS.map((_, i) => stateOf(i + 1, current, completed && i + 1 === current))
-
-  if (orientation === "horizontal") {
-    return (
-      <ol className="flex items-start" aria-label={t("Connection steps")}>
-        {STEPS.map((step, i) => (
-          <li key={step.title} className="flex flex-1 items-start last:flex-none" aria-current={states[i] === "active" ? "step" : undefined}>
-            <div className="flex flex-col items-center gap-1.5">
-              <Circle n={i + 1} state={states[i]} />
-              <span className={cn("text-xs font-medium", states[i] === "upcoming" ? "text-muted-foreground" : "text-foreground")}>{t(step.short)}</span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <span aria-hidden className={cn("mx-2 mt-4 h-px flex-1 transition-colors", states[i] === "done" ? "bg-gain/40" : "bg-border")} />
-            )}
-          </li>
-        ))}
-      </ol>
-    )
-  }
+  const states: StepState[] = STEPS.map((_, i) => {
+    const n = i + 1
+    if (n < current || (completed && n === current)) return "done"
+    return n === current ? "active" : "upcoming"
+  })
 
   return (
-    <ol aria-label={t("Connection steps")}>
+    <ol className="flex w-full min-w-0 items-center @[480px]/ws:w-auto @[480px]/ws:flex-1 @[640px]/ws:flex-none" aria-label={t("Connection steps")}>
       {STEPS.map((step, i) => (
-        <li key={step.title} className="flex gap-3" aria-current={states[i] === "active" ? "step" : undefined}>
-          <div className="flex flex-col items-center">
-            <Circle n={i + 1} state={states[i]} />
-            {i < STEPS.length - 1 && <span aria-hidden className={cn("my-1 h-[52px] w-px transition-colors", states[i] === "done" ? "bg-gain/40" : "bg-border")} />}
-          </div>
-          <div className="min-w-0 pt-1.5">
-            <p className={cn("text-[13px] leading-5 font-semibold", states[i] === "upcoming" ? "text-muted-foreground" : "text-foreground")}>{t(step.title)}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{t(step.hint)}</p>
-          </div>
+        <li key={step.title} className={cn("flex min-w-0 items-center", i < STEPS.length - 1 && "flex-1 @[640px]/ws:flex-none")} aria-current={states[i] === "active" ? "step" : undefined}>
+          <span
+            className={cn(
+              "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors duration-200",
+              states[i] === "active" && "bg-primary text-primary-foreground",
+              states[i] === "done" && "border border-gain bg-gain/10 text-gain",
+              states[i] === "upcoming" && "border bg-card text-muted-foreground",
+            )}
+          >
+            {states[i] === "done" ? <Check className="size-3.5" aria-hidden /> : i + 1}
+          </span>
+          <span className={cn("ms-2 text-[13px] font-medium whitespace-nowrap", states[i] === "upcoming" ? "text-muted-foreground" : "text-foreground")}>
+            <span className="@[640px]/ws:hidden">{t(step.short)}</span>
+            <span className="hidden @[640px]/ws:inline">{t(step.title)}</span>
+          </span>
+          {i < STEPS.length - 1 && (
+            <span aria-hidden className={cn("mx-2 h-px min-w-3 flex-1 transition-colors @[640px]/ws:mx-3 @[640px]/ws:w-14 @[640px]/ws:flex-none", states[i] === "done" ? "bg-gain/40" : "bg-border")} />
+          )}
         </li>
       ))}
     </ol>
