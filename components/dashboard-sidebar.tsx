@@ -33,6 +33,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ShieldCheck,
+  Gauge,
   Banknote,
   CandlestickChart,
   Wallet,
@@ -51,6 +52,7 @@ const links = [
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/propfirm", label: "Prop Firm", icon: ShieldCheck },
+  { href: "/propfirm-max", label: "PropFirm Max", icon: Gauge },
   { href: "/payouts", label: "Payouts", icon: Banknote },
 ]
 
