@@ -10,7 +10,8 @@ const LOGOS: { match: string[]; file: string; dark?: string }[] = [
   { match: ["topstep"], file: "topstep.png" },
   { match: ["tradeify"], file: "tradeify.png" },
   { match: ["ftmo"], file: "FTMO.png", dark: "FTMO-dark.png" },
-  { match: ["alpha capital"], file: "alphacapital.png" },
+  // ACG Markets is Alpha Capital's broker (MetaTrader reports "ACG Markets Limited").
+  { match: ["alpha capital", "acg markets", "acgmarkets"], file: "alphacapital.png" },
   { match: ["lucid"], file: "lucid.png" },
   { match: ["rithmic"], file: "rithmic.png" },
   { match: ["exness"], file: "exness.png" },
