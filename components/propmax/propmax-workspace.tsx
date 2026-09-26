@@ -15,12 +15,14 @@ import {
   Plus,
   CircleDollarSign,
   BadgeCheck,
+  Bell,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { PropMaxAccountView } from "@/lib/propmax/account"
-import type { CatalogOption } from "@/lib/propmax/view-types"
-import { removePropMaxAccount } from "@/app/actions/propmax"
+import type { CatalogOption, PropMaxAlertView } from "@/lib/propmax/view-types"
+import { removePropMaxAccount, acknowledgePropMaxAlert, acknowledgeAllPropMaxAlerts } from "@/app/actions/propmax"
 import type { RuleResult } from "@/lib/propmax/types"
 import { PropMaxSetupDialog } from "@/components/propmax/setup-dialog"
 import {
@@ -33,7 +35,15 @@ import {
   confidenceLabel,
 } from "@/components/propmax/display"
 
-export function PropMaxWorkspace({ accounts, catalog }: { accounts: PropMaxAccountView[]; catalog: CatalogOption[] }) {
+export function PropMaxWorkspace({
+  accounts,
+  catalog,
+  alerts = [],
+}: {
+  accounts: PropMaxAccountView[]
+  catalog: CatalogOption[]
+  alerts?: PropMaxAlertView[]
+}) {
   const bound = accounts.filter((a) => a.binding && a.evaluation)
   const unbound = accounts.filter((a) => !a.binding)
 
@@ -85,6 +95,8 @@ export function PropMaxWorkspace({ accounts, catalog }: { accounts: PropMaxAccou
         </div>
       )}
 
+      {alerts.length > 0 && <AlertCenter alerts={alerts} />}
+
       {bound.length === 0 && unbound.length === 0 && (
         <EmptyState />
       )}
@@ -108,6 +120,71 @@ export function PropMaxWorkspace({ accounts, catalog }: { accounts: PropMaxAccou
         </section>
       )}
     </div>
+  )
+}
+
+function AlertCenter({ alerts }: { alerts: PropMaxAlertView[] }) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+
+  function ack(id: number) {
+    startTransition(async () => {
+      try {
+        await acknowledgePropMaxAlert(id)
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't dismiss.")
+      }
+    })
+  }
+  function ackAll() {
+    startTransition(async () => {
+      try {
+        await acknowledgeAllPropMaxAlerts()
+        toast.success("All alerts cleared.")
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't clear.")
+      }
+    })
+  }
+
+  return (
+    <section className="mb-6 rounded-xl border bg-card">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Bell className="size-4 text-amber-500" />
+          Alerts
+          <span className="rounded-full bg-amber-500/15 px-1.5 text-xs font-semibold text-amber-600 tabular-nums dark:text-amber-400">{alerts.length}</span>
+        </div>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={ackAll} disabled={pending}>
+          Dismiss all
+        </Button>
+      </div>
+      <ul className="divide-y">
+        {alerts.map((a) => {
+          const meta = STATUS_META[a.status as keyof typeof STATUS_META] ?? STATUS_META.unknown
+          return (
+            <li key={a.id} className="flex items-start gap-3 px-4 py-3">
+              <span className={cn("mt-1.5 inline-block size-2 shrink-0 rounded-full", meta.dot)} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{a.title}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{a.body}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => ack(a.id)}
+                disabled={pending}
+                aria-label="Dismiss"
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 

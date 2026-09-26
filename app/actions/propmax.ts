@@ -2,25 +2,21 @@
 
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
-import { and, eq, isNull } from "drizzle-orm"
+import { and, desc, eq, isNull } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { assertAdmin } from "@/lib/admin/guard"
-import { tradingAccounts, propAccount, propFirm, propProgram, propRuleVersion } from "@/lib/db/schema"
+import { tradingAccounts, propAccount, propFirm, propProgram, propRuleVersion, propSnapshot, propAlert } from "@/lib/db/schema"
 import { getPropMaxOverview, type PropMaxAccountView } from "@/lib/propmax/account"
 import { seedPropmaxCatalog } from "@/lib/propmax/seed"
-import type { CatalogOption, PropMaxData } from "@/lib/propmax/view-types"
+import { deriveAlerts, buildSnapshot } from "@/lib/propmax/alerts"
+import type { RuleConfig, RuleType } from "@/lib/propmax/types"
+import type { CatalogOption, PropMaxData, PropMaxAlertView } from "@/lib/propmax/view-types"
 
-async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) throw new Error("Unauthorized")
-  return session.user.id
-}
-
-export async function getPropMaxData(): Promise<PropMaxData> {
-  const userId = await getUserId()
-  const [accounts, firms, programs, versions] = await Promise.all([
-    getPropMaxOverview(userId),
+// Build the setup-picker catalog: only firm/program/size/phase combos with an
+// in-force, sourced rule version.
+async function buildCatalog(): Promise<CatalogOption[]> {
+  const [firms, programs, versions] = await Promise.all([
     db.select({ id: propFirm.id, slug: propFirm.slug, name: propFirm.name }).from(propFirm),
     db.select({ id: propProgram.id, firmId: propProgram.firmId, slug: propProgram.slug, name: propProgram.name }).from(propProgram),
     db
@@ -56,7 +52,6 @@ export async function getPropMaxData(): Promise<PropMaxData> {
       sourceName: v.sourceName,
     })
   }
-  // Stable order for the picker: firm, program, size, phase.
   catalog.sort(
     (a, b) =>
       a.firmName.localeCompare(b.firmName) ||
@@ -64,15 +59,116 @@ export async function getPropMaxData(): Promise<PropMaxData> {
       (a.accountSize ?? 0) - (b.accountSize ?? 0) ||
       a.phase.localeCompare(b.phase),
   )
+  return catalog
+}
 
+// Record today's snapshot for each bound account and fire any new
+// threshold-crossing alerts. Idempotent: the snapshot upserts on
+// (propAccountId, date) and each alert's unique dedupeKey means a level that's
+// already been alerted today is skipped. Mirrors the codebase's pattern of
+// letting a read action persist derived state (see getPropFirmAccounts).
+async function persistState(userId: string, accounts: PropMaxAccountView[]): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  const snapshots = accounts.map((a) => buildSnapshot(a, userId, today)).filter((s): s is NonNullable<typeof s> => s != null)
+  const alerts = accounts.flatMap((a) => deriveAlerts(a, userId, today))
+
+  for (const s of snapshots) {
+    await db
+      .insert(propSnapshot)
+      .values(s)
+      .onConflictDoUpdate({
+        target: [propSnapshot.propAccountId, propSnapshot.date],
+        set: { balance: s.balance, equity: s.equity, highWaterMark: s.highWaterMark, riskStatus: s.riskStatus, evaluation: s.evaluation },
+      })
+  }
+  for (const a of alerts) {
+    await db
+      .insert(propAlert)
+      .values({
+        propAccountId: a.propAccountId,
+        userId: a.userId,
+        ruleType: a.ruleType,
+        status: a.status,
+        severity: a.severity,
+        title: a.title,
+        body: a.body,
+        percentageUsed: a.percentageUsed != null ? String(a.percentageUsed) : null,
+        dedupeKey: a.dedupeKey,
+      })
+      .onConflictDoNothing({ target: propAlert.dedupeKey })
+  }
+}
+
+async function getUserId() {
+  const session = await auth.api.getSession({ headers: await headers() })
+  if (!session?.user) throw new Error("Unauthorized")
+  return session.user.id
+}
+
+export async function getPropMaxData(): Promise<PropMaxData> {
+  const userId = await getUserId()
+  const [accounts, catalog] = await Promise.all([getPropMaxOverview(userId), buildCatalog()])
+  // Record snapshots + fire alerts off this fresh evaluation (idempotent).
+  await persistState(userId, accounts)
   return { accounts, catalog }
 }
 
 // One account's detail (its evaluation) plus the catalog, for the detail page
-// and its "change rules" picker.
+// and its "change rules" picker. Read-only (no snapshot/alert writes here — the
+// main page's load already did that).
 export async function getPropMaxAccountDetail(accountId: number): Promise<{ account: PropMaxAccountView | null; catalog: CatalogOption[] }> {
-  const { accounts, catalog } = await getPropMaxData()
+  const userId = await getUserId()
+  const [accounts, catalog] = await Promise.all([getPropMaxOverview(userId), buildCatalog()])
   return { account: accounts.find((a) => a.accountId === accountId) ?? null, catalog }
+}
+
+// The user's unacknowledged alerts, newest first, for the alert center.
+export async function getPropMaxAlerts(): Promise<PropMaxAlertView[]> {
+  const userId = await getUserId()
+  const rows = await db
+    .select({
+      id: propAlert.id,
+      accountId: propAccount.accountId,
+      accountName: tradingAccounts.name,
+      ruleType: propAlert.ruleType,
+      status: propAlert.status,
+      severity: propAlert.severity,
+      title: propAlert.title,
+      body: propAlert.body,
+      percentageUsed: propAlert.percentageUsed,
+      createdAt: propAlert.createdAt,
+    })
+    .from(propAlert)
+    .leftJoin(propAccount, eq(propAlert.propAccountId, propAccount.id))
+    .leftJoin(tradingAccounts, eq(propAccount.accountId, tradingAccounts.id))
+    .where(and(eq(propAlert.userId, userId), isNull(propAlert.acknowledgedAt)))
+    .orderBy(desc(propAlert.createdAt))
+    .limit(50)
+
+  return rows.map((r) => ({
+    id: r.id,
+    accountId: r.accountId ?? null,
+    accountName: r.accountName ?? "Account",
+    ruleType: r.ruleType,
+    status: r.status,
+    severity: r.severity,
+    title: r.title,
+    body: r.body,
+    percentageUsed: r.percentageUsed != null ? Number(r.percentageUsed) : null,
+    createdAt: r.createdAt.toISOString(),
+  }))
+}
+
+export async function acknowledgePropMaxAlert(alertId: number) {
+  const userId = await getUserId()
+  await db.update(propAlert).set({ acknowledgedAt: new Date() }).where(and(eq(propAlert.id, alertId), eq(propAlert.userId, userId)))
+  revalidatePath("/propfirm-max")
+}
+
+export async function acknowledgeAllPropMaxAlerts() {
+  const userId = await getUserId()
+  await db.update(propAlert).set({ acknowledgedAt: new Date() }).where(and(eq(propAlert.userId, userId), isNull(propAlert.acknowledgedAt)))
+  revalidatePath("/propfirm-max")
 }
 
 // Bind one of the user's accounts to a specific, existing rule version. The
@@ -137,5 +233,85 @@ export async function seedPropMaxCatalogAction() {
   await assertAdmin({ brokers: ["sync"] })
   const result = await seedPropmaxCatalog(db)
   revalidatePath("/propfirm-max")
+  revalidatePath("/admin/prop-rules")
   return result
+}
+
+const RULE_TYPES = new Set<RuleType>([
+  "max_daily_loss",
+  "max_drawdown",
+  "profit_target",
+  "min_trading_days",
+  "max_trading_days",
+  "consistency",
+  "max_position_size",
+  "max_contracts",
+  "max_open_positions",
+  "inactivity",
+  "weekend_holding",
+  "news_restriction",
+  "min_trade_duration",
+])
+
+// Admin-only: publish a new rule version for a (program, size, phase). This is
+// the versioning workflow — the current in-force version is retired
+// (effectiveTo = now) and a new one takes its place with a bumped version and a
+// changeReason, so history is preserved and any account pinned to the old
+// version keeps being judged by it. A source is mandatory: rules are never
+// published without one.
+export async function createPropRuleVersion(input: {
+  programId: number
+  accountSize: number | null
+  phase: string
+  rules: RuleConfig[]
+  sourceName: string
+  sourceUrl?: string | null
+  sourceType?: string
+  confidence?: string
+  verifiedAt?: string | null
+  changeReason?: string | null
+  caveat?: string | null
+}) {
+  const admin = await assertAdmin({ brokers: ["sync"] })
+
+  if (!input.sourceName?.trim()) throw new Error("A source is required — rules are never published without one.")
+  const rules = (input.rules ?? []).filter((r) => RULE_TYPES.has(r.type) && (r.value == null || Number.isFinite(r.value)))
+  if (rules.length === 0) throw new Error("Add at least one rule.")
+
+  const [program] = await db.select({ id: propProgram.id }).from(propProgram).where(eq(propProgram.id, input.programId))
+  if (!program) throw new Error("Program not found.")
+
+  const now = new Date()
+  const scope = and(
+    eq(propRuleVersion.programId, input.programId),
+    input.accountSize == null ? isNull(propRuleVersion.accountSize) : eq(propRuleVersion.accountSize, input.accountSize),
+    eq(propRuleVersion.phase, input.phase),
+  )
+
+  // Retire the current in-force version for this scope, if any.
+  await db.update(propRuleVersion).set({ effectiveTo: now }).where(and(scope, isNull(propRuleVersion.effectiveTo)))
+
+  const prior = await db.select({ version: propRuleVersion.version }).from(propRuleVersion).where(scope).orderBy(desc(propRuleVersion.version)).limit(1)
+  const version = (prior[0]?.version ?? 0) + 1
+
+  await db.insert(propRuleVersion).values({
+    programId: input.programId,
+    accountSize: input.accountSize,
+    phase: input.phase,
+    version,
+    rules,
+    sourceName: input.sourceName.trim(),
+    sourceUrl: input.sourceUrl?.trim() || null,
+    sourceType: input.sourceType || "official_rules",
+    confidence: input.confidence || "medium",
+    verifiedAt: input.verifiedAt ? new Date(input.verifiedAt) : now,
+    effectiveFrom: now,
+    changeReason: input.changeReason?.trim() || null,
+    caveat: input.caveat?.trim() || null,
+    createdBy: admin.id,
+  })
+
+  revalidatePath("/admin/prop-rules")
+  revalidatePath("/propfirm-max")
+  return { version }
 }

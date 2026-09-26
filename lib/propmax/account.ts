@@ -136,8 +136,16 @@ export interface PropMaxBinding {
   caveat: string | null
 }
 
+export interface PropMaxMetrics {
+  balance: number
+  equity: number | null
+  highWaterMark: number
+}
+
 export interface PropMaxAccountView {
   accountId: number
+  // The prop_account binding's own id (for snapshots/alerts). Null when unbound.
+  propAccountId: number | null
   name: string
   broker: string | null
   startingBalance: number
@@ -145,6 +153,8 @@ export interface PropMaxAccountView {
   brokerBalance: number | null
   binding: PropMaxBinding | null
   evaluation: AccountEvaluation | null
+  // Balance / high-water mark from the evaluation context, for snapshots.
+  metrics: PropMaxMetrics | null
   // Set when there's no binding yet — a suggestion for setup, never applied
   // automatically.
   detection: Detection | null
@@ -171,7 +181,7 @@ async function evaluateBound(
   binding: typeof propAccount.$inferSelect,
   version: RuleVersionRow,
   payouts: { at: string; amount: number }[],
-): Promise<AccountEvaluation> {
+): Promise<{ evaluation: AccountEvaluation; metrics: PropMaxMetrics }> {
   const startingBalance = Number(account.startingBalance)
   const engineTrades = await loadEngineTrades(db, account.id)
   const [openPositions, livePositionsAvailable] = await loadOpenPositions(db, account.id)
@@ -195,7 +205,10 @@ async function evaluateBound(
     payouts,
     lastSyncAt: brokerLinked ? account.balanceUpdatedAt : null,
   })
-  return evaluateAccount(ctx, ruleSetFromVersion(version))
+  return {
+    evaluation: evaluateAccount(ctx, ruleSetFromVersion(version)),
+    metrics: { balance: ctx.balance, equity: ctx.equity, highWaterMark: ctx.highWaterMark },
+  }
 }
 
 // Everything the PropFirm Max overview needs for a user: each non-archived
@@ -251,11 +264,12 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
       const payouts = payoutRows
         .filter((p) => p.accountId === account.id)
         .map((p) => ({ at: p.occurredAt.toISOString(), amount: Number(p.amount) }))
-      const evaluation = await evaluateBound(db, account, binding, version, payouts)
+      const { evaluation, metrics } = await evaluateBound(db, account, binding, version, payouts)
       const firm = binding.firmId != null ? firmById.get(binding.firmId) : null
       const program = binding.programId != null ? programById.get(binding.programId) : null
       views.push({
         accountId: account.id,
+        propAccountId: binding.id,
         name: account.name,
         broker: account.broker,
         startingBalance,
@@ -275,6 +289,7 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
           caveat: version.caveat,
         },
         evaluation,
+        metrics,
         detection: null,
       })
     } else {
@@ -284,6 +299,7 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
       )
       views.push({
         accountId: account.id,
+        propAccountId: null,
         name: account.name,
         broker: account.broker,
         startingBalance,
@@ -291,6 +307,7 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
         brokerBalance: brokerLinked ? Number(account.currentBalance) : null,
         binding: null,
         evaluation: null,
+        metrics: null,
         detection,
       })
     }

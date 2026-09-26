@@ -3,9 +3,9 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Activity, BookOpen, CreditCard, Database, FileUp, Gauge, LifeBuoy, Lock, Megaphone, PlugZap, ScrollText, ShieldCheck, Users } from "lucide-react"
+import { Activity, BookOpen, CreditCard, Database, FileUp, Gauge, LifeBuoy, Lock, Megaphone, PlugZap, ScrollText, ShieldCheck, SlidersHorizontal, Users } from "lucide-react"
 
-const ICONS = { overview: Gauge, users: Users, billing: CreditCard, brokers: PlugZap, analytics: Activity, announcements: Megaphone, audit: ScrollText, team: ShieldCheck, support: LifeBuoy, security: Lock, imports: FileUp, content: BookOpen, system: Database }
+const ICONS = { overview: Gauge, users: Users, billing: CreditCard, brokers: PlugZap, analytics: Activity, announcements: Megaphone, audit: ScrollText, team: ShieldCheck, support: LifeBuoy, security: Lock, imports: FileUp, content: BookOpen, system: Database, propRules: SlidersHorizontal }
 
 export type NavItem = { href: string; label: string; icon: keyof typeof ICONS; badge?: number }
 

@@ -23,3 +23,17 @@ export interface PropMaxData {
   accounts: PropMaxAccountView[]
   catalog: CatalogOption[]
 }
+
+// A fired alert as the alert center shows it.
+export interface PropMaxAlertView {
+  id: number
+  accountId: number | null // the trading account, for linking
+  accountName: string
+  ruleType: string | null
+  status: string
+  severity: string
+  title: string
+  body: string
+  percentageUsed: number | null
+  createdAt: string
+}
