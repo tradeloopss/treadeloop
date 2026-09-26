@@ -107,6 +107,60 @@ export interface TradeManagerData {
   trades: OpenTradeView[]
 }
 
+// A recently-closed trade, for the "Closed Today" tab and the win-rate KPI.
+export interface ClosedTradeRow {
+  id: number
+  accountId: number | null
+  accountName: string
+  currency: string
+  symbol: string
+  side: "long" | "short"
+  quantity: number
+  entryPrice: number
+  exitPrice: number | null
+  pnl: number
+  exitTime: string // ISO
+}
+
+// KPI figures for the Trades Manager header — all from real data.
+export interface TradesManagerStats {
+  openCount: number
+  buys: number
+  shorts: number
+  // Sum of unrealized P&L across positions that report it (MetaTrader). Null
+  // when no open position reports a live P&L, so the UI shows "—" not "$0".
+  totalUnrealized: number | null
+  todayRealized: number
+  wins: number
+  losses: number
+  winRate: number | null // over closed-today; null when nothing closed today
+}
+
+export interface TradesManagerData {
+  accounts: { id: number; name: string }[]
+  openTrades: OpenTradeView[]
+  closedToday: ClosedTradeRow[]
+  stats: TradesManagerStats
+}
+
+export function computeStats(openTrades: OpenTradeView[], closedToday: ClosedTradeRow[]): TradesManagerStats {
+  const withPnl = openTrades.filter((t) => t.unrealizedPnl != null)
+  const totalUnrealized = withPnl.length ? round2(withPnl.reduce((s, t) => s + (t.unrealizedPnl ?? 0), 0)) : null
+  const wins = closedToday.filter((t) => t.pnl > 0).length
+  const losses = closedToday.filter((t) => t.pnl < 0).length
+  const decided = wins + losses
+  return {
+    openCount: openTrades.length,
+    buys: openTrades.filter((t) => t.side === "long").length,
+    shorts: openTrades.filter((t) => t.side === "short").length,
+    totalUnrealized,
+    todayRealized: round2(closedToday.reduce((s, t) => s + t.pnl, 0)),
+    wins,
+    losses,
+    winRate: decided > 0 ? Math.round((wins / decided) * 100) : null,
+  }
+}
+
 // Metrics for a LIVE broker position that reports its floating P&L (MetaTrader).
 // Rather than guess a forex pip value, we calibrate money-per-price-move from
 // the broker's own unrealized P&L: perUnit = profit ÷ (current − open). Then

@@ -1,9 +1,9 @@
-import { getOpenTradesOverview } from "@/app/actions/trade-manager"
-import { TradeManager } from "@/components/trade-manager/trade-manager"
+import { getTradesManagerData } from "@/app/actions/trade-manager"
+import { TradesManager } from "@/components/trade-manager/trades-manager"
 
-export const metadata = { title: "Trade Manager" }
+export const metadata = { title: "Trades Manager" }
 
 export default async function TradeManagerPage() {
-  const data = await getOpenTradesOverview()
-  return <TradeManager data={data} />
+  const data = await getTradesManagerData()
+  return <TradesManager data={data} />
 }

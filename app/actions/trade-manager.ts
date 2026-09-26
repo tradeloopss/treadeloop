@@ -2,12 +2,12 @@
 
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, gte } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { tradingAccounts, trades, providerAccounts, providerPositions, metatraderConnections } from "@/lib/db/schema"
 import { contractMultiplierForSymbol, computePnl, computeRMultiple } from "@/lib/calc"
-import { openTradeMetrics, liveTradeMetrics, type TradeManagerData, type OpenTradeView } from "@/lib/trade-manager"
+import { openTradeMetrics, liveTradeMetrics, computeStats, type TradeManagerData, type TradesManagerData, type ClosedTradeRow, type OpenTradeView } from "@/lib/trade-manager"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -181,6 +181,53 @@ function hashCode(s: string): number {
 export async function getOpenTradesOverview(): Promise<TradeManagerData> {
   const userId = await getUserId()
   return loadOpenPositions(userId)
+}
+
+// Everything the Trades Manager page needs: real open positions, today's
+// closed trades, and KPI stats — all from the user's own data.
+export async function getTradesManagerData(): Promise<TradesManagerData> {
+  const userId = await getUserId()
+  const { accounts, trades: openTrades } = await loadOpenPositions(userId)
+  const nameById = new Map(accounts.map((a) => [a.id, a.name]))
+  const currencyByAccount = new Map<number, string>()
+  const accRows = await db.select({ id: tradingAccounts.id, currency: tradingAccounts.currency }).from(tradingAccounts).where(eq(tradingAccounts.userId, userId))
+  for (const a of accRows) currencyByAccount.set(a.id, a.currency)
+
+  const startOfDay = new Date()
+  startOfDay.setUTCHours(0, 0, 0, 0)
+  const closedRows = await db
+    .select({
+      id: trades.id,
+      accountId: trades.accountId,
+      symbol: trades.symbol,
+      side: trades.side,
+      quantity: trades.quantity,
+      entryPrice: trades.entryPrice,
+      exitPrice: trades.exitPrice,
+      pnl: trades.pnl,
+      exitTime: trades.exitTime,
+    })
+    .from(trades)
+    .where(and(eq(trades.userId, userId), eq(trades.status, "closed"), gte(trades.exitTime, startOfDay)))
+    .orderBy(desc(trades.exitTime))
+
+  const closedToday: ClosedTradeRow[] = closedRows
+    .filter((t) => t.exitTime != null)
+    .map((t) => ({
+      id: t.id,
+      accountId: t.accountId,
+      accountName: t.accountId != null ? nameById.get(t.accountId) ?? "Account" : "Unassigned",
+      currency: t.accountId != null ? currencyByAccount.get(t.accountId) ?? "USD" : "USD",
+      symbol: t.symbol,
+      side: t.side === "short" ? "short" : "long",
+      quantity: Number(t.quantity),
+      entryPrice: Number(t.entryPrice),
+      exitPrice: t.exitPrice != null ? Number(t.exitPrice) : null,
+      pnl: Number(t.pnl),
+      exitTime: t.exitTime!.toISOString(),
+    }))
+
+  return { accounts, openTrades, closedToday, stats: computeStats(openTrades, closedToday) }
 }
 
 // The open positions for one account (for the PropFirm Max account detail's
