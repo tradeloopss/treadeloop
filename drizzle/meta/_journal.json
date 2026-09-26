@@ -120,6 +120,13 @@
       "when": 1790130000000,
       "tag": "0016_ninjatrader_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790200000000,
+      "tag": "0017_subscription_trial_ip",
+      "breakpoints": true
     }
   ]
 }

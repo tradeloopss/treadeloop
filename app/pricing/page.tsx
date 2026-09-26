@@ -3,7 +3,8 @@ import { ShieldCheck } from "lucide-react"
 import Link from "next/link"
 import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
-import { hasUsedTrial } from "@/lib/subscription"
+import { hasUsedTrial, ipHasUsedTrial } from "@/lib/subscription"
+import { trialIpHashFrom } from "@/lib/trial-ip"
 import { BrandMark } from "@/components/brand-mark"
 import { getT } from "@/lib/i18n/server"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -15,11 +16,13 @@ export default async function PricingPage({
 }) {
   const { required } = await searchParams
   const t = await getT()
-  // One free trial per person: someone signed in who has already had theirs
-  // sees the plans as starting today. Signed-out visitors see the trial;
-  // /checkout re-checks once they've signed in.
-  const session = await auth.api.getSession({ headers: await headers() })
-  const trialEligible = !session?.user || !(await hasUsedTrial(session.user.id, session.user.email))
+  // One free trial per person: someone (by account, email, or IP) who has
+  // already had theirs sees the plans as starting today. Signed-out visitors
+  // are checked by IP; /checkout re-checks once they've signed in.
+  const h = await headers()
+  const session = await auth.api.getSession({ headers: h })
+  const ipHash = trialIpHashFrom(h)
+  const trialEligible = session?.user ? !(await hasUsedTrial(session.user.id, session.user.email, ipHash)) : !(await ipHasUsedTrial(ipHash))
 
   return (
     <div className="min-h-svh bg-gradient-to-b from-background to-accent/20 px-4 py-16">

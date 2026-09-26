@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { createCheckout } from "@/lib/checkout"
 import { getUserPlan, hasUsedTrial } from "@/lib/subscription"
+import { trialIpHashFrom } from "@/lib/trial-ip"
 import type { PlanTier, Billing } from "@/lib/whop"
 
 // Where a visitor who picked a plan while signed out lands after signing
@@ -18,7 +19,8 @@ export default async function CheckoutPage({
     redirect("/pricing")
   }
 
-  const session = await auth.api.getSession({ headers: await headers() })
+  const h = await headers()
+  const session = await auth.api.getSession({ headers: h })
   if (!session?.user) {
     redirect(`/sign-up?next=${encodeURIComponent(`/checkout?plan=${plan}&billing=${billing}`)}`)
   }
@@ -26,9 +28,11 @@ export default async function CheckoutPage({
   // them a second plan.
   if (await getUserPlan(session.user.id)) redirect("/dashboard")
   // They picked this plan while signed out, when the page promised a free
-  // trial it couldn't know they'd already had. Rather than send them to a
-  // checkout that charges today, show them the plans as they actually are.
-  if (await hasUsedTrial(session.user.id, session.user.email)) redirect("/pricing")
+  // trial it couldn't know they'd already had — by their account, email, or
+  // this IP. Rather than send them to a checkout that charges today, show them
+  // the plans as they actually are.
+  const ipHash = trialIpHashFrom(h)
+  if (await hasUsedTrial(session.user.id, session.user.email, ipHash)) redirect("/pricing")
 
-  redirect(await createCheckout(session.user, plan as PlanTier, billing as Billing))
+  redirect(await createCheckout(session.user, plan as PlanTier, billing as Billing, null, ipHash))
 }

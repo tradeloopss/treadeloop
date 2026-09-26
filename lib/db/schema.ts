@@ -598,6 +598,10 @@ export const subscriptions = pgTable("subscriptions", {
   // whop | admin. An admin grant is access given from the admin panel with
   // no payment behind it; it lapses at currentPeriodEnd.
   source: text("source").notNull().default("whop"),
+  // HMAC of the IP that claimed the free trial on this checkout (never the raw
+  // address). Set only when a trial was granted, so a later signup from the
+  // same IP is offered no trial (lib/trial-ip.ts, lib/subscription.hasUsedTrial).
+  trialIpHash: text("trialIpHash"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
 })

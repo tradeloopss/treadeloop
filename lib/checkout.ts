@@ -33,9 +33,12 @@ export async function createCheckout(
   user: { id: string; email: string },
   plan: PlanTier,
   billing: Billing,
-  replaces: string | null = null
+  replaces: string | null = null,
+  // Hashed IP of the request (lib/trial-ip.ts): a trial is offered only if this
+  // IP hasn't already claimed one, and the hash is stored on the row below.
+  ipHash: string | null = null
 ): Promise<string> {
-  const withTrial = !(await hasUsedTrial(user.id, user.email))
+  const withTrial = !(await hasUsedTrial(user.id, user.email, ipHash))
   const { amount, billingPeriodDays, trialPeriodDays } = renewalPriceFor(plan, billing, withTrial)
   const title = `${PLAN_PRICING[plan].title} (${billing === "annual" ? "Annual" : "Monthly"})`
   const productId = await getProductIdForPlan(plan)
@@ -70,6 +73,9 @@ export async function createCheckout(
       billing,
       status: PENDING_STATUS,
       whopPlanId: config.plan.id,
+      // Only record the IP when a trial is actually being granted, so the
+      // check counts trials, not every checkout, from an address.
+      trialIpHash: withTrial ? ipHash : null,
     })
   }
   return config.purchase_url

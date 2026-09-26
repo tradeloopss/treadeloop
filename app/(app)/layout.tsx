@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { announcements } from "@/lib/db/schema"
 import { getUserPlan, hasUsedTrial, isOwnerEmail } from "@/lib/subscription"
+import { trialIpHashFrom } from "@/lib/trial-ip"
 import { isAdminRole } from "@/lib/admin/roles"
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
 import { SubscriptionPaywall } from "@/components/subscription-paywall"
@@ -38,8 +39,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ])
   const locked = plan === null
   // Only matters for the paywall: whether to offer the free trial or (once
-  // they've had it) a plan that starts today.
-  const trialEligible = locked ? !(await hasUsedTrial(session.user.id, session.user.email)) : true
+  // they've had it — by account, email, or IP) a plan that starts today.
+  const trialEligible = locked ? !(await hasUsedTrial(session.user.id, session.user.email, trialIpHashFrom(requestHeaders))) : true
   const impersonating = !!session.session.impersonatedBy
   // Server time for this layout's own work (session + plan + announcements).
   // Pages measure themselves the same way via recordRequestTiming.

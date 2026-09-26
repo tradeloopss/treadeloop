@@ -189,7 +189,7 @@ export async function memberAndCardInUse(membershipId: string): Promise<{ member
   return { memberId, cardInUse }
 }
 
-export async function getBillingOverview(user: { id: string; email: string; name: string }): Promise<BillingOverview> {
+export async function getBillingOverview(user: { id: string; email: string; name: string }, ipHash: string | null = null): Promise<BillingOverview> {
   const [owner, rows, adminRows, trialUsed] = await Promise.all([
     isOwner(user.id),
     whopRows(user.id),
@@ -198,7 +198,7 @@ export async function getBillingOverview(user: { id: string; email: string; name
       .from(subscriptions)
       .where(and(eq(subscriptions.userId, user.id), eq(subscriptions.source, "admin")))
       .orderBy(desc(subscriptions.updatedAt)),
-    hasUsedTrial(user.id, user.email),
+    hasUsedTrial(user.id, user.email, ipHash),
   ])
   const adminRow = adminRows.find(rowGrantsAccess) ?? null
 

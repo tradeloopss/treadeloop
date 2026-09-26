@@ -55,21 +55,30 @@ export async function getUserPlan(userId: string): Promise<"pro" | "essential" |
 
 // Whether this person has already had their free trial. Every Whop checkout
 // created for a first-time subscriber carries one, so any Whop membership
-// that ever existed for them — under this account, or under their email in
-// case they come back with a new account — means the trial is spent, however
-// it ended. Pending rows are checkouts that were never completed, and admin
-// grants aren't trials, so neither counts.
-export async function hasUsedTrial(userId: string, email: string): Promise<boolean> {
+// that ever existed for them — under this account, under their email in case
+// they come back with a new account, or from the same IP the trial was claimed
+// from (lib/trial-ip.ts) — means the trial is spent, however it ended. Pending
+// rows are checkouts that were never completed, and admin grants aren't trials,
+// so neither counts.
+export async function hasUsedTrial(userId: string, email: string, ipHash?: string | null): Promise<boolean> {
+  const identity = [eq(subscriptions.userId, userId), sql`lower(${subscriptions.email}) = ${email.toLowerCase()}`]
+  if (ipHash) identity.push(eq(subscriptions.trialIpHash, ipHash))
   const [row] = await db
     .select({ id: subscriptions.id })
     .from(subscriptions)
-    .where(
-      and(
-        eq(subscriptions.source, "whop"),
-        ne(subscriptions.status, PENDING_STATUS),
-        or(eq(subscriptions.userId, userId), sql`lower(${subscriptions.email}) = ${email.toLowerCase()}`)
-      )
-    )
+    .where(and(eq(subscriptions.source, "whop"), ne(subscriptions.status, PENDING_STATUS), or(...identity)))
+    .limit(1)
+  return row != null
+}
+
+// Trial-eligibility by IP alone — for a signed-out visitor (the pricing page),
+// where there's no account or email to check yet.
+export async function ipHasUsedTrial(ipHash: string | null | undefined): Promise<boolean> {
+  if (!ipHash) return false
+  const [row] = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(and(eq(subscriptions.source, "whop"), ne(subscriptions.status, PENDING_STATUS), eq(subscriptions.trialIpHash, ipHash)))
     .limit(1)
   return row != null
 }

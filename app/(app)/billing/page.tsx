@@ -2,6 +2,7 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { getBillingOverview, type PlanOption } from "@/lib/billing"
+import { trialIpHashFrom } from "@/lib/trial-ip"
 import { PLAN_PRICING, renewalPriceFor, type Billing, type PlanTier } from "@/lib/whop"
 import { getT } from "@/lib/i18n/server"
 import { BillingCenter } from "@/components/billing/billing-center"
@@ -15,9 +16,10 @@ export async function generateMetadata() {
 export const maxDuration = 30
 
 export default async function BillingPage() {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const h = await headers()
+  const session = await auth.api.getSession({ headers: h })
   if (!session?.user) redirect("/sign-in?next=/billing")
-  const overview = await getBillingOverview({ id: session.user.id, email: session.user.email, name: session.user.name })
+  const overview = await getBillingOverview({ id: session.user.id, email: session.user.email, name: session.user.name }, trialIpHashFrom(h))
 
   // What each plan would charge if chosen now — the same numbers checkout
   // creates (promo included; a switch never gets a second free trial).

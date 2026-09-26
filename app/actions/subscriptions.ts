@@ -6,6 +6,7 @@ import { redirect } from "next/navigation"
 import { createCheckout, confirmPendingCheckouts } from "@/lib/checkout"
 import { getUserPlan } from "@/lib/subscription"
 import { currentWhopMembershipId } from "@/lib/billing"
+import { trialIpHashFrom } from "@/lib/trial-ip"
 import type { PlanTier, Billing } from "@/lib/whop"
 
 async function getSession() {
@@ -24,7 +25,8 @@ export async function startCheckout(plan: PlanTier, billing: Billing) {
   // Already subscribed on Whop: this is a plan switch, and the new
   // membership retires the current one once it's live (lib/checkout.ts).
   const replaces = await currentWhopMembershipId(session.user.id)
-  const url = await createCheckout(session.user, plan, billing, replaces)
+  const ipHash = trialIpHashFrom(await headers())
+  const url = await createCheckout(session.user, plan, billing, replaces, ipHash)
   redirect(url)
 }
 
