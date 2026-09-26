@@ -21,14 +21,16 @@ const AUTO_SYNC = [
     detail: "Connect with your investor (read-only) password. Closed positions and balance sync on their own.",
     note: "Set up today for Exness, FTMO (including its free-trial servers), FundedNext and ACG Markets (Alpha Capital). Other brokers are added as traders ask for them.",
   },
-]
-
-const COMING_SOON = [
   {
     name: "Tradovate",
-    detail: "Direct account connection is in progress. Until it ships, import a Tradovate CSV — it takes about a minute.",
+    detail: "Through NinjaTrader 8: connect your Tradovate account there and add the TradeLoop add-on. Fills sync within seconds while NinjaTrader is open.",
+    note: "Works with prop-firm Tradovate accounts (Apex, Tradeify, MyFundedFutures and others). Your Tradovate password stays in NinjaTrader.",
   },
 ]
+
+// Nothing is waiting on a direct connection right now; the section shows
+// again when something is.
+const COMING_SOON: { name: string; detail: string }[] = []
 
 const FILE_IMPORT = [
   { name: "Tradovate", how: "Reports → Orders → pick a date range → Download CSV" },
@@ -83,6 +85,7 @@ export default async function BrokersPage() {
           </div>
         </section>
 
+        {COMING_SOON.length > 0 && (
         <section className="mt-6 rounded-2xl border bg-card p-6 sm:p-8">
           <div className="flex items-center gap-2">
             <span className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -108,6 +111,7 @@ export default async function BrokersPage() {
             ))}
           </div>
         </section>
+        )}
 
         <section className="mt-6 rounded-2xl border bg-card p-6 sm:p-8">
           <div className="flex items-center gap-2">

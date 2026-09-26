@@ -13,7 +13,7 @@ import type { ConnectionHealth, HubAccount, HubConnection } from "@/components/a
 
 // Shared pieces of the Accounts page's account list (accounts-list.tsx).
 
-export const PLATFORM_LABEL: Record<HubConnection["kind"], string> = { rithmic: "Rithmic", mt5: "MetaTrader 5", mt4: "MetaTrader 4", tradingview: "TradingView", tradovate: "Tradovate" }
+export const PLATFORM_LABEL: Record<HubConnection["kind"], string> = { rithmic: "Rithmic", mt5: "MetaTrader 5", mt4: "MetaTrader 4", tradingview: "TradingView", tradovate: "Tradovate", ninjatrader: "Tradovate via NinjaTrader" }
 
 export function HealthPill({ health }: { health: ConnectionHealth | "manual" | "archived" }) {
   const t = useT()

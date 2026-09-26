@@ -23,9 +23,9 @@ export interface HubAccount {
 // One live connection (a card in "Your connected accounts").
 export interface HubConnection {
   key: string
-  kind: "rithmic" | "mt5" | "mt4" | "tradingview" | "tradovate"
+  kind: "rithmic" | "mt5" | "mt4" | "tradingview" | "tradovate" | "ninjatrader"
   connectionId: number
-  providerAccountRowId?: number // tradovate: this account's provider_accounts row (per-account disconnect)
+  providerAccountRowId?: number // tradovate / ninjatrader: this account's provider_accounts row (per-account disconnect)
   title: string
   subtitle: string
   logoName: string | null // matched against lib/broker-logos

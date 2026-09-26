@@ -13,6 +13,7 @@ import { ESSENTIAL_ACCOUNT_LIMIT, ESSENTIAL_METATRADER_LIMIT, type PlanUsage } f
 import { getT } from "@/lib/i18n/server"
 import { tradovateAvailability } from "@/lib/tradovate/config"
 import { tradovateConnectionsFor } from "@/lib/tradovate/connections"
+import { ninjaTraderViewFor, type NinjaTraderView } from "@/lib/ninjatrader/connections"
 
 // Connecting Rithmic (login + account discovery + history) and "Sync all"
 // run as server actions on this route and can take up to a minute.
@@ -40,7 +41,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const initialPlatform = CONNECTABLE.find((p) => p === connect) ?? (tradovateParam ? "tradovate" : null)
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate] = await Promise.all([
+  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate, ninjatrader] = await Promise.all([
     getAccounts(true),
     getRithmicConnections(),
     getMetaTraderConnections(),
@@ -55,6 +56,12 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           return []
         })
       : Promise.resolve([]),
+    session?.user
+      ? ninjaTraderViewFor(session.user.id).catch((err): NinjaTraderView | null => {
+          console.error("[accounts] ninjatrader view unavailable:", err instanceof Error ? err.message : err)
+          return null
+        })
+      : Promise.resolve(null),
   ])
   const tradovateStatus = tradovateAvailability()
 
@@ -208,6 +215,45 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
               }
             }),
     ),
+    // Tradovate (or another broker) through the NinjaTrader add-on: one row per
+    // account it reports. The add-on pushes fills itself while NinjaTrader is
+    // open, so there's no "Sync now"; being offline just means it's closed.
+    ...(ninjatrader?.connectionId != null
+      ? ninjatrader.accounts
+          .filter((a) => a.enabled)
+          .map((a): HubConnection => {
+            const acct = account(a.tradingAccountId)
+            const deviceError = ninjatrader.devices.find((d) => d.lastStatus === "error")
+            const health = a.planLimited ? "error" : deviceError ? "warning" : "connected"
+            return {
+              key: `nt:${a.id}`,
+              kind: "ninjatrader",
+              connectionId: ninjatrader.connectionId!,
+              providerAccountRowId: a.id,
+              title: acct?.name ?? a.name,
+              subtitle: `${t("via NinjaTrader")} · ${a.connectionName ?? a.broker}`,
+              // A prop firm's own logo when the account's name gives it away (APEX-…).
+              logoName: brokerLogo(a.name) ? a.name : (acct?.broker ?? a.broker),
+              health,
+              message: a.planLimited ? t("Over your plan's account limit — upgrade to Pro to sync it.") : (deviceError?.lastError ?? null),
+              currency: a.currency,
+              balance: a.balance,
+              equity: a.equity,
+              openPositions: null,
+              tradeCount: null,
+              lastSyncedAt: ninjatrader.lastSeenAt ? new Date(ninjatrader.lastSeenAt) : null,
+              canSync: false,
+              account: acct,
+              reconnect: null,
+              diagnostics: [
+                { label: t("NinjaTrader"), value: ninjatrader.online ? t("Online") : t("Offline — syncs when NinjaTrader is open") },
+                { label: t("Last check-in"), at: ninjatrader.lastSeenAt },
+                { label: t("Fills received"), value: String(a.executions) },
+                { label: t("Last fill"), at: a.lastExecutionAt },
+              ],
+            }
+          })
+      : []),
   ]
 
   const otherAccounts = accounts.filter((a) => !linked.has(a.id)).map((a) => byId.get(a.id)!)

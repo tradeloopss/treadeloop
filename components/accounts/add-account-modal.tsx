@@ -18,6 +18,7 @@ import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
 import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { ConnectionStepper } from "@/components/accounts/connection-stepper"
 import { TradovateConnect, TradovateProgress, type TradovateProgressState } from "@/components/accounts/tradovate-connect"
+import { NinjaTraderSetup, type NinjaTraderSetupState } from "@/components/accounts/ninjatrader-setup"
 import { Badge, PlatformCard, type PlatformBadge } from "@/components/accounts/platform-card"
 import type { PlatformId } from "@/components/accounts/types"
 import type { PlanUsage } from "@/lib/plan-allowance"
@@ -153,18 +154,19 @@ const PLATFORMS: PlatformDef[] = [
     needs: ["An export from Tradovate, NinjaTrader, TradingView or MetaTrader"],
     security: "The file is read once to import your trades — no login or password needed.",
   },
+  // Tradovate through NinjaTrader 8 (the TradeLoop add-on). Replaced by
+  // TRADOVATE_LIVE below when Tradovate's own API is configured.
   {
     id: "tradovate",
     name: "Tradovate",
-    card: "Futures & options, coming soon",
-    badge: "soon",
+    card: "Futures, live sync via NinjaTrader",
+    badge: "live",
     icon: <Logo src="/brokers/sm/tradovate.png" />,
     live: true,
-    soon: true,
-    keywords: "futures options",
-    about: "Direct Tradovate sync is in progress. Until it ships, import a Tradovate CSV — it takes about a minute.",
-    needs: ["For now: a Tradovate Orders CSV (Reports → Orders → Download CSV)"],
-    security: null,
+    keywords: "futures prop apex tradeify mffu myfundedfutures takeprofit ninjatrader nt8 add-on addon",
+    about: "Connect your Tradovate account in NinjaTrader 8 and add the TradeLoop add-on — every fill lands in your journal within seconds while NinjaTrader is open.",
+    needs: ["NinjaTrader 8 on a Windows PC, with your Tradovate account connected", "The TradeLoop add-on — a one-file download"],
+    security: "Your Tradovate password stays in NinjaTrader — TradeLoop never sees it. The add-on only reads your fills and balances and sends them here; it can't place, change or cancel orders.",
   },
 ]
 
@@ -190,8 +192,10 @@ const CONNECT_COPY: Record<PlatformId, { title: string; description: string }> =
   mt4: { title: "Connect your MetaTrader 4 account", description: "Use the investor (read-only) password from your broker or prop firm — never your trading password." },
   tradingview: { title: "Connect TradingView paper trading", description: "Pair the TradeLoop browser extension once; paper trades then sync on their own." },
   file: { title: "Import a file", description: "Upload an export from your platform. Accounts in the file are created automatically, and re-importing never duplicates trades." },
-  tradovate: { title: "Connect Tradovate", description: "Sign in on Tradovate's own page; your accounts then sync on their own." },
+  tradovate: { title: "Sync Tradovate through NinjaTrader", description: "Three steps, about two minutes. After that, fills sync on their own whenever NinjaTrader is open." },
 }
+
+const TRADOVATE_OAUTH_COPY = { title: "Connect Tradovate", description: "Sign in on Tradovate's own page; your accounts then sync on their own." }
 
 // Why the viewer's plan can't connect this platform, or null if it can.
 // Essential's one live sync is MetaTrader (lib/plan-allowance.ts): available
@@ -241,16 +245,14 @@ export function AddAccountModal({
 
   // Every opening starts fresh, on the platform it was opened for (if any).
   useEffect(() => {
-    // A platform that can't be connected here (Tradovate before it's set up)
-    // opens on its details instead of a form.
-    const connectable = request.platform != null && !(request.platform === "tradovate" && !tradovate.enabled)
     setSelected(request.platform ?? "rithmic")
-    setStage(connectable ? "connect" : "choose")
+    setStage(request.platform != null ? "connect" : "choose")
     setQuery("")
     setOutcome(null)
     setMtStage("form")
     setAttempt(0)
-  }, [request.nonce, request.platform, tradovate.enabled])
+    setNtState("setup")
+  }, [request.nonce, request.platform])
 
   const onMtStage = useCallback((stage: MetaTraderStage) => setMtStage(stage), [])
 
@@ -259,15 +261,18 @@ export function AddAccountModal({
   // Back from Tradovate's sign-in: this window follows that connection's first sync.
   const tradovateProgressId = def.id === "tradovate" && stage === "connect" ? (request.tradovateConnectionId ?? null) : null
   const [tradovateState, setTradovateState] = useState<TradovateProgressState>("running")
+  // Tradovate through NinjaTrader: waiting for, then connected to, the add-on.
+  const [ntState, setNtState] = useState<NinjaTraderSetupState>("setup")
+  const viaNinjaTrader = def.id === "tradovate" && !tradovate.enabled && stage === "connect"
   const isMt = def.id === "mt5" || def.id === "mt4"
   // Reconnecting an account you already have is always allowed (the server
   // checks it's the same login).
   const reconnecting = request.initial?.login != null && request.platform === def.id
   const lock = reconnecting ? null : lockFor(def, isPro, usage)
 
-  const inVerify = outcome != null || (isMt && mtStage !== "form") || tradovateProgressId != null
+  const inVerify = outcome != null || (isMt && mtStage !== "form") || tradovateProgressId != null || (viaNinjaTrader && ntState !== "setup")
   const step: 1 | 2 | 3 = stage === "choose" ? 1 : inVerify ? 3 : 2
-  const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done") || (tradovateProgressId != null && tradovateState === "complete")
+  const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done") || (tradovateProgressId != null && tradovateState === "complete") || (viaNinjaTrader && ntState === "connected")
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -400,6 +405,8 @@ export function AddAccountModal({
         ) : (
           <TradovateConnect mock={tradovate.mock} error={tradovate.error} />
         )
+    } else if (def.id === "tradovate") {
+      body = <NinjaTraderSetup onDone={done} onFile={() => goConnect("file")} onState={setNtState} />
     } else if (def.id === "tradingview") {
       body = <TradingViewSetup pairings={pairings} isPro={isPro} />
     } else {
@@ -415,7 +422,7 @@ export function AddAccountModal({
       )
     }
   }
-  const copy = CONNECT_COPY[def.id]
+  const copy = def.id === "tradovate" && tradovate.enabled ? TRADOVATE_OAUTH_COPY : CONNECT_COPY[def.id]
 
   // ------------------------------------------------------- the main action
   const action =

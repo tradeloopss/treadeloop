@@ -6,7 +6,7 @@
 // Deliberately plain TypeScript (no enums, no parameter properties) so the
 // pure parts of the integration run under Node's type stripping in tests.
 
-export type ProviderId = "tradovate" | "rithmic" | "mt4" | "mt5"
+export type ProviderId = "tradovate" | "ninjatrader" | "rithmic" | "mt4" | "mt5"
 export type Side = "buy" | "sell"
 export type AssetClass = "future" | "option" | "forex" | "cfd" | "stock" | "crypto"
 

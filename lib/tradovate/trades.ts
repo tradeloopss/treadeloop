@@ -24,10 +24,13 @@ export interface BuildResult {
   removed: number
 }
 
-export async function buildTradovateTrades(connectionId: number): Promise<BuildResult> {
+// Works for any provider_* connection (Tradovate, the NinjaTrader add-on):
+// trades are sourced and externalId-prefixed by the connection's provider.
+export async function buildProviderTrades(connectionId: number): Promise<BuildResult> {
   const [connection] = await db.select().from(tradingConnections).where(eq(tradingConnections.id, connectionId))
   const result: BuildResult = { inserted: 0, updated: 0, removed: 0 }
   if (!connection) return result
+  const source = connection.provider
   const dirtyAtStart = connection.tradesDirtyAt
   const showProgress = connection.syncStage === "building_trades"
   if (showProgress) await setStage(connectionId, "building_trades")
@@ -53,19 +56,19 @@ export async function buildTradovateTrades(connectionId: number): Promise<BuildR
       )
       .orderBy(asc(providerExecutions.timestamp), asc(providerExecutions.id))
 
-    const built = buildTradesFromExecutions(`${account.environment}-${account.providerAccountId}`, rows)
+    const built = buildTradesFromExecutions(`${account.environment}-${account.providerAccountId}`, rows, source)
     if (showProgress) await setStage(connectionId, "calculating_pnl")
 
     const existing = await db
       .select({ id: trades.id, externalId: trades.externalId, fees: trades.fees, pnl: trades.pnl, quantity: trades.quantity, entryPrice: trades.entryPrice, exitPrice: trades.exitPrice, exitTime: trades.exitTime })
       .from(trades)
-      .where(and(eq(trades.accountId, journalAccountId), eq(trades.source, "tradovate")))
+      .where(and(eq(trades.accountId, journalAccountId), eq(trades.source, source)))
     const byExternal = new Map(existing.map((t) => [t.externalId, t]))
     const builtIds = new Set<string>()
 
     for (const t of built) {
       builtIds.add(t.externalId)
-      const { multiplier, pnl, fees } = t
+      const { multiplier, pnl, fees, market } = t
       const values = {
         quantity: String(t.quantity),
         entryPrice: String(t.entryPrice),
@@ -80,7 +83,7 @@ export async function buildTradovateTrades(connectionId: number): Promise<BuildR
       if (!prior) {
         await db
           .insert(trades)
-          .values({ userId: connection.userId, accountId: journalAccountId, symbol: t.symbol, market: "futures", side: t.side, status: "closed", externalId: t.externalId, source: "tradovate", ...values })
+          .values({ userId: connection.userId, accountId: journalAccountId, symbol: t.symbol, market, side: t.side, status: "closed", externalId: t.externalId, source, ...values })
           .onConflictDoNothing({ target: [trades.accountId, trades.externalId] })
         result.inserted++
         affectedDays.add(t.exitTime.slice(0, 10))
@@ -124,20 +127,22 @@ export async function buildTradovateTrades(connectionId: number): Promise<BuildR
     .update(tradingConnections)
     .set({ tradesDirtyAt: null })
     .where(and(eq(tradingConnections.id, connectionId), dirtyAtStart ? eq(tradingConnections.tradesDirtyAt, dirtyAtStart) : sql`${tradingConnections.tradesDirtyAt} is null`))
-  if (result.inserted + result.updated + result.removed > 0) tlog("trades_built", { connectionId, ...result })
+  if (result.inserted + result.updated + result.removed > 0) tlog("trades_built", { provider: source, connectionId, ...result })
   return result
 }
 
-// Every connection with executions not yet turned into trades.
-export async function buildDueTradovateTrades(): Promise<{ connections: number } & BuildResult> {
+export const buildTradovateTrades = buildProviderTrades
+
+// Every connection of `provider` with executions not yet turned into trades.
+export async function buildDueTradovateTrades(provider = "tradovate"): Promise<{ connections: number } & BuildResult> {
   const due = await db
     .select({ id: tradingConnections.id })
     .from(tradingConnections)
-    .where(and(eq(tradingConnections.provider, "tradovate"), isNotNull(tradingConnections.tradesDirtyAt)))
+    .where(and(eq(tradingConnections.provider, provider), isNotNull(tradingConnections.tradesDirtyAt)))
   const total = { connections: due.length, inserted: 0, updated: 0, removed: 0 }
   for (const { id } of due) {
     try {
-      const r = await buildTradovateTrades(id)
+      const r = await buildProviderTrades(id)
       total.inserted += r.inserted
       total.updated += r.updated
       total.removed += r.removed

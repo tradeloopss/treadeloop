@@ -16,9 +16,11 @@ export interface StoredExecution {
   price: number | string
   commission: number | string | null
   pointValue: number | string | null
+  assetClass?: string | null
 }
 
 export interface BuiltTrade extends ImportedTrade {
+  market: "futures" | "stocks" | "options" | "forex" | "crypto" | "cfd"
   multiplier: number
   gross: number
   pnl: number // gross − fees, rounded to cents
@@ -40,14 +42,21 @@ export function executionsToFills(accountKey: string, rows: StoredExecution[]): 
   }))
 }
 
-// The point value Tradovate reported for the product wins; the app's
-// contract table (lib/calc) is only the fallback.
-export function buildTradesFromExecutions(accountKey: string, rows: StoredExecution[]): BuiltTrade[] {
+const MARKETS: Record<string, BuiltTrade["market"]> = { future: "futures", stock: "stocks", option: "options", forex: "forex", crypto: "crypto", cfd: "cfd" }
+
+// The point value the provider reported for the product wins; the app's
+// contract table (lib/calc) is only the fallback. `prefix` namespaces the
+// trades' externalIds by provider ("tradovate", "ninjatrader").
+export function buildTradesFromExecutions(accountKey: string, rows: StoredExecution[], prefix = "tradovate"): BuiltTrade[] {
   const pointValue = new Map<string, number>()
-  for (const r of rows) if (r.pointValue != null) pointValue.set(sanitize(r.symbol), Number(r.pointValue))
-  return reconstructTrades(executionsToFills(accountKey, rows), "tradovate").map((t) => {
+  const market = new Map<string, BuiltTrade["market"]>()
+  for (const r of rows) {
+    if (r.pointValue != null) pointValue.set(sanitize(r.symbol), Number(r.pointValue))
+    if (r.assetClass && MARKETS[r.assetClass]) market.set(sanitize(r.symbol), MARKETS[r.assetClass])
+  }
+  return reconstructTrades(executionsToFills(accountKey, rows), prefix).map((t) => {
     const multiplier = pointValue.get(t.symbol) ?? contractMultiplierForSymbol(t.symbol)
     const gross = Math.round(computePnl({ side: t.side, quantity: t.quantity, entryPrice: t.entryPrice, exitPrice: t.exitPrice, fees: 0, contractMultiplier: multiplier }) * 100) / 100
-    return { ...t, multiplier, gross, pnl: Math.round((gross - t.fees) * 100) / 100 }
+    return { ...t, market: market.get(t.symbol) ?? "futures", multiplier, gross, pnl: Math.round((gross - t.fees) * 100) / 100 }
   })
 }

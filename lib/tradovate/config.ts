@@ -3,7 +3,7 @@
 // client secrets are read only on the server and never leave it.
 //
 // TRADOVATE_MODE (TRADOVATE_ENV is accepted as an alias):
-//   off        — the default: Tradovate shows as "coming soon"
+//   off        — the default: Tradovate syncs through NinjaTrader (lib/ninjatrader)
 //   mock       — fixture data, no network; local development only
 //   staging    — NinjaTrader's staging infrastructure, with staging credentials
 //   production — requires production credentials approved by Tradovate

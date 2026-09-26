@@ -928,3 +928,27 @@ export const providerPositions = pgTable(
   },
   (t) => [uniqueIndex("provider_positions_identity").on(t.connectionId, t.environment, t.providerAccountId, t.contractId)],
 )
+
+// A desktop add-on the trader installed — the NinjaTrader add-on first
+// (lib/ninjatrader). The add-on posts its fills with this key; only a SHA-256
+// hash is stored (keyHint is the last 4 characters, for telling keys apart).
+// A revoked key stops working at once.
+export const providerDeviceKeys = pgTable(
+  "provider_device_keys",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    provider: text("provider").notNull(), // ninjatrader
+    keyHash: text("keyHash").notNull(),
+    keyHint: text("keyHint").notNull(),
+    label: text("label"), // the computer's name, as the add-on reports it
+    clientVersion: text("clientVersion"),
+    lastSeenAt: timestamp("lastSeenAt"),
+    lastSyncAt: timestamp("lastSyncAt"), // last time it brought new or changed fills
+    lastStatus: text("lastStatus"), // ok | error
+    lastError: text("lastError"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    revokedAt: timestamp("revokedAt"),
+  },
+  (t) => [uniqueIndex("provider_device_keys_hash").on(t.keyHash), index("provider_device_keys_user").on(t.userId, t.provider)],
+)

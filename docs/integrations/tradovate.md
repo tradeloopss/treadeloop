@@ -1,5 +1,12 @@
 # Tradovate integration
 
+> **Without Tradovate API access** (Tradovate requires a live, funded account
+> with $1,000 or more and a paid API add-on, and prop-firm accounts aren't
+> eligible), Tradovate accounts sync through NinjaTrader 8 and the TradeLoop
+> add-on. See [ninjatrader.md](ninjatrader.md). That's what the Add account
+> window offers while `TRADOVATE_MODE` is `off`. The OAuth integration below
+> takes over once Tradovate approves TradeLoop as a partner.
+
 TradeLoop connects to Tradovate through Tradovate's official Partner API
 only: OAuth sign-in, the documented REST endpoints and the user-data
 WebSocket. It reads accounts, balances, orders, fills, fill fees and
