@@ -18,7 +18,7 @@ import { execFile } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { and, eq, inArray, like, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
-import { metatraderConnections, metatraderDeals, tradingAccounts } from "@/lib/db/schema"
+import { metatraderConnections, metatraderDeals, tradingAccounts, orderCommands } from "@/lib/db/schema"
 import { decrypt } from "@/lib/crypto"
 import { utcToServerTime, zoneFromMeasuredOffset } from "@/lib/metatrader-time"
 import { recordSyncRun } from "@/lib/sync-runs"
@@ -205,6 +205,118 @@ function pickBridge(free: Bridge[], connection: Connection, broker: Broker | nul
     free.find((b) => b.broker === null) ??
     free[0]
   )
+}
+
+// ---------------------------------------------------------------------------
+// Order execution — the write path. Claims rule-checked order_commands the app
+// queued and sends them to the broker via the bridge's /order endpoint, using
+// the account's MASTER password (the investor one used for /sync can't trade).
+
+type OrderCommandRow = typeof orderCommands.$inferSelect
+interface OrderBridgeResult {
+  accepted: boolean
+  retcode: number
+  comment: string
+  order: string
+  deal: string
+  volume: number
+  price: number
+}
+
+async function claimOrderCommands(limit: number): Promise<OrderCommandRow[]> {
+  if (limit <= 0) return []
+  const claimed = await db.execute<{ id: number }>(sql`
+    update order_commands set "leaseUntil" = now() + make_interval(mins => 2), "updatedAt" = now()
+    where id in (
+      select id from order_commands
+      where broker in ('mt5','mt4') and status = 'pending' and ("leaseUntil" is null or "leaseUntil" < now())
+      order by "createdAt" limit ${limit} for update skip locked
+    ) returning id`)
+  const ids = claimed.rows.map((r) => r.id)
+  if (ids.length === 0) return []
+  return db.select().from(orderCommands).where(inArray(orderCommands.id, ids))
+}
+
+async function finishCommand(id: number, status: string, message: string, brokerRef?: string | null, raw?: unknown) {
+  await db
+    .update(orderCommands)
+    .set({ status, resultMessage: message, brokerRef: brokerRef ?? null, brokerResult: raw ?? null, leaseUntil: null, updatedAt: new Date() })
+    .where(eq(orderCommands.id, id))
+}
+
+async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connection: Connection) {
+  try {
+    if (connection.tradingPasswordEnc == null) {
+      await finishCommand(cmd.id, "failed", "Order execution isn't enabled for this account (no trading password).")
+      return
+    }
+    const num = (v: string | null) => (v != null ? Number(v) : null)
+    const result = await callBridge<OrderBridgeResult>(
+      bridge,
+      "/order",
+      {
+        login: connection.login,
+        password: decrypt(connection.tradingPasswordEnc),
+        server: connection.server,
+        kind: cmd.kind,
+        positionRef: cmd.positionRef,
+        orderRef: cmd.orderRef,
+        symbol: cmd.symbol,
+        side: cmd.side,
+        volume: num(cmd.volume),
+        price: num(cmd.price),
+        stopLoss: num(cmd.stopLoss),
+        takeProfit: num(cmd.takeProfit),
+        orderType: cmd.orderType,
+      },
+      60_000,
+    )
+    const brokerRef = result.deal && result.deal !== "0" ? result.deal : result.order
+    if (result.accepted) {
+      await finishCommand(cmd.id, "filled", "Order executed.", brokerRef, result)
+      // Refresh the account's positions/deals promptly so the app reflects it.
+      await db.update(metatraderConnections).set({ nextSyncAt: new Date() }).where(eq(metatraderConnections.id, connection.id))
+    } else {
+      await finishCommand(cmd.id, "rejected", `Broker rejected the order (retcode ${result.retcode}: ${result.comment || "no reason given"}).`, brokerRef, result)
+    }
+    console.log(`[mt5] order ${cmd.id} (${cmd.kind} ${connection.login}): ${result.accepted ? "filled" : `rejected — ${result.comment}`}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const attempts = cmd.attempts + 1
+    const giveUp = attempts >= 3
+    await db
+      .update(orderCommands)
+      .set({ status: giveUp ? "failed" : "pending", resultMessage: msg, attempts, leaseUntil: null, updatedAt: new Date() })
+      .where(eq(orderCommands.id, cmd.id))
+    console.warn(`[mt5] order ${cmd.id} attempt ${attempts} failed${giveUp ? " (giving up)" : ""}: ${msg}`)
+  }
+}
+
+async function processOrderCommands() {
+  const free = bridges.filter((b) => b.alive && !b.busy)
+  if (free.length === 0) return
+  const cmds = await claimOrderCommands(free.length)
+  for (const cmd of cmds) {
+    const [conn] = await db.select().from(metatraderConnections).where(eq(metatraderConnections.accountId, cmd.accountId))
+    if (!conn) {
+      await finishCommand(cmd.id, "failed", "No MetaTrader connection for this account.")
+      continue
+    }
+    if (conn.platform === "mt4") {
+      await finishCommand(cmd.id, "unsupported", "MT4 order routing needs the command EA — not deployed yet.")
+      continue
+    }
+    const avail = bridges.filter((b) => b.platform === "mt5" && b.alive && !b.busy)
+    if (avail.length === 0) {
+      await db.update(orderCommands).set({ leaseUntil: null }).where(eq(orderCommands.id, cmd.id)) // free it for the next tick
+      continue
+    }
+    const bridge = pickBridge(avail, conn, brokerFor(conn.server))
+    bridge.busy = true
+    void executeOrderCommand(bridge, cmd, conn).finally(() => {
+      bridge.busy = false
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +653,9 @@ async function tick() {
     await flagQueued()
     await requeueNewlySupported()
   }
+  // Orders are user-initiated and time-sensitive — handle them before syncs so
+  // a free terminal executes a close/modify without waiting on a sync pass.
+  await processOrderCommands()
   for (const platform of ["mt5", "mt4"] as const) {
     const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)
     if (free.length === 0) continue

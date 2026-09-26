@@ -27,7 +27,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency } from "@/lib/calc"
 import { closeOpenTrade } from "@/app/actions/trade-manager"
-import type { OpenTradeView, ClosedTradeRow, TradesManagerData } from "@/lib/trade-manager"
+import { submitOrder, setTradingPassword } from "@/app/actions/orders"
+import type { OpenTradeView, ClosedTradeRow, TradesManagerData, AccountExecution } from "@/lib/trade-manager"
+import type { OrderCommandInput } from "@/lib/order-execution/types"
 
 // ---------- helpers -------------------------------------------------------
 
@@ -111,6 +113,42 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
+  }
+
+  const router = useRouter()
+  const [enableFor, setEnableFor] = useState<UITrade | null>(null)
+
+  function execFor(t: UITrade): AccountExecution {
+    return (t.accountId != null && data.execution[t.accountId]) || { broker: null, supported: false, enabled: false }
+  }
+  // A live MetaTrader position on an account with execution turned on → real orders.
+  function tradable(t: UITrade): boolean {
+    const e = execFor(t)
+    return t.origin === "provider" && !!t.positionRef && (e.broker === "mt5" || e.broker === "mt4") && e.enabled
+  }
+
+  // Send a real order to the broker and report the outcome. Returns true when it
+  // was accepted/queued (so the caller can apply the optimistic UI change).
+  async function runOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<boolean> {
+    if (t.accountId == null) return false
+    const e = execFor(t)
+    try {
+      const res = await submitOrder({ accountId: t.accountId, broker: (e.broker ?? "mt5") as OrderCommandInput["broker"], positionRef: t.positionRef, ...input })
+      if (res.status === "blocked") {
+        toast.error("Blocked by your prop-firm rules", { description: res.reasons.join(" ") })
+        return false
+      }
+      if (res.status === "pending" || res.status === "filled" || res.status === "sent") {
+        toast.success(res.message)
+        router.refresh()
+        return true
+      }
+      toast.error(res.message || "Order couldn't be sent")
+      return false
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Order failed")
+      return false
+    }
   }
 
   return (
@@ -227,6 +265,10 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
             <ManagementPanel
               key={selected.id}
               trade={selected}
+              execution={execFor(selected)}
+              tradable={tradable(selected)}
+              onEnableExecution={() => setEnableFor(selected)}
+              onOrder={(input) => runOrder(selected, input)}
               panelTab={panelTab}
               onPanelTab={setPanelTab}
               history={history[selected.id] ?? [{ time: openLabel(selected), label: "Position opened", detail: `${selected.quantity} @ ${fmtPrice(selected.entryPrice)}` }]}
@@ -236,29 +278,32 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
                 updateTrade(selected.id, { stopLoss: sl, takeProfit: tp })
                 if (sl !== prev.stopLoss) pushHistory(prev.id, { time: nowLabel(), label: "Stop Loss modified", detail: fmtPrice(sl) })
                 if (tp !== prev.takeProfit) pushHistory(prev.id, { time: nowLabel(), label: "Take Profit modified", detail: fmtPrice(tp) })
-                toast.success("Levels updated", { description: `${selected.symbol} · SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
+                if (tradable(selected)) void runOrder(selected, { kind: "modify", positionRef: selected.positionRef, stopLoss: sl, takeProfit: tp })
+                else toast.success("Levels updated", { description: `${selected.symbol} · SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
               }}
               onMoveBE={(buffer) => {
                 const be = selected.entryPrice + (selected.side === "long" ? buffer : -buffer)
                 updateTrade(selected.id, { stopLoss: be })
                 pushHistory(selected.id, { time: nowLabel(), label: "Moved SL to break-even", detail: fmtPrice(be) })
-                toast.success("Stop moved to break-even", { description: `${selected.symbol} · SL ${fmtPrice(be)}` })
+                if (tradable(selected)) void runOrder(selected, { kind: "modify", positionRef: selected.positionRef, stopLoss: be, takeProfit: selected.takeProfit })
+                else toast.success("Stop moved to break-even", { description: `${selected.symbol} · SL ${fmtPrice(be)}` })
               }}
               onTrailing={(cfg) => {
                 updateTrade(selected.id, { trailing: cfg })
                 pushHistory(selected.id, { time: nowLabel(), label: cfg.active ? "Trailing stop enabled" : "Trailing stop disabled", detail: cfg.active ? `${cfg.distance} pips` : undefined })
-                toast.success(cfg.active ? "Trailing stop active" : "Trailing stop off")
+                toast.success(cfg.active ? "Trailing stop active — TradeLoop will trail your stop" : "Trailing stop off")
               }}
               onPartial={(lots) => {
                 const remaining = Math.max(0, round4(selected.quantity - lots))
                 pushHistory(selected.id, { time: nowLabel(), label: "Partial close", detail: `${lots} lots` })
+                if (tradable(selected)) void runOrder(selected, { kind: "partial_close", positionRef: selected.positionRef, volume: lots })
+                else toast.success("Partial close sent", { description: `${lots} lots of ${selected.symbol}` })
                 if (remaining <= 0) {
                   updateTrade(selected.id, { closed: true })
                   setSelectedId(null)
                 } else updateTrade(selected.id, { quantity: remaining })
-                toast.success("Partial close sent", { description: `${lots} lots of ${selected.symbol}` })
               }}
-              onClosed={(realId) => {
+              onClosed={() => {
                 updateTrade(selected.id, { closed: true })
                 setSelectedId(null)
                 pushHistory(selected.id, { time: nowLabel(), label: "Position closed" })
@@ -285,6 +330,10 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
             setSelectedId(null)
           }}
         />
+      )}
+
+      {enableFor && enableFor.accountId != null && (
+        <EnableExecutionDialog accountId={enableFor.accountId} accountName={enableFor.accountName} onClose={() => setEnableFor(null)} />
       )}
     </div>
   )
@@ -535,6 +584,10 @@ function openLabel(t: OpenTradeView): string {
 
 function ManagementPanel({
   trade,
+  execution,
+  tradable,
+  onEnableExecution,
+  onOrder,
   panelTab,
   onPanelTab,
   history,
@@ -546,6 +599,10 @@ function ManagementPanel({
   onClosed,
 }: {
   trade: UITrade
+  execution: AccountExecution
+  tradable: boolean
+  onEnableExecution: () => void
+  onOrder: (input: Omit<OrderCommandInput, "accountId" | "broker">) => Promise<boolean>
   panelTab: "manage" | "info" | "history"
   onPanelTab: (t: "manage" | "info" | "history") => void
   history: HistEvent[]
@@ -554,7 +611,7 @@ function ManagementPanel({
   onMoveBE: (buffer: number) => void
   onTrailing: (cfg: { distance: number; step: number; active: boolean }) => void
   onPartial: (lots: number) => void
-  onClosed: (id: number) => void
+  onClosed: () => void
 }) {
   const meta = instrument(trade.symbol)
   const pct = pnlPercent(trade)
@@ -610,7 +667,18 @@ function ManagementPanel({
 
       <div className="flex-1 overflow-y-auto p-4">
         {panelTab === "manage" && (
-          <ManageTab trade={trade} onModifyLevels={onModifyLevels} onMoveBE={onMoveBE} onTrailing={onTrailing} onPartial={onPartial} onClosed={onClosed} />
+          <ManageTab
+            trade={trade}
+            execution={execution}
+            tradable={tradable}
+            onEnableExecution={onEnableExecution}
+            onOrder={onOrder}
+            onModifyLevels={onModifyLevels}
+            onMoveBE={onMoveBE}
+            onTrailing={onTrailing}
+            onPartial={onPartial}
+            onClosed={onClosed}
+          />
         )}
         {panelTab === "info" && <InfoTab trade={trade} />}
         {panelTab === "history" && <HistoryTab events={history} />}
@@ -621,6 +689,10 @@ function ManagementPanel({
 
 function ManageTab({
   trade,
+  execution,
+  tradable,
+  onEnableExecution,
+  onOrder,
   onModifyLevels,
   onMoveBE,
   onTrailing,
@@ -628,11 +700,15 @@ function ManageTab({
   onClosed,
 }: {
   trade: UITrade
+  execution: AccountExecution
+  tradable: boolean
+  onEnableExecution: () => void
+  onOrder: (input: Omit<OrderCommandInput, "accountId" | "broker">) => Promise<boolean>
   onModifyLevels: (sl: number | null, tp: number | null) => void
   onMoveBE: (buffer: number) => void
   onTrailing: (cfg: { distance: number; step: number; active: boolean }) => void
   onPartial: (lots: number) => void
-  onClosed: (id: number) => void
+  onClosed: () => void
 }) {
   const [sl, setSl] = useState(trade.stopLoss != null ? String(trade.stopLoss) : "")
   const [tp, setTp] = useState(trade.takeProfit != null ? String(trade.takeProfit) : "")
@@ -646,9 +722,32 @@ function ManageTab({
   const tpPips = tpNum != null ? pips(tpNum, ref, trade.symbol) : null
   const step = pipSize(trade.symbol)
   const dirty = slNum !== trade.stopLoss || tpNum !== trade.takeProfit
+  // A live broker position whose account supports execution but hasn't turned it on.
+  const needsEnable = trade.origin === "provider" && execution.supported && !execution.enabled
 
   return (
     <div className="space-y-6">
+      {/* Execution status */}
+      {trade.origin === "provider" && (
+        <div className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-xs", tradable ? "border-[var(--gain)]/30 bg-[var(--gain)]/5 text-[var(--gain)]" : "text-muted-foreground")}>
+          <span className={cn("size-1.5 rounded-full", tradable ? "bg-[var(--gain)]" : "bg-amber-500")} />
+          {tradable ? (
+            <span>Live order execution is on — actions are sent to your broker.</span>
+          ) : needsEnable ? (
+            <span className="flex-1">
+              Order execution is off for this account.{" "}
+              <button type="button" onClick={onEnableExecution} className="font-medium text-primary underline">
+                Enable it
+              </button>
+            </span>
+          ) : execution.broker === "tradovate" ? (
+            <span>Tradovate execution is dormant until its API is connected.</span>
+          ) : (
+            <span>Actions update your TradeLoop view; broker execution isn&apos;t available for this account.</span>
+          )}
+        </div>
+      )}
+
       {/* Quick actions */}
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick Actions</p>
@@ -703,7 +802,7 @@ function ManageTab({
       </div>
 
       <PartialCloseModal open={partialOpen} onOpenChange={setPartialOpen} trade={trade} onExecute={(lots) => { onPartial(lots); setPartialOpen(false) }} />
-      <CloseModal open={closeOpen} onOpenChange={setCloseOpen} trade={trade} onDone={(id) => { onClosed(id); setCloseOpen(false) }} />
+      <CloseModal open={closeOpen} onOpenChange={setCloseOpen} trade={trade} tradable={tradable} onOrder={onOrder} onDone={() => { onClosed(); setCloseOpen(false) }} />
     </div>
   )
 }
@@ -875,14 +974,15 @@ function PartialCloseModal({ open, onOpenChange, trade, onExecute }: { open: boo
   )
 }
 
-function CloseModal({ open, onOpenChange, trade, onDone }: { open: boolean; onOpenChange: (v: boolean) => void; trade: UITrade; onDone: (id: number) => void }) {
+function CloseModal({ open, onOpenChange, trade, tradable, onOrder, onDone }: { open: boolean; onOpenChange: (v: boolean) => void; trade: UITrade; tradable: boolean; onOrder: (input: Omit<OrderCommandInput, "accountId" | "broker">) => Promise<boolean>; onDone: () => void }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [exit, setExit] = useState(trade.currentPrice != null ? String(trade.currentPrice) : "")
 
   function confirm() {
     // A manual trade closes for real (records realized P&L); a live broker
-    // position is a prototype action until order-write integration exists.
+    // position with execution on sends a real close order; otherwise it's a
+    // view-only action.
     if (trade.origin === "trade") {
       const price = Number(exit)
       if (!Number.isFinite(price) || exit.trim() === "") {
@@ -893,15 +993,20 @@ function CloseModal({ open, onOpenChange, trade, onDone }: { open: boolean; onOp
         try {
           const { pnl } = await closeOpenTrade(trade.id, price)
           toast.success(`Closed ${trade.symbol}`, { description: `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)} realized` })
-          onDone(trade.id)
+          onDone()
           router.refresh()
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Couldn't close.")
         }
       })
+    } else if (tradable) {
+      startTransition(async () => {
+        const ok = await onOrder({ kind: "close", positionRef: trade.positionRef })
+        if (ok) onDone()
+      })
     } else {
-      toast.success(`Close request sent · ${trade.symbol}`)
-      onDone(trade.id)
+      toast.success(`Close request queued · ${trade.symbol}`)
+      onDone()
     }
   }
 
@@ -934,7 +1039,7 @@ function CloseModal({ open, onOpenChange, trade, onDone }: { open: boolean; onOp
           )}
           <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <InfoIcon className="size-3.5" />
-            {trade.origin === "trade" ? "This records the close in your journal." : "This will send a close request to your broker once integration is live."}
+            {trade.origin === "trade" ? "This records the close in your journal." : tradable ? "This sends a close order to your broker now." : "Broker execution isn't enabled — this updates your TradeLoop view only."}
           </p>
         </div>
         <DialogFooter>
@@ -981,6 +1086,55 @@ function TrailingModal({ open, onOpenChange, active, onApply }: { open: boolean;
 }
 
 // ---------- bulk bar ------------------------------------------------------
+
+function EnableExecutionDialog({ accountId, accountName, onClose }: { accountId: number; accountName: string; onClose: () => void }) {
+  const router = useRouter()
+  const [password, setPassword] = useState("")
+  const [pending, startTransition] = useTransition()
+  function save() {
+    if (!password.trim()) {
+      toast.error("Enter your master (trading) password.")
+      return
+    }
+    startTransition(async () => {
+      try {
+        await setTradingPassword(accountId, password)
+        toast.success("Order execution enabled", { description: accountName })
+        onClose()
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't enable execution.")
+      }
+    })
+  }
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Enable order execution</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            To send orders for <span className="font-medium text-foreground">{accountName}</span>, TradeLoop needs its <span className="font-medium text-foreground">master (trading)</span> password —
+            the investor password used for syncing can only read. It&apos;s stored encrypted and used only to place, modify and close orders you request.
+          </p>
+          <div>
+            <label className="text-xs text-muted-foreground">Master (trading) password</label>
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1" autoFocus />
+          </div>
+          <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+            On a funded account, orders are still checked against your PropFirm Max rules first — a rule-breaking order is blocked before it reaches the broker.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>Cancel</Button>
+          <Button onClick={save} disabled={pending}>{pending ? "Enabling…" : "Enable execution"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function BulkBar({ count, onClear, onCloseAll }: { count: number; onClear: () => void; onCloseAll: () => void }) {
   return (

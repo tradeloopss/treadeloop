@@ -81,6 +81,9 @@ export interface OpenTradeView {
   // Where this row came from: a `trades` row, or a live broker position
   // (Tradovate snapshot / MetaTrader). Live rows are managed in the platform.
   origin: "trade" | "provider"
+  // The broker's own position id/ticket, for sending orders against it (MT5
+  // position identifier). Null for manual `trades` rows (closed via the app).
+  positionRef: string | null
   accountId: number | null
   accountName: string
   currency: string
@@ -136,11 +139,20 @@ export interface TradesManagerStats {
   winRate: number | null // over closed-today; null when nothing closed today
 }
 
+// Whether an account can send orders, and whether it's turned on.
+export interface AccountExecution {
+  broker: "mt5" | "mt4" | "rithmic" | "tradovate" | null
+  supported: boolean // execution is possible for this broker at all
+  enabled: boolean // turned on for this account (trading credential stored)
+}
+
 export interface TradesManagerData {
   accounts: { id: number; name: string }[]
   openTrades: OpenTradeView[]
   closedToday: ClosedTradeRow[]
   stats: TradesManagerStats
+  // accountId → execution capability, for the account's open trades.
+  execution: Record<number, AccountExecution>
 }
 
 export function computeStats(openTrades: OpenTradeView[], closedToday: ClosedTradeRow[]): TradesManagerStats {

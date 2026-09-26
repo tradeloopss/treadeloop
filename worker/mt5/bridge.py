@@ -186,10 +186,185 @@ def health():
     }
 
 
+# --------------------------------------------------------------------------
+# Order execution (write path). Only reached for accounts the user opted into
+# trading, which is why the worker sends the MASTER password here — the investor
+# password used for /sync can only read. Each op re-authenticates with the
+# password given, so a terminal that was on a read-only session becomes able to
+# trade. See lib/order-execution and worker.ts (processOrderCommands).
+
+def pick_filling(info):
+    """Pick a fill mode the symbol allows (its filling_mode is a bitmask:
+    1 = FOK, 2 = IOC); fall back to RETURN."""
+    modes = getattr(info, "filling_mode", 0) or 0
+    if modes & 1:
+        return mt5.ORDER_FILLING_FOK
+    if modes & 2:
+        return mt5.ORDER_FILLING_IOC
+    return mt5.ORDER_FILLING_RETURN
+
+
+def ensure_trading_login(account, password, server):
+    """Authenticate the terminal with the given (master) password, forcing a
+    re-login even when it's already on this account — a prior /sync may have
+    logged in read-only, and only a master session can send orders."""
+    if mt5.terminal_info() is None:
+        start_terminal(account, password, server)
+    elif not mt5.login(account, password=password, server=server, timeout=60_000):
+        code, message = last_error()
+        raise login_error(code, message)
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        term = mt5.terminal_info()
+        if term and term.connected and current_login()[0] == account:
+            return
+        time.sleep(0.25)
+    raise BridgeError(504, "timeout", "Logged in, but the account never finished connecting")
+
+
+def send_order(request):
+    result = mt5.order_send(request)
+    if result is None:
+        code, message = last_error()
+        raise BridgeError(502, "order", f"order_send returned nothing: {message}", code)
+    done = result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_DONE_PARTIAL, mt5.TRADE_RETCODE_PLACED)
+    # A broker rejection is a normal result (accepted=False), not a bridge
+    # error, so the worker records the retcode/comment rather than retrying.
+    return {
+        "accepted": bool(done),
+        "retcode": int(result.retcode),
+        "comment": result.comment,
+        "order": str(result.order),
+        "deal": str(result.deal),
+        "volume": result.volume,
+        "price": result.price,
+    }
+
+
+def position_by_ticket(ticket):
+    positions = mt5.positions_get(ticket=ticket)
+    if not positions:
+        raise BridgeError(404, "position", "position not found — it may already be closed")
+    return positions[0]
+
+
+def ensure_symbol(symbol):
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        raise BridgeError(502, "order", f"unknown symbol {symbol}")
+    if not info.visible:
+        mt5.symbol_select(symbol, True)
+        info = mt5.symbol_info(symbol)
+    return info
+
+
+def do_close(req, partial):
+    ticket = int(req["positionRef"])
+    pos = position_by_ticket(ticket)
+    info = ensure_symbol(pos.symbol)
+    volume = float(req["volume"]) if partial and req.get("volume") else pos.volume
+    volume = min(volume, pos.volume)
+    is_buy = pos.type == mt5.POSITION_TYPE_BUY
+    tick = mt5.symbol_info_tick(pos.symbol)
+    if tick is None:
+        raise BridgeError(502, "order", f"no price for {pos.symbol}")
+    return send_order({
+        "action": mt5.TRADE_ACTION_DEAL,
+        "position": ticket,
+        "symbol": pos.symbol,
+        "volume": volume,
+        "type": mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
+        "price": tick.bid if is_buy else tick.ask,
+        "deviation": 30,
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": pick_filling(info),
+        "comment": "TradeLoop",
+    })
+
+
+def do_modify(req):
+    ticket = int(req["positionRef"])
+    pos = position_by_ticket(ticket)
+    return send_order({
+        "action": mt5.TRADE_ACTION_SLTP,
+        "position": ticket,
+        "symbol": pos.symbol,
+        "sl": float(req["stopLoss"]) if req.get("stopLoss") is not None else pos.sl,
+        "tp": float(req["takeProfit"]) if req.get("takeProfit") is not None else pos.tp,
+    })
+
+
+def do_cancel(req):
+    return send_order({"action": mt5.TRADE_ACTION_REMOVE, "order": int(req["orderRef"])})
+
+
+ORDER_TYPE_NAMES = {
+    ("long", "market"): "ORDER_TYPE_BUY",
+    ("short", "market"): "ORDER_TYPE_SELL",
+    ("long", "limit"): "ORDER_TYPE_BUY_LIMIT",
+    ("short", "limit"): "ORDER_TYPE_SELL_LIMIT",
+    ("long", "stop"): "ORDER_TYPE_BUY_STOP",
+    ("short", "stop"): "ORDER_TYPE_SELL_STOP",
+}
+
+
+def do_place(req):
+    symbol = str(req["symbol"])
+    info = ensure_symbol(symbol)
+    side = str(req.get("side") or "long")
+    otype = str(req.get("orderType") or "market")
+    type_name = ORDER_TYPE_NAMES.get((side, otype))
+    if type_name is None:
+        raise BridgeError(400, "request", f"bad order type {side}/{otype}")
+    market = otype == "market"
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        raise BridgeError(502, "order", f"no price for {symbol}")
+    price = (tick.ask if side == "long" else tick.bid) if market else float(req["price"])
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL if market else mt5.TRADE_ACTION_PENDING,
+        "symbol": symbol,
+        "volume": float(req["volume"]),
+        "type": getattr(mt5, type_name),
+        "price": price,
+        "deviation": 30,
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": pick_filling(info),
+        "comment": "TradeLoop",
+    }
+    if req.get("stopLoss") is not None:
+        request["sl"] = float(req["stopLoss"])
+    if req.get("takeProfit") is not None:
+        request["tp"] = float(req["takeProfit"])
+    return send_order(request)
+
+
+def order(req):
+    try:
+        account = int(req["login"])
+        password = str(req["password"])
+        server = str(req["server"]).strip()
+        kind = str(req["kind"])
+    except (KeyError, TypeError, ValueError):
+        raise BridgeError(400, "request", "login, password, server and kind are required")
+    ensure_trading_login(account, password, server)
+    if kind == "close":
+        return do_close(req, False)
+    if kind == "partial_close":
+        return do_close(req, True)
+    if kind == "modify":
+        return do_modify(req)
+    if kind == "cancel":
+        return do_cancel(req)
+    if kind == "place":
+        return do_place(req)
+    raise BridgeError(400, "request", f"unknown order kind {kind}")
+
+
 def on_bridge_error(err):
     if err.code in IPC_ERRORS:
         mt5.shutdown()
 
 
 if __name__ == "__main__":
-    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset}, on_bridge_error)
+    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order}, on_bridge_error)

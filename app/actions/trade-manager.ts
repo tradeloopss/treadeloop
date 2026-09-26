@@ -56,6 +56,7 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       id: t.id,
       source: t.source ?? "manual",
       origin: "trade",
+      positionRef: null,
       accountId: t.accountId,
       accountName: account?.name ?? "Unassigned",
       currency: account?.currency ?? "USD",
@@ -112,6 +113,7 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       id: -1 * (accId * 100000 + Math.abs(hashCode(symbol)) % 100000), // synthetic negative id (no `trades` row)
       source: "tradovate",
       origin: "provider",
+      positionRef: null,
       accountId: accId,
       accountName: account.name,
       currency: account.currency,
@@ -148,6 +150,7 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
         id: -1 * (accId * 1_000_000 + (Math.abs(hashCode(pos.identifier || pos.symbol)) % 1_000_000)),
         source: c.platform === "mt4" ? "mt4" : "mt5",
         origin: "provider",
+        positionRef: pos.identifier || null,
         accountId: accId,
         accountName: account.name,
         currency: account.currency,
@@ -227,7 +230,23 @@ export async function getTradesManagerData(): Promise<TradesManagerData> {
       exitTime: t.exitTime!.toISOString(),
     }))
 
-  return { accounts, openTrades, closedToday, stats: computeStats(openTrades, closedToday) }
+  // Execution capability per account with an open trade.
+  const execution: Record<number, import("@/lib/trade-manager").AccountExecution> = {}
+  const accountIds = [...new Set(openTrades.map((t) => t.accountId).filter((a): a is number => a != null))]
+  if (accountIds.length) {
+    const mtRows = await db
+      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, hasTrading: metatraderConnections.tradingPasswordEnc })
+      .from(metatraderConnections)
+      .where(eq(metatraderConnections.userId, userId))
+    const mtByAccount = new Map(mtRows.filter((r) => r.accountId != null).map((r) => [r.accountId!, r]))
+    for (const id of accountIds) {
+      const mt = mtByAccount.get(id)
+      if (mt) execution[id] = { broker: mt.platform === "mt4" ? "mt4" : "mt5", supported: true, enabled: mt.hasTrading != null }
+      else execution[id] = { broker: null, supported: false, enabled: false }
+    }
+  }
+
+  return { accounts, openTrades, closedToday, stats: computeStats(openTrades, closedToday), execution }
 }
 
 // The open positions for one account (for the PropFirm Max account detail's
