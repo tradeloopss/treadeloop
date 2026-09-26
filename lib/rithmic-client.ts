@@ -21,6 +21,7 @@ import tls from "node:tls"
 import WebSocket from "ws"
 import protobuf from "protobufjs"
 import type { ParsedFill } from "@/lib/fill-reconstruction"
+import type { RithmicPosition } from "@/lib/trade-manager"
 
 // Shared production network — hosts every real, live prop firm/broker.
 export const PRODUCTION_RITHMIC_GATEWAY = "wss://rprotocol.rithmic.com:443"
@@ -60,6 +61,7 @@ const PROTO_FILES = [
   "request_pnl_position_snapshot.proto",
   "response_pnl_position_snapshot.proto",
   "account_pnl_position_update.proto",
+  "instrument_pnl_position_update.proto",
   // Order routing (write path) — the order plant. Vendored from the same
   // async_rithmic source as the rest, exact Rithmic field tags. See
   // lib/order-execution and sendRithmicOrder below.
@@ -808,8 +810,8 @@ export async function fetchAccountSnapshots(
   systemName: string,
   gatewayUri: string,
   accounts: Pick<RithmicAccount, "fcmId" | "ibId" | "accountId">[],
-): Promise<Map<string, RithmicAccountSnapshot>> {
-  if (accounts.length === 0) return new Map()
+): Promise<{ snapshots: Map<string, RithmicAccountSnapshot>; positions: Map<string, RithmicPosition[]> }> {
+  if (accounts.length === 0) return { snapshots: new Map(), positions: new Map() }
   return withSession(
     user,
     password,
@@ -818,6 +820,7 @@ export async function fetchAccountSnapshots(
     async (ws, root) => {
       const Base = root.lookupType("Base")
       const snapshots = new Map<string, RithmicAccountSnapshot>()
+      const positions = new Map<string, RithmicPosition[]>()
       for (const account of accounts) {
         const collected = collectUntilTemplate(root, ws, 403)
         ws.send(encode(root, "RequestPnLPositionSnapshot", { templateId: 402, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId }))
@@ -827,23 +830,41 @@ export async function fetchAccountSnapshots(
           throw new Error(`PnL snapshot request failed: ${response.rpCode.join(", ")}`)
         }
         for (const raw of list) {
-          if ((Base.decode(raw as Buffer) as unknown as { templateId: number }).templateId !== 451) continue
-          const m = decode(root, "AccountPnLPositionUpdate", raw)
-          if (!m.accountId || m.accountBalance == null || m.accountBalance === "") continue
-          snapshots.set(m.accountId, {
-            accountId: m.accountId,
-            accountBalance: Number(m.accountBalance),
-            cashOnHand: m.cashOnHand ? Number(m.cashOnHand) : null,
-            openPositionPnl: Number(m.openPositionPnl || 0),
-            closedPositionPnl: Number(m.closedPositionPnl || 0),
-            minAccountBalance: positiveOrNull(m.minAccountBalance),
-            commission: m.rmsAccountCommission != null && m.rmsAccountCommission !== "" ? Math.abs(Number(m.rmsAccountCommission)) : null,
-            filledContracts: (Number(m.fillBuyQty || 0) + Number(m.fillSellQty || 0)) || null,
-            at: new Date(),
-          })
+          const templateId = (Base.decode(raw as Buffer) as unknown as { templateId: number }).templateId
+          if (templateId === 451) {
+            const m = decode(root, "AccountPnLPositionUpdate", raw)
+            if (!m.accountId || m.accountBalance == null || m.accountBalance === "") continue
+            snapshots.set(m.accountId, {
+              accountId: m.accountId,
+              accountBalance: Number(m.accountBalance),
+              cashOnHand: m.cashOnHand ? Number(m.cashOnHand) : null,
+              openPositionPnl: Number(m.openPositionPnl || 0),
+              closedPositionPnl: Number(m.closedPositionPnl || 0),
+              minAccountBalance: positiveOrNull(m.minAccountBalance),
+              commission: m.rmsAccountCommission != null && m.rmsAccountCommission !== "" ? Math.abs(Number(m.rmsAccountCommission)) : null,
+              filledContracts: (Number(m.fillBuyQty || 0) + Number(m.fillSellQty || 0)) || null,
+              at: new Date(),
+            })
+          } else if (templateId === 450) {
+            // Per-instrument position — the running futures position (net_quantity
+            // is signed, open_position_pnl is the floating P&L).
+            const p = decode(root, "InstrumentPnLPositionUpdate", raw)
+            const net = Number(p.netQuantity || 0)
+            if (!p.accountId || !p.symbol || net === 0) continue
+            const list = positions.get(p.accountId) ?? []
+            list.push({
+              symbol: p.symbol,
+              exchange: p.exchange || "",
+              netQuantity: net,
+              avgOpenFillPrice: p.avgOpenFillPrice != null ? Number(p.avgOpenFillPrice) : null,
+              openPositionPnl: p.openPositionPnl != null && p.openPositionPnl !== "" ? Number(p.openPositionPnl) : null,
+              productCode: p.productCode || null,
+            })
+            positions.set(p.accountId, list)
+          }
         }
       }
-      return snapshots
+      return { snapshots, positions }
     },
     PNL_PLANT,
   )

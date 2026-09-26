@@ -76,6 +76,18 @@ export interface Mt5Position {
   identifier: string
 }
 
+// A live Rithmic open position, from the P&L plant snapshot (per instrument).
+// Stored on the connection each sync so the Trades Manager can show running
+// futures positions with their real open P&L.
+export interface RithmicPosition {
+  symbol: string
+  exchange: string
+  netQuantity: number // signed: >0 long, <0 short
+  avgOpenFillPrice: number | null
+  openPositionPnl: number | null
+  productCode: string | null
+}
+
 export interface OpenTradeView {
   id: number
   // Where this row came from: a `trades` row, or a live broker position
@@ -88,6 +100,9 @@ export interface OpenTradeView {
   accountName: string
   currency: string
   symbol: string
+  // The instrument's exchange, when the broker reports it (Rithmic futures) —
+  // needed to send an order against it. Null for FX/MT/manual.
+  exchange: string | null
   market: string
   side: "long" | "short"
   quantity: number

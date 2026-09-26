@@ -170,19 +170,21 @@ export async function applyBrokerSnapshot(
 export async function refreshBrokerBalance(connection: RithmicConnectionRow, password: string, rms?: RithmicAccountRms): Promise<void> {
   if (connection.accountId == null) return
   try {
-    const snapshots = await fetchAccountSnapshots(connection.login, password, connection.systemName, connection.gatewayUri, [
+    const { snapshots, positions } = await fetchAccountSnapshots(connection.login, password, connection.systemName, connection.gatewayUri, [
       { fcmId: connection.fcmId, ibId: connection.ibId, accountId: connection.rithmicAccountId },
     ])
+    // Store the live open positions (from the same snapshot) so the Trades
+    // Manager can show running Rithmic futures with their real open P&L.
+    await db
+      .update(rithmicConnections)
+      .set({ openPositionsData: positions.get(connection.rithmicAccountId) ?? [] })
+      .where(eq(rithmicConnections.id, connection.id))
     const snapshot = snapshots.get(connection.rithmicAccountId)
     if (snapshot) await applyBrokerSnapshot(connection.accountId, snapshot, rms, { accountId: connection.rithmicAccountId, accountName: connection.accountName })
   } catch (err) {
     console.warn(`[rithmic] balance refresh failed for connection ${connection.id}:`, err instanceof Error ? err.message : err)
   }
 }
-
-// Background syncs run every minute; the balance only needs to follow at a
-// gentler pace than the fills, so each one costs Rithmic one login, not two.
-const BALANCE_REFRESH_MS = 10 * 60_000
 
 // Syncs one connection — no session/auth check, since the background
 // auto-sync job calls this outside any request context. Callers that DO
@@ -295,11 +297,11 @@ export async function syncRithmicConnection(connection: RithmicConnectionRow, tr
     const imported = await importFillsForConnection(connection.userId, connection.id, connection.accountId!, fills)
     await recordSyncRun({ broker: "rithmic", connectionId: connection.id, userId: connection.userId, trigger, startedAt, imported })
 
-    // A manual "Sync now" always refreshes the balance; the background job
-    // only once it's gone stale.
-    const [account] = await db.select({ balanceUpdatedAt: tradingAccounts.balanceUpdatedAt }).from(tradingAccounts).where(eq(tradingAccounts.id, connection.accountId!))
-    const stale = !account?.balanceUpdatedAt || Date.now() - account.balanceUpdatedAt.getTime() > BALANCE_REFRESH_MS
-    if (trigger !== "auto" || stale) await refreshBrokerBalance(connection, password, rms)
+    // Refresh the balance AND the live open positions from the P&L snapshot.
+    // Positions need to stay fresh for the Trades Manager, so this runs every
+    // pass now (it's the one place they're read); the balance side of it is
+    // cheap and idempotent (a reprice only happens when the rate changes).
+    await refreshBrokerBalance(connection, password, rms)
     return { imported }
   } catch (err) {
     await db

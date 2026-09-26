@@ -121,10 +121,13 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
   function execFor(t: UITrade): AccountExecution {
     return (t.accountId != null && data.execution[t.accountId]) || { broker: null, supported: false, enabled: false }
   }
-  // A live MetaTrader position on an account with execution turned on → real orders.
+  // A live position on an account with execution on → real orders. MetaTrader
+  // closes by ticket (needs positionRef); Rithmic flattens by symbol/exchange.
   function tradable(t: UITrade): boolean {
     const e = execFor(t)
-    return t.origin === "provider" && !!t.positionRef && (e.broker === "mt5" || e.broker === "mt4") && e.enabled
+    if (e.broker === "mt5" || e.broker === "mt4") return t.origin === "provider" && !!t.positionRef && e.enabled
+    if (e.broker === "rithmic") return t.origin === "provider" && e.enabled
+    return false
   }
 
   // Send a real order to the broker and report the outcome. Returns true when it
@@ -132,8 +135,19 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
   async function runOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<boolean> {
     if (t.accountId == null) return false
     const e = execFor(t)
+    const broker = (e.broker ?? "mt5") as OrderCommandInput["broker"]
+    // Rithmic acts by symbol+exchange (no position ticket); a partial close is
+    // an opposite-side order.
+    const brokerFields: Partial<OrderCommandInput> =
+      broker === "rithmic"
+        ? {
+            positionRef: null,
+            symbol: t.exchange ? `${t.symbol}@${t.exchange}` : t.symbol,
+            ...(input.kind === "partial_close" ? { side: t.side === "long" ? "short" : "long" } : {}),
+          }
+        : { positionRef: t.positionRef }
     try {
-      const res = await submitOrder({ accountId: t.accountId, broker: (e.broker ?? "mt5") as OrderCommandInput["broker"], positionRef: t.positionRef, ...input })
+      const res = await submitOrder({ accountId: t.accountId, broker, ...brokerFields, ...input })
       if (res.status === "blocked") {
         toast.error("Blocked by your prop-firm rules", { description: res.reasons.join(" ") })
         return false

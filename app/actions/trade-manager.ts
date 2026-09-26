@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache"
 import { and, desc, eq, gte } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { tradingAccounts, trades, providerAccounts, providerPositions, metatraderConnections } from "@/lib/db/schema"
+import { tradingAccounts, trades, providerAccounts, providerPositions, metatraderConnections, rithmicConnections } from "@/lib/db/schema"
 import { contractMultiplierForSymbol, computePnl, computeRMultiple } from "@/lib/calc"
 import { openTradeMetrics, liveTradeMetrics, computeStats, type TradeManagerData, type TradesManagerData, type ClosedTradeRow, type OpenTradeView } from "@/lib/trade-manager"
 
@@ -61,6 +61,7 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       accountName: account?.name ?? "Unassigned",
       currency: account?.currency ?? "USD",
       symbol: t.symbol,
+      exchange: null,
       market: t.market,
       side,
       quantity,
@@ -118,6 +119,7 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       accountName: account.name,
       currency: account.currency,
       symbol,
+      exchange: null,
       market: "futures",
       side,
       quantity,
@@ -155,6 +157,7 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
         accountName: account.name,
         currency: account.currency,
         symbol: pos.symbol,
+        exchange: null,
         market: "forex",
         side: pos.side,
         quantity: pos.volume,
@@ -167,6 +170,49 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
         contractMultiplier: 1,
         notes: null,
         metrics: liveTradeMetrics({ side: pos.side, volume: pos.volume, openPrice: pos.openPrice, currentPrice: pos.currentPrice, profit: pos.profit, stopLoss: pos.stopLoss, takeProfit: pos.takeProfit }),
+      })
+    }
+  }
+
+  // 4) Live Rithmic futures positions — stored on the connection each sync
+  //    from the P&L-plant snapshot (signed net qty, avg fill price, floating P&L).
+  const rithRows = await db
+    .select({ accountId: rithmicConnections.accountId, positions: rithmicConnections.openPositionsData, updatedAt: rithmicConnections.lastSyncedAt })
+    .from(rithmicConnections)
+    .where(eq(rithmicConnections.userId, userId))
+  for (const r of rithRows) {
+    const accId = r.accountId
+    if (accId == null || !accountById.has(accId)) continue
+    if (onlyAccountId != null && accId !== onlyAccountId) continue
+    const account = accountById.get(accId)!
+    for (const pos of r.positions ?? []) {
+      if (!(Math.abs(pos.netQuantity) > 0)) continue
+      const side = pos.netQuantity > 0 ? "long" : "short"
+      const quantity = Math.abs(pos.netQuantity)
+      const entryPrice = pos.avgOpenFillPrice ?? 0
+      const contractMultiplier = contractMultiplierForSymbol(pos.symbol)
+      views.push({
+        id: -1 * (accId * 1_000_000 + (Math.abs(hashCode(pos.symbol)) % 1_000_000)),
+        source: "rithmic",
+        origin: "provider",
+        positionRef: null,
+        accountId: accId,
+        accountName: account.name,
+        currency: account.currency,
+        symbol: pos.symbol,
+        exchange: pos.exchange || null,
+        market: "futures",
+        side,
+        quantity,
+        entryPrice,
+        currentPrice: null,
+        unrealizedPnl: pos.openPositionPnl,
+        stopLoss: null,
+        takeProfit: null,
+        entryTime: (r.updatedAt ?? new Date()).toISOString(),
+        contractMultiplier,
+        notes: null,
+        metrics: openTradeMetrics({ side, quantity, entryPrice, stopLoss: null, takeProfit: null, contractMultiplier, fees: 0 }),
       })
     }
   }
@@ -239,9 +285,14 @@ export async function getTradesManagerData(): Promise<TradesManagerData> {
       .from(metatraderConnections)
       .where(eq(metatraderConnections.userId, userId))
     const mtByAccount = new Map(mtRows.filter((r) => r.accountId != null).map((r) => [r.accountId!, r]))
+    const rithRows = await db.select({ accountId: rithmicConnections.accountId }).from(rithmicConnections).where(eq(rithmicConnections.userId, userId))
+    const rithAccounts = new Set(rithRows.map((r) => r.accountId).filter((a): a is number => a != null))
     for (const id of accountIds) {
       const mt = mtByAccount.get(id)
       if (mt) execution[id] = { broker: mt.platform === "mt4" ? "mt4" : "mt5", supported: true, enabled: mt.hasTrading != null }
+      // Rithmic uses the same login for trading, so execution is on as soon as
+      // the account has order routing entitled (confirmed on the first order).
+      else if (rithAccounts.has(id)) execution[id] = { broker: "rithmic", supported: true, enabled: true }
       else execution[id] = { broker: null, supported: false, enabled: false }
     }
   }

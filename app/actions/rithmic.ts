@@ -170,9 +170,9 @@ async function runConnectRithmic(
   // Balances live on a different Rithmic plant, so they're a second session.
   // Not fatal if it fails — the account still connects, just without a
   // starting size until the next sync gets one.
-  const snapshots = await fetchAccountSnapshots(login, password, systemName, gatewayUri, accounts).catch((err) => {
+  const { snapshots } = await fetchAccountSnapshots(login, password, systemName, gatewayUri, accounts).catch((err) => {
     console.warn("[rithmic] could not read account balances on connect:", err instanceof Error ? err.message : err)
-    return new Map<string, RithmicAccountSnapshot>()
+    return { snapshots: new Map<string, RithmicAccountSnapshot>(), positions: new Map() }
   })
 
   const passwordEnc = encrypt(password)

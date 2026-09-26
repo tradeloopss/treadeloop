@@ -1,7 +1,7 @@
 import { pgTable, text, timestamp, boolean, serial, numeric, integer, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core"
 import type { RuleConfig } from "@/lib/propmax/types"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
-import type { Mt5Position } from "@/lib/trade-manager"
+import type { Mt5Position, RithmicPosition } from "@/lib/trade-manager"
 import type { GuardDecision } from "@/lib/order-execution/types"
 
 // --- Better Auth required tables -------------------------------------------
@@ -356,6 +356,10 @@ export const rithmicConnections = pgTable("rithmic_connections", {
   lastSyncStatus: text("lastSyncStatus"), // ok | error
   lastSyncError: text("lastSyncError"),
   lastSyncCount: integer("lastSyncCount"),
+  // Live open futures positions from the P&L-plant snapshot (symbol, exchange,
+  // signed net qty, avg fill price, floating P&L), refreshed each sync — for
+  // the Trades Manager. Null before this existed.
+  openPositionsData: jsonb("openPositionsData").$type<RithmicPosition[]>(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 
