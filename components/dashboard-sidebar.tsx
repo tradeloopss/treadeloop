@@ -34,6 +34,7 @@ import {
   ChevronsRight,
   ShieldCheck,
   Gauge,
+  Activity,
   Banknote,
   CandlestickChart,
   Wallet,
@@ -47,6 +48,7 @@ import { useT } from "@/components/locale-provider"
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
+  { href: "/trade-manager", label: "Trade Manager", icon: Activity },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
