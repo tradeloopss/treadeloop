@@ -7,7 +7,7 @@
 //
 // Server-only (reads the DB) — imported from server components/actions, never
 // a client component, matching the rest of lib/.
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, isNull } from "drizzle-orm"
 import { db as sharedDb } from "@/lib/db"
 import {
   tradingAccounts,
@@ -126,7 +126,11 @@ export interface PropMaxBinding {
   firmName: string | null
   programName: string | null
   market: string // futures | forex
-  phase: string
+  phase: string // evaluation | funded (this account's current stage)
+  // The phases the catalog has rules for at this program + size, so the UI can
+  // offer "mark as funded" / "move to evaluation" without a re-setup. Always
+  // includes the current phase.
+  availablePhases: string[]
   accountSize: number | null
   detectionSource: string
   detectionConfidence: string
@@ -235,6 +239,20 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
   const firmById = new Map(firms.map((f) => [f.id, f]))
   const programById = new Map(programs.map((p) => [p.id, p]))
 
+  // Which phases the catalog currently has rules for at each bound program+size,
+  // so a tracked account can be advanced evaluation→funded (or back) in place.
+  const phaseRows = programIds.length
+    ? await db
+        .select({ programId: propRuleVersion.programId, accountSize: propRuleVersion.accountSize, phase: propRuleVersion.phase })
+        .from(propRuleVersion)
+        .where(and(inArray(propRuleVersion.programId, programIds), isNull(propRuleVersion.effectiveTo)))
+    : []
+  const phasesByProgramSize = new Map<string, Set<string>>()
+  for (const r of phaseRows) {
+    const key = `${r.programId}:${r.accountSize ?? ""}`
+    ;(phasesByProgramSize.get(key) ?? phasesByProgramSize.set(key, new Set()).get(key)!).add(r.phase)
+  }
+
   const payoutRows = await db
     .select({ accountId: propFirmTransactions.accountId, amount: propFirmTransactions.amount, occurredAt: propFirmTransactions.occurredAt })
     .from(propFirmTransactions)
@@ -281,6 +299,7 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
           programName: program?.name ?? null,
           market: program?.assetClass ?? "futures",
           phase: binding.phase,
+          availablePhases: [...(phasesByProgramSize.get(`${binding.programId}:${binding.accountSize ?? ""}`) ?? new Set([binding.phase]))],
           accountSize: binding.accountSize,
           detectionSource: binding.detectionSource,
           detectionConfidence: binding.detectionConfidence,

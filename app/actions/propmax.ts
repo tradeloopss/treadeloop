@@ -256,6 +256,44 @@ export async function setupPropMaxAccount(input: { accountId: number; ruleVersio
   revalidatePath("/propfirm-max")
 }
 
+// Advance (or move back) a tracked account between its evaluation and funded
+// stages in place — re-pins it to the same firm/program/size's rules for the
+// target phase, so the tracker judges it against the right stage without a
+// re-setup. Only works when the catalog actually has rules for that phase.
+export async function switchPropMaxPhase(accountId: number, phase: "evaluation" | "funded") {
+  const userId = await getUserId()
+
+  const [binding] = await db
+    .select({ id: propAccount.id, programId: propAccount.programId, accountSize: propAccount.accountSize })
+    .from(propAccount)
+    .where(and(eq(propAccount.accountId, accountId), eq(propAccount.userId, userId)))
+  if (!binding) throw new Error("This account isn't being tracked yet.")
+  if (binding.programId == null) throw new Error("This account has no program to switch phase for.")
+
+  // Find the in-force rule version for the same program + size at the target
+  // phase. accountSize may be null (a firm with no per-size table), so match it
+  // exactly either way.
+  const [version] = await db
+    .select({ id: propRuleVersion.id, accountSize: propRuleVersion.accountSize, phase: propRuleVersion.phase })
+    .from(propRuleVersion)
+    .where(
+      and(
+        eq(propRuleVersion.programId, binding.programId),
+        binding.accountSize == null ? isNull(propRuleVersion.accountSize) : eq(propRuleVersion.accountSize, binding.accountSize),
+        eq(propRuleVersion.phase, phase),
+        isNull(propRuleVersion.effectiveTo),
+      ),
+    )
+  if (!version) throw new Error(`No ${phase} rules published for this program and size.`)
+
+  await db
+    .update(propAccount)
+    .set({ phase, ruleVersionId: version.id, updatedAt: new Date() })
+    .where(and(eq(propAccount.id, binding.id), eq(propAccount.userId, userId)))
+  revalidatePath("/propfirm-max")
+  revalidatePath(`/propfirm-max/${accountId}`)
+}
+
 // Stop tracking an account under PropFirm Max (removes the binding; the old
 // /propfirm tracker and the account's trades are untouched).
 export async function removePropMaxAccount(accountId: number) {

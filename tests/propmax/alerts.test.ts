@@ -27,6 +27,7 @@ function view(dailyLossLimit: number): PropMaxAccountView {
       programName: "Eval",
       market: "futures",
       phase: "evaluation",
+      availablePhases: ["evaluation", "funded"],
       accountSize: 50000,
       detectionSource: "manual",
       detectionConfidence: "high",

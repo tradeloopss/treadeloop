@@ -35,7 +35,7 @@ import type { PropMaxAlertView, PropMaxDailyRow, PropMaxPayoutRow } from "@/lib/
 import type { OpenTradeView } from "@/lib/trade-manager"
 import type { RuleResult, RuleType, RuleSource } from "@/lib/propmax/types"
 import { closeOpenTrade } from "@/app/actions/trade-manager"
-import { removePropMaxAccount } from "@/app/actions/propmax"
+import { removePropMaxAccount, switchPropMaxPhase } from "@/app/actions/propmax"
 import { STATUS_META, ruleLabel, formatMoney, formatValue, formatSize, phaseLabel, confidenceLabel, timeAgo } from "@/components/propmax/display"
 
 const money = (n: number | null | undefined, ccy = "USD") => (n == null ? "—" : formatMoney(n, ccy))
@@ -732,6 +732,8 @@ function SettingsTab({ account }: { account: PropMaxAccountView }) {
   const router = useRouter()
   const b = account.binding!
   const [pending, startTransition] = useTransition()
+  const canFund = b.phase !== "funded" && b.availablePhases.includes("funded")
+  const canRevert = b.phase === "funded" && b.availablePhases.includes("evaluation")
   function untrack() {
     if (!confirm(`Stop tracking ${account.name} in Propfirm Tracker? Its trades and the old tracker are untouched.`)) return
     startTransition(async () => {
@@ -741,6 +743,17 @@ function SettingsTab({ account }: { account: PropMaxAccountView }) {
         router.push("/propfirm-max")
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Couldn't remove.")
+      }
+    })
+  }
+  function setPhase(target: "evaluation" | "funded") {
+    startTransition(async () => {
+      try {
+        await switchPropMaxPhase(account.accountId, target)
+        toast.success(target === "funded" ? "Marked as funded — now tracking funded rules." : "Moved back to evaluation.")
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't switch phase.")
       }
     })
   }
@@ -765,6 +778,19 @@ function SettingsTab({ account }: { account: PropMaxAccountView }) {
           </div>
         ))}
       </div>
+      {(canFund || canRevert) && (
+        <div className="rounded-xl border bg-card p-4">
+          <p className="text-sm font-medium">Account stage</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {canFund
+              ? "Passed the evaluation? Switch to the funded account to track it against the funded rules (no profit target, funded drawdown & consistency)."
+              : "Move this account back to its evaluation rules."}
+          </p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => setPhase(canFund ? "funded" : "evaluation")} disabled={pending}>
+            {pending ? "Switching…" : canFund ? "Mark as funded" : "Move to evaluation"}
+          </Button>
+        </div>
+      )}
       <div className="rounded-xl border border-[var(--loss)]/30 bg-[var(--loss)]/5 p-4">
         <p className="text-sm font-medium">Stop tracking</p>
         <p className="mt-0.5 text-xs text-muted-foreground">Removes this account from Propfirm Tracker. Its trades and the old tracker are untouched.</p>

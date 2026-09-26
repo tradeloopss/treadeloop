@@ -31,7 +31,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { cn } from "@/lib/utils"
 import type { PropMaxAccountView } from "@/lib/propmax/account"
 import type { CatalogOption, PropMaxAlertView } from "@/lib/propmax/view-types"
-import { removePropMaxAccount, acknowledgePropMaxAlert, acknowledgeAllPropMaxAlerts } from "@/app/actions/propmax"
+import { removePropMaxAccount, switchPropMaxPhase, acknowledgePropMaxAlert, acknowledgeAllPropMaxAlerts } from "@/app/actions/propmax"
 import { PropMaxSetupDialog } from "@/components/propmax/setup-dialog"
 import { STATUS_META, ruleLabel, formatMoney, formatSize, timeAgo } from "@/components/propmax/display"
 
@@ -319,6 +319,22 @@ function MarketBadge({ market }: { market: string }) {
   return <span className="rounded-md border px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">{market}</span>
 }
 
+// Whether this account is an evaluation or a funded account — always shown, so
+// the stage is never ambiguous. Funded is green; evaluation is neutral amber.
+function PhaseBadge({ phase }: { phase: string }) {
+  const funded = phase === "funded"
+  return (
+    <span
+      className={cn(
+        "rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+        funded ? "bg-[var(--gain)]/10 text-[var(--gain)]" : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      )}
+    >
+      {funded ? "Funded" : "Evaluation"}
+    </span>
+  )
+}
+
 function FirmMark({ name }: { name: string }) {
   return <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{name.slice(0, 2).toUpperCase()}</span>
 }
@@ -351,6 +367,7 @@ function AccountTable({ rows }: { rows: Row[] }) {
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{r.view.name}</span>
                         <MarketBadge market={b.market} />
+                        <PhaseBadge phase={b.phase} />
                       </div>
                       <p className="truncate text-xs text-muted-foreground">
                         {b.firmName ?? "—"} · {b.programName ?? "—"} · {formatSize(b.accountSize)}
@@ -383,7 +400,7 @@ function AccountTable({ rows }: { rows: Row[] }) {
                     <Link href={`/propfirm-max/${r.view.accountId}`}>
                       <Button size="sm" variant="outline" className="h-7 px-2 text-xs">Open</Button>
                     </Link>
-                    <RowMenu accountId={r.view.accountId} name={r.view.name} />
+                    <RowMenu accountId={r.view.accountId} name={r.view.name} phase={b.phase} availablePhases={b.availablePhases} />
                   </div>
                 </td>
               </tr>
@@ -406,6 +423,7 @@ function AccountCard({ r }: { r: Row }) {
             <div className="flex items-center gap-1.5">
               <span className="truncate font-medium">{r.view.name}</span>
               <MarketBadge market={b.market} />
+              <PhaseBadge phase={b.phase} />
             </div>
             <p className="truncate text-xs text-muted-foreground">{b.firmName ?? "—"} · {b.programName ?? "—"}</p>
           </div>
@@ -439,9 +457,11 @@ function AccountCard({ r }: { r: Row }) {
   )
 }
 
-function RowMenu({ accountId, name }: { accountId: number; name: string }) {
+function RowMenu({ accountId, name, phase, availablePhases }: { accountId: number; name: string; phase: string; availablePhases: string[] }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const canFund = phase !== "funded" && availablePhases.includes("funded")
+  const canRevert = phase === "funded" && availablePhases.includes("evaluation")
   function untrack() {
     if (!confirm(`Stop tracking ${name} in Propfirm Tracker?`)) return
     startTransition(async () => {
@@ -454,13 +474,27 @@ function RowMenu({ accountId, name }: { accountId: number; name: string }) {
       }
     })
   }
+  function setPhase(target: "evaluation" | "funded") {
+    startTransition(async () => {
+      try {
+        await switchPropMaxPhase(accountId, target)
+        toast.success(target === "funded" ? `${name} marked as funded — now tracking its funded rules.` : `${name} moved back to evaluation.`)
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't switch phase.")
+      }
+    })
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-7" aria-label="Account menu"><MoreHorizontal className="size-4" /></Button>} />
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuItem render={<Link href={`/propfirm-max/${accountId}`} />}>Open account</DropdownMenuItem>
         <DropdownMenuItem render={<Link href={`/propfirm-max/${accountId}?tab=running`} />}>Running trades</DropdownMenuItem>
         <DropdownMenuItem render={<Link href={`/propfirm-max/${accountId}?tab=rules`} />}>View rules</DropdownMenuItem>
+        {(canFund || canRevert) && <DropdownMenuSeparator />}
+        {canFund && <DropdownMenuItem onClick={() => setPhase("funded")} disabled={pending}>Mark as funded</DropdownMenuItem>}
+        {canRevert && <DropdownMenuItem onClick={() => setPhase("evaluation")} disabled={pending}>Move to evaluation</DropdownMenuItem>}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={untrack} disabled={pending}>Stop tracking</DropdownMenuItem>
       </DropdownMenuContent>
