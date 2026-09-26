@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, boolean, serial, numeric, integer, jsonb, uni
 import type { RuleConfig } from "@/lib/propmax/types"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { Mt5Position } from "@/lib/trade-manager"
+import type { GuardDecision } from "@/lib/order-execution/types"
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -252,6 +253,11 @@ export const metatraderConnections = pgTable("metatrader_connections", {
   accountId: integer("accountId"), // links to trading_accounts
   // The investor (read-only) password, AES-GCM encrypted (lib/crypto).
   passwordEnc: text("passwordEnc").notNull(),
+  // The master/trading password (AES-GCM), set only when the user opts an
+  // account into order execution — it's what lets the bridge actually place,
+  // modify and close orders (the investor password above cannot trade). Null
+  // keeps the account read-only. See lib/order-execution.
+  tradingPasswordEnc: text("tradingPasswordEnc"),
   login: text("login").notNull(),
   server: text("server").notNull(),
   platform: text("platform").notNull(), // mt4 | mt5
@@ -1204,5 +1210,52 @@ export const propAlert = pgTable(
     uniqueIndex("prop_alert_dedupe").on(t.dedupeKey),
     index("prop_alert_account").on(t.propAccountId),
     index("prop_alert_user_unack").on(t.userId, t.acknowledgedAt),
+  ],
+)
+
+// --- Order execution -------------------------------------------------------
+// The ONE write path from TradeLoop to a broker. The app writes a command
+// (after the rule guard vets it); a per-broker executor picks it up, sends it
+// and records the result. Nothing here runs unless the account has execution
+// enabled (a stored trading credential), so the app stays read-only by default.
+// See lib/order-execution.
+export const orderCommands = pgTable(
+  "order_commands",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    accountId: integer("accountId").notNull(), // trading_accounts.id
+    broker: text("broker").notNull(), // mt5 | mt4 | rithmic | tradovate
+    kind: text("kind").notNull(), // close | partial_close | modify | cancel | place
+    // pending → sent → filled | rejected | failed; blocked (guard refused) or
+    // unsupported (broker execution not wired yet) never reach a broker.
+    status: text("status").notNull().default("pending"),
+    // Target of the command.
+    positionRef: text("positionRef"), // broker position/ticket id (close/partial/modify)
+    orderRef: text("orderRef"), // pending order id (cancel / modify pending)
+    symbol: text("symbol"),
+    side: text("side"), // long | short (place)
+    volume: numeric("volume", { precision: 18, scale: 4 }), // lots / contracts
+    price: numeric("price", { precision: 18, scale: 6 }), // limit/stop (place); exit hint (close)
+    stopLoss: numeric("stopLoss", { precision: 18, scale: 6 }),
+    takeProfit: numeric("takeProfit", { precision: 18, scale: 6 }),
+    orderType: text("orderType"), // market | limit | stop (place)
+    // The rule guard's decision, kept for the audit trail.
+    ruleCheck: jsonb("ruleCheck").$type<GuardDecision>(),
+    // The broker's normalized reply + message.
+    brokerRef: text("brokerRef"), // fill/order id the broker returned
+    resultMessage: text("resultMessage"),
+    brokerResult: jsonb("brokerResult"),
+    // Executor scheduling: who's working it and how many tries.
+    leaseUntil: timestamp("leaseUntil"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [
+    index("order_commands_user").on(t.userId),
+    // The executor's poll: pending commands for a broker, oldest first.
+    index("order_commands_due").on(t.broker, t.status, t.leaseUntil),
+    index("order_commands_account").on(t.accountId),
   ],
 )

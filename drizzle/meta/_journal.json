@@ -141,6 +141,13 @@
       "when": 1790360000000,
       "tag": "0019_mt5_open_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790440000000,
+      "tag": "0020_order_execution",
+      "breakpoints": true
     }
   ]
 }
