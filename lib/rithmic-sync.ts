@@ -3,10 +3,10 @@
 // "Sync now") and by lib/rithmic-auto-sync.ts's background job, which runs
 // outside any request context and can't rely on a logged-in session.
 import { db } from "@/lib/db"
-import { propFirmTransactions, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
+import { propFirmTransactions, rithmicConnections, trades, tradingAccounts, orderCommands } from "@/lib/db/schema"
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm"
 import { decrypt } from "@/lib/crypto"
-import { fetchAccountSnapshots, fetchRithmicFillsAndRms, type RithmicAccountRms, type RithmicAccountSnapshot } from "@/lib/rithmic-client"
+import { fetchAccountSnapshots, fetchRithmicFillsAndRms, sendRithmicOrder, type RithmicAccountRms, type RithmicAccountSnapshot, type RithmicOrderInput } from "@/lib/rithmic-client"
 import { brokerDrawdownFloor, inferStartingBalance } from "@/lib/broker-balance"
 import { reconstructTrades, type ParsedFill } from "@/lib/fill-reconstruction"
 import { computePnl, computeRMultiple, contractMultiplierForSymbol } from "@/lib/calc"
@@ -188,6 +188,92 @@ const BALANCE_REFRESH_MS = 10 * 60_000
 // auto-sync job calls this outside any request context. Callers that DO
 // have a session (the manual "Sync now" button) are responsible for
 // verifying the connection belongs to the caller before invoking this.
+// --- Order routing (write path) -------------------------------------------
+// A Rithmic order carries a symbol AND an exchange; the app may pass either a
+// bare symbol (with a known root → exchange) or "SYMBOL@EXCHANGE".
+const ROOT_EXCHANGE: Record<string, string> = {
+  ES: "CME", MES: "CME", NQ: "CME", MNQ: "CME", RTY: "CME", M2K: "CME", "6E": "CME", "6B": "CME", "6J": "CME", "6A": "CME", "6C": "CME",
+  CL: "NYMEX", MCL: "NYMEX", NG: "NYMEX", GC: "COMEX", MGC: "COMEX", SI: "COMEX", HG: "COMEX",
+  YM: "CBOT", ZN: "CBOT", ZB: "CBOT", ZF: "CBOT", ZT: "CBOT", ZC: "CBOT", ZS: "CBOT", ZW: "CBOT",
+}
+function symbolExchange(raw: string | null, fallback?: string | null): { symbol: string | null; exchange: string | null } {
+  if (!raw) return { symbol: null, exchange: fallback ?? null }
+  if (raw.includes("@")) {
+    const [s, e] = raw.split("@")
+    return { symbol: s, exchange: e || fallback || null }
+  }
+  const root = raw.replace(/[0-9]+$/, "").replace(/[FGHJKMNQUVXZ]$/, "") // strip month/year code
+  return { symbol: raw, exchange: fallback ?? ROOT_EXCHANGE[root] ?? ROOT_EXCHANGE[raw] ?? null }
+}
+
+// Executes pending Rithmic order_commands (the Vercel side, where Rithmic
+// connectivity + the credential key live — called from the rithmic-sync cron).
+// The rule guard already ran at submit time; this only transmits.
+//
+// UNVERIFIED end to end — needs an order-routing-entitled Rithmic account to
+// confirm before real use; a bad entitlement surfaces as a rejected request.
+export async function runRithmicOrderCommands(): Promise<{ processed: number }> {
+  const claimed = await db.execute<{ id: number }>(sql`
+    update order_commands set "leaseUntil" = now() + interval '2 minutes', "updatedAt" = now()
+    where id in (
+      select id from order_commands
+      where broker = 'rithmic' and status = 'pending' and ("leaseUntil" is null or "leaseUntil" < now())
+      order by "createdAt" limit 10 for update skip locked
+    ) returning id`)
+  const ids = claimed.rows.map((r) => r.id)
+  if (ids.length === 0) return { processed: 0 }
+  const cmds = await db.select().from(orderCommands).where(inArray(orderCommands.id, ids))
+
+  for (const cmd of cmds) {
+    try {
+      const [conn] = await db.select().from(rithmicConnections).where(eq(rithmicConnections.accountId, cmd.accountId))
+      if (!conn) {
+        await finishOrder(cmd.id, "failed", "No Rithmic connection for this account.")
+        continue
+      }
+      if (cmd.kind === "modify") {
+        await finishOrder(cmd.id, "unsupported", "Rithmic positions have no SL/TP to modify — place a protective stop/limit order instead.")
+        continue
+      }
+      const { symbol, exchange } = symbolExchange(cmd.symbol)
+      const input: RithmicOrderInput = {
+        kind: cmd.kind as RithmicOrderInput["kind"],
+        symbol,
+        exchange,
+        side: cmd.side === "short" ? "short" : cmd.side === "long" ? "long" : null,
+        quantity: cmd.volume != null ? Number(cmd.volume) : null,
+        price: cmd.price != null ? Number(cmd.price) : null,
+        orderType: (cmd.orderType as RithmicOrderInput["orderType"]) ?? "market",
+        basketId: cmd.orderRef,
+      }
+      const res = await sendRithmicOrder(
+        conn.login,
+        decrypt(conn.passwordEnc),
+        conn.systemName,
+        conn.gatewayUri,
+        { fcmId: conn.fcmId, ibId: conn.ibId, accountId: conn.rithmicAccountId },
+        input,
+      )
+      await finishOrder(cmd.id, res.status, res.message, res.brokerRef, res)
+      console.log(`[rithmic] order ${cmd.id} (${cmd.kind} ${conn.rithmicAccountId}): ${res.status} — ${res.message}`)
+    } catch (err) {
+      const attempts = cmd.attempts + 1
+      await db
+        .update(orderCommands)
+        .set({ status: attempts >= 3 ? "failed" : "pending", resultMessage: err instanceof Error ? err.message : String(err), attempts, leaseUntil: null, updatedAt: new Date() })
+        .where(eq(orderCommands.id, cmd.id))
+    }
+  }
+  return { processed: cmds.length }
+}
+
+async function finishOrder(id: number, status: string, message: string, brokerRef?: string | null, raw?: unknown) {
+  await db
+    .update(orderCommands)
+    .set({ status, resultMessage: message, brokerRef: brokerRef ?? null, brokerResult: (raw ?? null) as never, leaseUntil: null, updatedAt: new Date() })
+    .where(eq(orderCommands.id, id))
+}
+
 export async function syncRithmicConnection(connection: RithmicConnectionRow, trigger: SyncTrigger = "auto"): Promise<{ imported: number }> {
   const startedAt = Date.now()
   try {

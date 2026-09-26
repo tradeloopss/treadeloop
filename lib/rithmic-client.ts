@@ -60,6 +60,16 @@ const PROTO_FILES = [
   "request_pnl_position_snapshot.proto",
   "response_pnl_position_snapshot.proto",
   "account_pnl_position_update.proto",
+  // Order routing (write path) — the order plant. Vendored from the same
+  // async_rithmic source as the rest, exact Rithmic field tags. See
+  // lib/order-execution and sendRithmicOrder below.
+  "request_new_order.proto",
+  "response_new_order.proto",
+  "request_exit_position.proto",
+  "response_exit_position.proto",
+  "request_cancel_order.proto",
+  "response_cancel_order.proto",
+  "rithmic_order_notification.proto",
 ]
 
 // SysInfraType per request_login.proto's enum — which login a session is
@@ -77,6 +87,18 @@ const PNL_PLANT = 4
 const EXCHANGE_ORDER_NOTIFICATION_TEMPLATE = 352
 const REPLAY_EXECUTIONS_RESPONSE_TEMPLATE = 3510
 const NOTIFY_TYPE_FILL = 5
+
+// Order-plant template ids (Rithmic R|Protocol).
+const T_NEW_ORDER = 312
+const T_RESPONSE_NEW_ORDER = 313
+const T_EXIT_POSITION = 3504
+const T_RESPONSE_EXIT_POSITION = 3505
+const T_CANCEL_ORDER = 316
+const T_RESPONSE_CANCEL_ORDER = 317
+const T_ORDER_NOTIFICATION = 351
+// RithmicOrderNotification.notify_type values that end the order's lifecycle.
+const RON_COMPLETE = 15
+const RON_FAILURES = new Set([16, 17, 20]) // MODIFICATION_FAILED, CANCELLATION_FAILED, LINK_ORDERS_FAILED
 const TRANSACTION_TYPE_BUY = 1
 
 let cachedRoot: protobuf.Root | null = null
@@ -528,6 +550,161 @@ async function withSession<T>(
 async function fetchLoginInfo(ws: WebSocket, root: protobuf.Root): Promise<{ fcmId: string; ibId: string; userType: number }> {
   ws.send(encode(root, "RequestLoginInfo", { templateId: 300 }))
   return decode(root, "ResponseLoginInfo", await waitForOne(ws))
+}
+
+// --- Order routing (write path) -------------------------------------------
+// Sends one order to the order plant and reports the outcome. Everything that
+// vets WHETHER to send (the prop-firm rule guard, execution opt-in) lives in
+// lib/order-execution; this only encodes and transmits a decided order.
+//
+// UNVERIFIED against a live order-routing account — the account must have
+// order routing entitled, and this should be confirmed with a tiny test order
+// before being trusted with real size.
+export interface RithmicOrderInput {
+  kind: "close" | "partial_close" | "place" | "cancel"
+  symbol?: string | null
+  exchange?: string | null
+  // For place/partial: the side of the NEW order (a partial close is an
+  // opposite-side order the caller sets).
+  side?: "long" | "short" | null
+  quantity?: number | null
+  price?: number | null
+  orderType?: "market" | "limit" | "stop" | null
+  basketId?: string | null // cancel: the order id to cancel
+}
+
+export interface RithmicOrderResult {
+  accepted: boolean
+  status: "filled" | "sent" | "rejected"
+  message: string
+  brokerRef?: string | null
+}
+
+const MANUAL = 1 // OrderPlacement.MANUAL
+
+export async function sendRithmicOrder(
+  user: string,
+  password: string,
+  systemName: string,
+  gatewayUri: string,
+  account: { fcmId: string; ibId: string; accountId: string },
+  cmd: RithmicOrderInput,
+): Promise<RithmicOrderResult> {
+  return withSession(
+    user,
+    password,
+    systemName,
+    gatewayUri,
+    async (ws, root) => {
+      const base = { fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId, manualOrAuto: MANUAL, windowName: APP_NAME }
+      let responseTemplate: number
+      let responseType: string
+
+      if (cmd.kind === "cancel") {
+        if (!cmd.basketId) throw new Error("Cancel needs the order id")
+        ws.send(encode(root, "RequestCancelOrder", { templateId: T_CANCEL_ORDER, basketId: cmd.basketId, ...base }))
+        responseTemplate = T_RESPONSE_CANCEL_ORDER
+        responseType = "ResponseCancelOrder"
+      } else if (cmd.kind === "close") {
+        if (!cmd.symbol || !cmd.exchange) throw new Error("Close needs the symbol and exchange")
+        ws.send(encode(root, "RequestExitPosition", { templateId: T_EXIT_POSITION, symbol: cmd.symbol, exchange: cmd.exchange, ...base }))
+        responseTemplate = T_RESPONSE_EXIT_POSITION
+        responseType = "ResponseExitPosition"
+      } else {
+        if (!cmd.symbol || !cmd.exchange || !cmd.quantity || !cmd.side) throw new Error("Order needs a symbol, exchange, quantity and side")
+        const priceType = cmd.orderType === "limit" ? 1 : cmd.orderType === "stop" ? 4 : 2 // LIMIT / STOP_MARKET / MARKET
+        ws.send(
+          encode(root, "RequestNewOrder", {
+            templateId: T_NEW_ORDER,
+            symbol: cmd.symbol,
+            exchange: cmd.exchange,
+            quantity: cmd.quantity,
+            transactionType: cmd.side === "short" ? 2 : 1, // SELL / BUY
+            priceType,
+            duration: 1, // DAY
+            ...(cmd.price != null && priceType !== 2 ? { price: cmd.price } : {}),
+            ...base,
+          }),
+        )
+        responseTemplate = T_RESPONSE_NEW_ORDER
+        responseType = "ResponseNewOrder"
+      }
+
+      return collectOrderOutcome(root, ws, responseTemplate, responseType)
+    },
+    ORDER_PLANT,
+  )
+}
+
+// Reads the plant's reply: the Response{New,Exit,Cancel} carries an rp_code
+// that accepts/rejects the REQUEST, then RithmicOrderNotification messages
+// stream the lifecycle. Resolves on a terminal notification (COMPLETE = done,
+// a *_FAILED = rejected), on quiet, or a hard cap — never rejects the promise,
+// so a slow feed reports "sent" rather than losing the order.
+function collectOrderOutcome(root: protobuf.Root, ws: WebSocket, responseTemplate: number, responseType: string): Promise<RithmicOrderResult> {
+  const Base = root.lookupType("Base")
+  return new Promise((resolve) => {
+    let requestRejected = false
+    let basketId: string | null = null
+    let settled = false
+    let idle: ReturnType<typeof setTimeout>
+    const finish = (r: RithmicOrderResult) => {
+      if (settled) return
+      settled = true
+      clearTimeout(hardCap)
+      clearTimeout(idle)
+      ws.off("message", onMessage)
+      resolve(r)
+    }
+    const quiet = () =>
+      finish(
+        requestRejected
+          ? { accepted: false, status: "rejected", message: "Rithmic rejected the request", brokerRef: basketId }
+          : { accepted: true, status: "sent", message: "Order sent to Rithmic.", brokerRef: basketId },
+      )
+    const bump = (ms: number) => {
+      clearTimeout(idle)
+      idle = setTimeout(quiet, ms)
+    }
+    const hardCap = setTimeout(quiet, 12_000)
+    bump(6_000)
+
+    const onMessage = (data: WebSocket.RawData) => {
+      let templateId: number
+      try {
+        templateId = (Base.decode(data as Buffer) as unknown as { templateId: number }).templateId
+      } catch {
+        bump(3_000)
+        return
+      }
+      if (templateId === responseTemplate) {
+        const resp = decode(root, responseType, data)
+        basketId = resp.basketId ?? basketId
+        const rp: string[] = resp.rpCode ?? []
+        if (rp.length > 0 && rp[0] !== "0") {
+          requestRejected = true
+          finish({ accepted: false, status: "rejected", message: `Rithmic rejected the order (${rp.join(", ")}).`, brokerRef: basketId })
+          return
+        }
+        bump(5_000)
+      } else if (templateId === T_ORDER_NOTIFICATION) {
+        const n = decode(root, "RithmicOrderNotification", data)
+        basketId = n.basketId ?? basketId
+        if (n.notifyType === RON_COMPLETE) {
+          finish({ accepted: true, status: "filled", message: "Order complete.", brokerRef: basketId })
+          return
+        }
+        if (RON_FAILURES.has(n.notifyType)) {
+          finish({ accepted: false, status: "rejected", message: n.completionReason || n.text || "Order failed.", brokerRef: basketId })
+          return
+        }
+        bump(5_000)
+      } else {
+        bump(3_000)
+      }
+    }
+    ws.on("message", onMessage)
+  })
 }
 
 // user_type enum from the R|Protocol proto (admin=0, fcm=1, ib=2, trader=3).

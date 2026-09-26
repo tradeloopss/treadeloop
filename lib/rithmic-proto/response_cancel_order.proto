@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package rti;
+
+message ResponseCancelOrder
+{
+	int32           template_id        = 154467;
+	repeated string user_msg           = 132760;
+	string          user_tag           = 154119;
+	repeated string rq_handler_rp_code = 132764;
+	repeated string rp_code            = 132766;
+	string          basket_id          = 110300;
+	int32           ssboe              = 150100;
+	int32           usecs              = 150101;
+}
