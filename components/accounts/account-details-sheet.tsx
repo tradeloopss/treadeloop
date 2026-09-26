@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { useT } from "@/components/locale-provider"
-import { AccountAvatar, AccountMenu, HealthPill, type AccountActions } from "@/components/accounts/account-ui"
+import { AccountAvatar, AccountMenu, ConnectionDiagnostics, HealthPill, type AccountActions } from "@/components/accounts/account-ui"
 import { messageTone, useRowMetrics, useSyncWords, type RowModel } from "@/components/accounts/account-rows"
 
 // Phones: tapping an account opens its details as a screen of their own
@@ -166,6 +166,11 @@ function Details({
                 </div>
               ))}
             </dl>
+          )}
+          {c?.diagnostics && (
+            <div className="border-t px-4 py-3">
+              <ConnectionDiagnostics items={c.diagnostics} />
+            </div>
           )}
 
           <div className="flex items-center justify-between gap-3 border-t px-4 py-3">

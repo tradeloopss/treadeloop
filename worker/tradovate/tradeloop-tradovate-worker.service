@@ -1,0 +1,25 @@
+# /etc/systemd/system/tradeloop-tradovate-worker.service
+# TradeLoop Tradovate sync worker — see worker/tradovate/README.md.
+[Unit]
+Description=TradeLoop Tradovate sync worker (REST sync, user-data WebSockets, reconciliation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tradeloop
+EnvironmentFile=/etc/tradeloop/db.env
+EnvironmentFile=/etc/tradeloop/tradovate-worker.env
+Environment=TRADOVATE_STATUS_FILE=/var/lib/tradeloop/tradovate-status.json
+StateDirectory=tradeloop
+ExecStart=/usr/bin/node /srv/tradeloop/tradovate-worker/worker.cjs
+Restart=always
+RestartSec=5
+# Closes sockets and waits up to 60 s for in-flight syncs on SIGTERM.
+TimeoutStopSec=75
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

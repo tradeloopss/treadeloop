@@ -11,6 +11,8 @@ import { recordRequestTiming } from "@/lib/telemetry"
 import { brokerLogo } from "@/lib/broker-logos"
 import { ESSENTIAL_ACCOUNT_LIMIT, ESSENTIAL_METATRADER_LIMIT, type PlanUsage } from "@/lib/plan-allowance"
 import { getT } from "@/lib/i18n/server"
+import { tradovateAvailability } from "@/lib/tradovate/config"
+import { tradovateConnectionsFor } from "@/lib/tradovate/connections"
 
 // Connecting Rithmic (login + account discovery + history) and "Sync all"
 // run as server actions on this route and can take up to a minute.
@@ -18,15 +20,27 @@ export const maxDuration = 60
 
 const num = (v: string | number | null | undefined) => (v == null || v === "" ? null : Number(v))
 
-const CONNECTABLE: PlatformId[] = ["rithmic", "mt5", "mt4", "tradingview", "file"]
+const CONNECTABLE: PlatformId[] = ["rithmic", "mt5", "mt4", "tradingview", "file", "tradovate"]
 
-export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ connect?: string }> }) {
+// ?tradovate=<id> — back from Tradovate's sign-in: the Add account window
+// opens on that connection's first-sync progress. ?tradovate_error=<code> —
+// the sign-in didn't complete.
+const TRADOVATE_ERRORS: Record<string, string> = {
+  denied: "Tradovate sign-in was cancelled or declined.",
+  state: "That sign-in link expired or didn't match — please start again.",
+  exchange: "Tradovate didn't complete the sign-in. Please try again.",
+  rate: "Tradovate is limiting requests right now — please try again in a little while.",
+  plan: "Tradovate sync is included with Pro.",
+  unavailable: "Tradovate connections aren't available yet.",
+}
+
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ connect?: string; tradovate?: string; tradovate_error?: string }> }) {
   const startedAt = Date.now()
-  const { connect } = await searchParams
-  const initialPlatform = CONNECTABLE.find((p) => p === connect) ?? null
+  const { connect, tradovate: tradovateParam, tradovate_error: tradovateErrorCode } = await searchParams
+  const initialPlatform = CONNECTABLE.find((p) => p === connect) ?? (tradovateParam ? "tradovate" : null)
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner] = await Promise.all([
+  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate] = await Promise.all([
     getAccounts(true),
     getRithmicConnections(),
     getMetaTraderConnections(),
@@ -34,7 +48,15 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     getTradingViewPairings(),
     session?.user ? isPro(session.user.id) : Promise.resolve(false),
     session?.user ? isOwner(session.user.id) : Promise.resolve(false),
+    // Never let Tradovate take the rest of the page down.
+    session?.user
+      ? tradovateConnectionsFor(session.user.id).catch((err) => {
+          console.error("[accounts] tradovate connections unavailable:", err instanceof Error ? err.message : err)
+          return []
+        })
+      : Promise.resolve([]),
   ])
+  const tradovateStatus = tradovateAvailability()
 
   // Essential's allowance (lib/plan-allowance.ts), counted the way
   // lib/plan-limits.ts enforces it: every account, archived ones included.
@@ -148,6 +170,44 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           reconnect: null,
         }
       }),
+    // One row per Tradovate account (a login can hold several, demo and live).
+    ...tradovate.flatMap((c) =>
+      c.status === "disconnected"
+        ? []
+        : c.accounts
+            .filter((a) => a.enabled && a.status === "active")
+            .map((a): HubConnection => {
+              const acct = a.tradingAccountId != null ? account(a.tradingAccountId) : null
+              const failing = c.status === "reauth" || c.status === "error"
+              const health = failing ? "error" : c.status === "pending" ? "syncing" : c.errorCount > 0 || c.realtimeStatus === "degraded" ? "warning" : "connected"
+              return {
+                key: `tdv:${a.id}`,
+                kind: "tradovate",
+                connectionId: c.id,
+                providerAccountRowId: a.id,
+                title: acct?.name ?? `Tradovate - ${a.accountName}`,
+                subtitle: `${a.environment === "live" ? t("Live") : t("Demo")} · ${a.accountName}`,
+                logoName: "Tradovate",
+                health,
+                message: failing ? (c.statusMessage ?? c.lastSyncError) : c.errorCount > 0 ? c.lastSyncError : null,
+                currency: a.currency,
+                balance: a.balance,
+                equity: a.equity,
+                openPositions: a.openPositions,
+                tradeCount: null,
+                lastSyncedAt: c.lastSyncAt ? new Date(c.lastSyncAt) : null,
+                canSync: !failing,
+                account: acct,
+                reconnect: failing ? { platform: "tradovate" } : null,
+                diagnostics: [
+                  { label: t("Realtime"), value: c.realtimeStatus === "live" ? t("Live") : c.realtimeStatus === "degraded" ? t("Reconnecting") : c.realtimeStatus === "connecting" ? t("Connecting") : t("Offline") },
+                  { label: t("Last event"), at: c.lastRealtimeEventAt },
+                  { label: t("Last reconciliation"), at: c.lastReconciledAt },
+                  ...(c.errorCount > 0 ? [{ label: t("Recent errors"), value: String(c.errorCount) }] : []),
+                ],
+              }
+            }),
+    ),
   ]
 
   const otherAccounts = accounts.filter((a) => !linked.has(a.id)).map((a) => byId.get(a.id)!)
@@ -163,6 +223,12 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         usage={usage}
         pairings={pairings}
         importAccounts={importAccounts}
+        tradovate={{
+          enabled: tradovateStatus.enabled,
+          mock: tradovateStatus.mode === "mock",
+          connectionId: tradovateParam && /^\d+$/.test(tradovateParam) ? Number(tradovateParam) : null,
+          error: tradovateErrorCode ? (TRADOVATE_ERRORS[tradovateErrorCode] ?? TRADOVATE_ERRORS.exchange) : null,
+        }}
       />
   )
 }

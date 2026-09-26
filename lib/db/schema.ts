@@ -772,3 +772,159 @@ export const requestTimings = pgTable(
   },
   (t) => [index("request_timings_created_idx").on(t.createdAt)]
 )
+
+// --- Provider-neutral broker connections (lib/providers) --------------------
+// OAuth-style connections to a trading provider — Tradovate first; Rithmic,
+// MT4 and MT5 keep their own connection tables for now and can move here.
+// The raw data each provider reports is kept in provider_* tables below
+// (idempotent by the provider's own ids), and turned into journal `trades` by
+// the shared engine (lib/fill-reconstruction). Tokens are AES-256-GCM
+// encrypted (lib/crypto) and never leave the server.
+export const tradingConnections = pgTable(
+  "trading_connections",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    provider: text("provider").notNull(), // tradovate
+    environment: text("environment").notNull(), // mock | staging | production
+    providerUserId: text("providerUserId").notNull(),
+    providerUserName: text("providerUserName"),
+    // pending (first sync due) | connected | reauth (user must reconnect) | error | disconnected
+    status: text("status").notNull().default("pending"),
+    statusMessage: text("statusMessage"),
+    // Progress of the first sync, shown while connecting: authenticated →
+    // finding_accounts → importing_orders → importing_executions →
+    // building_trades → calculating_pnl → complete
+    syncStage: text("syncStage"),
+    accessTokenEnc: text("accessTokenEnc"),
+    refreshTokenEnc: text("refreshTokenEnc"),
+    tokenExpiresAt: timestamp("tokenExpiresAt"),
+    refreshExpiresAt: timestamp("refreshExpiresAt"),
+    // Realtime (worker): offline | connecting | live | degraded
+    realtimeStatus: text("realtimeStatus").notNull().default("offline"),
+    lastRealtimeEventAt: timestamp("lastRealtimeEventAt"),
+    lastSyncAt: timestamp("lastSyncAt"),
+    lastSyncStatus: text("lastSyncStatus"), // ok | error
+    lastSyncError: text("lastSyncError"),
+    lastReconciledAt: timestamp("lastReconciledAt"),
+    lastReconcileSummary: jsonb("lastReconcileSummary").$type<Record<string, number>>(),
+    errorCount: integer("errorCount").notNull().default(0),
+    // Scheduling, leased by the sync worker (SKIP LOCKED), like MetaTrader.
+    nextSyncAt: timestamp("nextSyncAt"),
+    leaseUntil: timestamp("leaseUntil"),
+    lastManualSyncAt: timestamp("lastManualSyncAt"),
+    // New executions stored since trades were last built → the app rebuilds.
+    tradesDirtyAt: timestamp("tradesDirtyAt"),
+    tradesBuiltAt: timestamp("tradesBuiltAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("trading_connections_user_provider_identity").on(t.userId, t.provider, t.environment, t.providerUserId),
+    index("trading_connections_due").on(t.provider, t.status, t.nextSyncAt),
+  ],
+)
+
+export const providerAccounts = pgTable(
+  "provider_accounts",
+  {
+    id: serial("id").primaryKey(),
+    connectionId: integer("connectionId").notNull(),
+    provider: text("provider").notNull(),
+    environment: text("environment").notNull(), // tradovate: demo | live
+    providerAccountId: text("providerAccountId").notNull(),
+    accountName: text("accountName").notNull(),
+    accountType: text("accountType"),
+    currency: text("currency").notNull().default("USD"),
+    balance: numeric("balance", { precision: 18, scale: 2 }),
+    equity: numeric("equity", { precision: 18, scale: 2 }),
+    availableMargin: numeric("availableMargin", { precision: 18, scale: 2 }),
+    status: text("status").notNull().default("active"), // active | inactive
+    // false = "disconnect this account": kept, but no longer synced into trades.
+    enabled: boolean("enabled").notNull().default(true),
+    tradingAccountId: integer("tradingAccountId"), // the journal account its trades land in
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("provider_accounts_identity").on(t.connectionId, t.environment, t.providerAccountId)],
+)
+
+export const providerOrders = pgTable(
+  "provider_orders",
+  {
+    id: serial("id").primaryKey(),
+    connectionId: integer("connectionId").notNull(),
+    provider: text("provider").notNull(),
+    environment: text("environment").notNull(),
+    providerOrderId: text("providerOrderId").notNull(),
+    providerAccountId: text("providerAccountId").notNull(),
+    symbol: text("symbol"),
+    contractId: text("contractId"),
+    side: text("side"), // buy | sell
+    quantity: numeric("quantity", { precision: 18, scale: 4 }),
+    orderType: text("orderType"),
+    limitPrice: numeric("limitPrice", { precision: 18, scale: 6 }),
+    stopPrice: numeric("stopPrice", { precision: 18, scale: 6 }),
+    status: text("status"),
+    submittedAt: timestamp("submittedAt", { precision: 3 }),
+    rawData: jsonb("rawData").$type<Record<string, unknown>>(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("provider_orders_identity").on(t.connectionId, t.environment, t.providerOrderId),
+    index("provider_orders_account").on(t.connectionId, t.environment, t.providerAccountId),
+  ],
+)
+
+// One row per execution (fill), UNIQUE by (connection, idempotencyKey): the
+// provider's own execution id, or a deterministic hash when it has none
+// (lib/providers/idempotency). A fill delivered twice is stored once.
+export const providerExecutions = pgTable(
+  "provider_executions",
+  {
+    id: serial("id").primaryKey(),
+    connectionId: integer("connectionId").notNull(),
+    provider: text("provider").notNull(),
+    environment: text("environment").notNull(),
+    idempotencyKey: text("idempotencyKey").notNull(),
+    providerExecutionId: text("providerExecutionId"),
+    providerOrderId: text("providerOrderId"),
+    providerAccountId: text("providerAccountId").notNull(),
+    symbol: text("symbol").notNull(),
+    contractMonth: text("contractMonth"),
+    assetClass: text("assetClass").notNull().default("future"),
+    side: text("side").notNull(), // buy | sell
+    quantity: numeric("quantity", { precision: 18, scale: 4 }).notNull(),
+    price: numeric("price", { precision: 18, scale: 6 }).notNull(),
+    pointValue: numeric("pointValue", { precision: 18, scale: 4 }),
+    timestamp: timestamp("timestamp", { precision: 3 }).notNull(),
+    commission: numeric("commission", { precision: 18, scale: 2 }),
+    currency: text("currency").notNull().default("USD"),
+    active: boolean("active").notNull().default(true),
+    rawData: jsonb("rawData").$type<Record<string, unknown>>(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("provider_executions_identity").on(t.connectionId, t.idempotencyKey),
+    index("provider_executions_account").on(t.connectionId, t.environment, t.providerAccountId, t.timestamp),
+  ],
+)
+
+// The provider's current open positions (a snapshot, replaced on each sync).
+export const providerPositions = pgTable(
+  "provider_positions",
+  {
+    id: serial("id").primaryKey(),
+    connectionId: integer("connectionId").notNull(),
+    provider: text("provider").notNull(),
+    environment: text("environment").notNull(),
+    providerAccountId: text("providerAccountId").notNull(),
+    contractId: text("contractId").notNull(),
+    symbol: text("symbol"),
+    netQuantity: numeric("netQuantity", { precision: 18, scale: 4 }).notNull(),
+    averagePrice: numeric("averagePrice", { precision: 18, scale: 6 }),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("provider_positions_identity").on(t.connectionId, t.environment, t.providerAccountId, t.contractId)],
+)

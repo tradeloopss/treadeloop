@@ -17,6 +17,7 @@ import { BrokerImport, type ImportSummary } from "@/components/broker-import"
 import { LiveSyncUpgradeBanner } from "@/components/live-sync-upgrade-banner"
 import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { ConnectionStepper } from "@/components/accounts/connection-stepper"
+import { TradovateConnect, TradovateProgress, type TradovateProgressState } from "@/components/accounts/tradovate-connect"
 import { Badge, PlatformCard, type PlatformBadge } from "@/components/accounts/platform-card"
 import type { PlatformId } from "@/components/accounts/types"
 import type { PlanUsage } from "@/lib/plan-allowance"
@@ -34,7 +35,17 @@ import type { PlanUsage } from "@/lib/plan-allowance"
 export interface AddAccountRequest {
   platform: PlatformId | null // skip the choice: straight to connecting
   initial?: { server?: string; login?: string } // Reconnect
+  tradovateConnectionId?: number | null // back from Tradovate's sign-in: show that first sync
   nonce: number
+}
+
+// Whether Tradovate can be connected on this deployment (TRADOVATE_MODE and
+// credentials — lib/tradovate/config), and what the sign-in redirect said.
+export interface TradovateSetup {
+  enabled: boolean
+  mock: boolean
+  connectionId: number | null
+  error: string | null
 }
 
 type Outcome =
@@ -157,13 +168,29 @@ const PLATFORMS: PlatformDef[] = [
   },
 ]
 
+// Tradovate when TRADOVATE_MODE and its credentials are set: official OAuth,
+// so the security note is exact — TradeLoop never sees the Tradovate password,
+// keeps only an encrypted access token, and only reads.
+const TRADOVATE_LIVE: PlatformDef = {
+  id: "tradovate",
+  name: "Tradovate",
+  card: "Futures & options, live sync",
+  badge: "live",
+  icon: <Logo src="/brokers/sm/tradovate.png" />,
+  live: true,
+  keywords: "futures options prop apex topstep takeprofit",
+  about: "Sign in with Tradovate once — every account under that login is added, and new fills appear within seconds.",
+  needs: ["Your Tradovate login — entered on Tradovate's own sign-in page, never here", "The accounts you want to journal, under that login"],
+  security: "You sign in on Tradovate's own page, so TradeLoop never sees your Tradovate password. We keep an encrypted access token that's only used to read your accounts, orders and fills — never to place or change orders.",
+}
+
 const CONNECT_COPY: Record<PlatformId, { title: string; description: string }> = {
   rithmic: { title: "Connect your Rithmic account", description: "Pick your prop firm, then sign in with your Rithmic login. Every account under it is added and synced." },
   mt5: { title: "Connect your MetaTrader 5 account", description: "Use the investor (read-only) password from your broker or prop firm — never your trading password." },
   mt4: { title: "Connect your MetaTrader 4 account", description: "Use the investor (read-only) password from your broker or prop firm — never your trading password." },
   tradingview: { title: "Connect TradingView paper trading", description: "Pair the TradeLoop browser extension once; paper trades then sync on their own." },
   file: { title: "Import a file", description: "Upload an export from your platform. Accounts in the file are created automatically, and re-importing never duplicates trades." },
-  tradovate: { title: "Tradovate", description: "" },
+  tradovate: { title: "Connect Tradovate", description: "Sign in on Tradovate's own page; your accounts then sync on their own." },
 }
 
 // Why the viewer's plan can't connect this platform, or null if it can.
@@ -189,6 +216,7 @@ export function AddAccountModal({
   usage,
   pairings,
   importAccounts,
+  tradovate,
 }: {
   open: boolean
   request: AddAccountRequest
@@ -197,6 +225,7 @@ export function AddAccountModal({
   usage: PlanUsage | null
   pairings: TradingViewPairingView[]
   importAccounts: { id: number; name: string }[]
+  tradovate: TradovateSetup
 }) {
   const t = useT()
   const router = useRouter()
@@ -212,35 +241,42 @@ export function AddAccountModal({
 
   // Every opening starts fresh, on the platform it was opened for (if any).
   useEffect(() => {
+    // A platform that can't be connected here (Tradovate before it's set up)
+    // opens on its details instead of a form.
+    const connectable = request.platform != null && !(request.platform === "tradovate" && !tradovate.enabled)
     setSelected(request.platform ?? "rithmic")
-    setStage(request.platform ? "connect" : "choose")
+    setStage(connectable ? "connect" : "choose")
     setQuery("")
     setOutcome(null)
     setMtStage("form")
     setAttempt(0)
-  }, [request.nonce, request.platform])
+  }, [request.nonce, request.platform, tradovate.enabled])
 
   const onMtStage = useCallback((stage: MetaTraderStage) => setMtStage(stage), [])
 
-  const def = PLATFORMS.find((p) => p.id === selected) ?? PLATFORMS[0]
+  const platforms = useMemo(() => (tradovate.enabled ? PLATFORMS.map((p) => (p.id === "tradovate" ? TRADOVATE_LIVE : p)) : PLATFORMS), [tradovate.enabled])
+  const def = platforms.find((p) => p.id === selected) ?? platforms[0]
+  // Back from Tradovate's sign-in: this window follows that connection's first sync.
+  const tradovateProgressId = def.id === "tradovate" && stage === "connect" ? (request.tradovateConnectionId ?? null) : null
+  const [tradovateState, setTradovateState] = useState<TradovateProgressState>("running")
   const isMt = def.id === "mt5" || def.id === "mt4"
   // Reconnecting an account you already have is always allowed (the server
   // checks it's the same login).
   const reconnecting = request.initial?.login != null && request.platform === def.id
   const lock = reconnecting ? null : lockFor(def, isPro, usage)
 
-  const inVerify = outcome != null || (isMt && mtStage !== "form")
+  const inVerify = outcome != null || (isMt && mtStage !== "form") || tradovateProgressId != null
   const step: 1 | 2 | 3 = stage === "choose" ? 1 : inVerify ? 3 : 2
-  const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done")
+  const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done") || (tradovateProgressId != null && tradovateState === "complete")
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return PLATFORMS
-    return PLATFORMS.filter((p) => `${p.name} ${p.card} ${p.keywords}`.toLowerCase().includes(q))
-  }, [query])
+    if (!q) return platforms
+    return platforms.filter((p) => `${p.name} ${p.card} ${p.keywords}`.toLowerCase().includes(q))
+  }, [query, platforms])
 
   function goConnect(id: PlatformId = def.id) {
-    const target = PLATFORMS.find((p) => p.id === id)
+    const target = platforms.find((p) => p.id === id)
     if (!target || target.soon) return
     setSelected(id)
     setOutcome(null)
@@ -352,6 +388,18 @@ export function AddAccountModal({
           onBack={() => setStage("choose")}
         />
       )
+    } else if (def.id === "tradovate" && tradovate.enabled) {
+      body =
+        tradovateProgressId != null ? (
+          <TradovateProgress
+            connectionId={tradovateProgressId}
+            onDone={done}
+            onRetry={() => setStage("choose")}
+            onState={setTradovateState}
+          />
+        ) : (
+          <TradovateConnect mock={tradovate.mock} error={tradovate.error} />
+        )
     } else if (def.id === "tradingview") {
       body = <TradingViewSetup pairings={pairings} isPro={isPro} />
     } else {

@@ -8,12 +8,13 @@ import { toast } from "sonner"
 import { disconnectRithmic, syncRithmic } from "@/app/actions/rithmic"
 import { disconnectMetaTrader, syncMetaTraderNow } from "@/app/actions/metatrader"
 import { disconnectTradingView } from "@/app/actions/tradingview"
+import { setTradovateAccountSync, syncTradovateNow } from "@/app/actions/tradovate"
 import { deleteAccount, setAccountArchived } from "@/app/actions/accounts"
 import { syncAllConnections } from "@/app/actions/connections"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIntlLocale, useT } from "@/components/locale-provider"
-import { AccountAvatar, AccountMenu, HealthPill, formatMoney, type AccountActions } from "@/components/accounts/account-ui"
+import { AccountAvatar, AccountMenu, ConnectionDiagnostics, HealthPill, formatMoney, type AccountActions } from "@/components/accounts/account-ui"
 import { ConfirmDialog, CreateManualAccountDialog, EditAccountDialog } from "@/components/accounts/account-dialogs"
 import { AccountDetailsSheet } from "@/components/accounts/account-details-sheet"
 import { accountRow, connectionRow, messageTone, useRowMetrics, useSyncWords, type RowModel } from "@/components/accounts/account-rows"
@@ -79,6 +80,10 @@ export function AccountsList({
       if (c.kind === "rithmic") {
         const result = await syncRithmic(c.connectionId)
         toast.success(result.imported > 0 ? (result.imported === 1 ? t("Imported 1 trade") : t("Imported {n} trades", { n: result.imported })) : t("Already up to date"))
+      } else if (c.kind === "tradovate") {
+        const result = await syncTradovateNow(c.connectionId)
+        if (!result.ok) throw new Error(result.error)
+        toast.success(t("Syncing — new trades will appear in a few seconds"))
       } else {
         await syncMetaTraderNow(c.connectionId)
         toast.success(t("Syncing — new trades will appear in a few seconds"))
@@ -116,7 +121,11 @@ export function AccountsList({
           const c = current.connection
           if (c.kind === "rithmic") await disconnectRithmic(c.connectionId)
           else if (c.kind === "tradingview") await disconnectTradingView(c.connectionId)
-          else await disconnectMetaTrader(c.connectionId)
+          else if (c.kind === "tradovate") {
+            // Just this account; the last one disconnects the Tradovate login.
+            const result = await setTradovateAccountSync(c.providerAccountRowId!, false)
+            if (!result.ok) throw new Error(result.error)
+          } else await disconnectMetaTrader(c.connectionId)
           toast.success(t("Disconnected"))
         } else {
           await deleteAccount(current.account.id)
@@ -203,6 +212,8 @@ export function AccountsList({
               : t("This removes the account. Its trades stay in your journal, just no longer tagged to an account.")
             : confirm?.connection.kind === "tradingview"
               ? t("Sync from this paper account stops. The account and the trades already imported stay in your journal.")
+              : confirm?.connection.kind === "tradovate"
+                ? t("Sync from this Tradovate account stops. The account and the trades already imported stay in your journal; disconnecting the last account of a login also deletes its saved Tradovate access.")
               : t("Sync stops and the saved login is deleted. The account and the trades already imported stay in your journal.")
         }
         confirmLabel={confirm?.kind === "delete" ? t("Delete account") : t("Disconnect")}
@@ -441,6 +452,7 @@ function RowDetails({ row, syncing, lastSynced, actions }: { row: RowModel; sync
           ))}
         </dl>
       )}
+      {c?.diagnostics && <ConnectionDiagnostics items={c.diagnostics} />}
       <div className="flex flex-wrap items-center justify-between gap-2">
         {/* On phones the row itself already shows the last sync. */}
         <p className={cn("text-xs text-muted-foreground", c && "hidden @[480px]/list:block")}>{c ? lastSynced : t("Trades are added by file import or by hand.")}</p>

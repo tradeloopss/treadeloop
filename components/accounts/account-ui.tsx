@@ -8,11 +8,12 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useT } from "@/components/locale-provider"
+import { useRelativeTime } from "@/components/accounts/use-relative-time"
 import type { ConnectionHealth, HubAccount, HubConnection } from "@/components/accounts/types"
 
 // Shared pieces of the Accounts page's account list (accounts-list.tsx).
 
-export const PLATFORM_LABEL: Record<HubConnection["kind"], string> = { rithmic: "Rithmic", mt5: "MetaTrader 5", mt4: "MetaTrader 4", tradingview: "TradingView" }
+export const PLATFORM_LABEL: Record<HubConnection["kind"], string> = { rithmic: "Rithmic", mt5: "MetaTrader 5", mt4: "MetaTrader 4", tradingview: "TradingView", tradovate: "Tradovate" }
 
 export function HealthPill({ health }: { health: ConnectionHealth | "manual" | "archived" }) {
   const t = useT()
@@ -47,6 +48,23 @@ export function AccountAvatar({ name, logoName, className }: { name: string; log
         (name.trim().charAt(0) || "?").toUpperCase()
       )}
     </span>
+  )
+}
+
+// A connection's health details (e.g. Tradovate: realtime state, last event,
+// last reconciliation), as small label · value pairs.
+export function ConnectionDiagnostics({ items }: { items: NonNullable<HubConnection["diagnostics"]> }) {
+  const t = useT()
+  const ago = useRelativeTime()
+  return (
+    <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
+      {items.map((d) => (
+        <div key={d.label} className="flex gap-1">
+          <dt className="text-muted-foreground">{d.label}</dt>
+          <dd className="font-medium text-foreground">{d.value ?? (d.at ? (ago(new Date(d.at)) ?? "") : t("—"))}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

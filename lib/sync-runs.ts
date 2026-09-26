@@ -10,7 +10,7 @@ const KEEP_DAYS = 14
 
 // Never throws: failing to log a sync must not fail the sync.
 export async function recordSyncRun(run: {
-  broker: "rithmic" | "metatrader"
+  broker: "rithmic" | "metatrader" | "tradovate"
   connectionId: number
   userId: string
   trigger: SyncTrigger

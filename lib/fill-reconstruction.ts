@@ -11,6 +11,11 @@ export type ParsedFill = {
   action: "Buy" | "Sell"
   qty: number
   price: number
+  // All fees on this fill when the broker reports them per fill (Tradovate's
+  // fillFee). Summed onto the trade the fill belongs to; a fill that flips
+  // the position splits its fee by quantity between the closing and the new
+  // trade. Omitted → 0, so feeds without per-fill fees are unaffected.
+  fee?: number
 }
 
 // Turns a fill stream into round-trip trades using average-cost position
@@ -50,8 +55,9 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
     let closedNotional = 0 // sum(exit price × close qty) → avg exit
     let exitTime: string | null = null
     let lastExitFillId = "" // the fill that closed the leg — stable id for dedupe
+    let legFees = 0 // fees of every fill (or fill share) in this leg
 
-    const openLeg = (signedQty: number, price: number, time: string) => {
+    const openLeg = (signedQty: number, price: number, time: string, fee: number) => {
       position = signedQty
       side = signedQty > 0 ? "long" : "short"
       entryQty = Math.abs(signedQty)
@@ -61,6 +67,7 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
       closedNotional = 0
       exitTime = null
       lastExitFillId = ""
+      legFees = fee
     }
 
     const emit = () => {
@@ -75,7 +82,7 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
         exitPrice: closedNotional / closedQty,
         entryTime,
         exitTime,
-        fees: 0,
+        fees: Math.round(legFees * 100) / 100,
       })
       position = 0
       side = null
@@ -83,9 +90,10 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
 
     for (const fill of sorted) {
       const signedQty = fill.action === "Buy" ? fill.qty : -fill.qty
+      const fee = fill.fee ?? 0
 
       if (position === 0) {
-        openLeg(signedQty, fill.price, fill.timestamp)
+        openLeg(signedQty, fill.price, fill.timestamp, fee)
         continue
       }
 
@@ -94,6 +102,7 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
         entryNotional += fill.price * fill.qty
         entryQty += fill.qty
         position += signedQty
+        legFees += fee
         continue
       }
 
@@ -105,10 +114,11 @@ export function reconstructTrades(fills: ParsedFill[], sourcePrefix: string): Im
       lastExitFillId = fill.externalId
       position += Math.sign(signedQty) * closeAmt // moves toward 0
       const remainder = fill.qty - closeAmt
+      legFees += fill.qty > 0 ? (fee * closeAmt) / fill.qty : 0
 
       if (position === 0) {
         emit()
-        if (remainder > 0) openLeg(Math.sign(signedQty) * remainder, fill.price, fill.timestamp)
+        if (remainder > 0) openLeg(Math.sign(signedQty) * remainder, fill.price, fill.timestamp, fill.qty > 0 ? (fee * remainder) / fill.qty : 0)
       }
     }
   }

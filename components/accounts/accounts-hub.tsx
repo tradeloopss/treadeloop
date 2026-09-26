@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { ChevronRight } from "lucide-react"
 import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { useT } from "@/components/locale-provider"
-import { AddAccountModal, type AddAccountRequest } from "@/components/accounts/add-account-modal"
+import { AddAccountModal, type AddAccountRequest, type TradovateSetup } from "@/components/accounts/add-account-modal"
 import { AccountsList } from "@/components/accounts/accounts-list"
 import { SecurityCard } from "@/components/accounts/security-card"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
@@ -28,6 +28,7 @@ export function AccountsHub({
   usage,
   pairings,
   importAccounts,
+  tradovate,
   initialPlatform = null,
 }: {
   initialPlatform?: PlatformId | null // /accounts?connect=mt5 opens that flow
@@ -37,11 +38,22 @@ export function AccountsHub({
   usage: PlanUsage | null // Essential's allowance; null on Pro
   pairings: TradingViewPairingView[]
   importAccounts: { id: number; name: string }[]
+  tradovate: TradovateSetup
 }) {
   const t = useT()
   const router = useRouter()
   const [modalOpen, setModalOpen] = useState(initialPlatform != null)
-  const [request, setRequest] = useState<AddAccountRequest>({ platform: initialPlatform, nonce: 0 })
+  const [request, setRequest] = useState<AddAccountRequest>({ platform: initialPlatform, tradovateConnectionId: tradovate.connectionId, nonce: 0 })
+
+  // Closing the window after a Tradovate sign-in drops ?tradovate=… from the
+  // address, so a refresh doesn't reopen it.
+  const onModalOpenChange = useCallback(
+    (open: boolean) => {
+      setModalOpen(open)
+      if (!open && typeof window !== "undefined" && /[?&](tradovate|tradovate_error|connect)=/.test(window.location.search)) router.replace("/accounts", { scroll: false })
+    },
+    [router],
+  )
 
   const openModal = useCallback((platform: PlatformId | null = null, initial?: AddAccountRequest["initial"]) => {
     setRequest((r) => ({ platform, initial, nonce: r.nonce + 1 }))
@@ -101,11 +113,12 @@ export function AccountsHub({
       <AddAccountModal
         open={modalOpen}
         request={request}
-        onOpenChange={setModalOpen}
+        onOpenChange={onModalOpenChange}
         isPro={isPro}
         usage={usage}
         pairings={pairings}
         importAccounts={importAccounts}
+        tradovate={tradovate}
       />
     </div>
   )

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/migrate.mjs && next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --experimental-strip-types --no-warnings --import ./tests/register.mjs --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

@@ -23,8 +23,9 @@ export interface HubAccount {
 // One live connection (a card in "Your connected accounts").
 export interface HubConnection {
   key: string
-  kind: "rithmic" | "mt5" | "mt4" | "tradingview"
+  kind: "rithmic" | "mt5" | "mt4" | "tradingview" | "tradovate"
   connectionId: number
+  providerAccountRowId?: number // tradovate: this account's provider_accounts row (per-account disconnect)
   title: string
   subtitle: string
   logoName: string | null // matched against lib/broker-logos
@@ -39,5 +40,9 @@ export interface HubConnection {
   lastSyncedAt: Date | null
   canSync: boolean // has a manual "Sync now"
   account: HubAccount | null
-  reconnect: { platform: "mt5" | "mt4"; server: string; login: string } | null
+  reconnect: { platform: "mt5" | "mt4" | "tradovate"; server?: string; login?: string } | null
+  // Connection health details shown with the account (e.g. Tradovate's
+  // realtime state, last event, last reconciliation). `at` is shown as a
+  // relative time.
+  diagnostics?: { label: string; value?: string; at?: string | null }[]
 }

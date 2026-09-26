@@ -99,6 +99,13 @@
       "when": 1789960000000,
       "tag": "0013_mt5_native",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789970000000,
+      "tag": "0014_trading_connections",
+      "breakpoints": true
     }
   ]
 }
