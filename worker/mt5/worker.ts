@@ -655,7 +655,13 @@ async function tick() {
   }
   // Orders are user-initiated and time-sensitive — handle them before syncs so
   // a free terminal executes a close/modify without waiting on a sync pass.
-  await processOrderCommands()
+  // Isolated so an order-processing hiccup (or a not-yet-migrated table) can
+  // never skip the sync pass below.
+  try {
+    await processOrderCommands()
+  } catch (err) {
+    console.error("[mt5] order processing failed:", err instanceof Error ? err.message : err)
+  }
   for (const platform of ["mt5", "mt4"] as const) {
     const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)
     if (free.length === 0) continue
