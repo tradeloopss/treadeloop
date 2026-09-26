@@ -125,6 +125,7 @@ async function loadOpenPositions(db: Db, accountId: number): Promise<[OpenPositi
 export interface PropMaxBinding {
   firmName: string | null
   programName: string | null
+  market: string // futures | forex
   phase: string
   accountSize: number | null
   detectionSource: string
@@ -278,6 +279,7 @@ export async function getPropMaxOverview(userId: string, db: Db = sharedDb): Pro
         binding: {
           firmName: firm?.name ?? null,
           programName: program?.name ?? null,
+          market: program?.assetClass ?? "futures",
           phase: binding.phase,
           accountSize: binding.accountSize,
           detectionSource: binding.detectionSource,

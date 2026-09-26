@@ -25,6 +25,7 @@ function view(dailyLossLimit: number): PropMaxAccountView {
     binding: {
       firmName: "Test Firm",
       programName: "Eval",
+      market: "futures",
       phase: "evaluation",
       accountSize: 50000,
       detectionSource: "manual",

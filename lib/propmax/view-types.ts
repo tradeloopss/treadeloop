@@ -24,6 +24,25 @@ export interface PropMaxData {
   catalog: CatalogOption[]
 }
 
+// One day's snapshot, for the Daily History tab / charts.
+export interface PropMaxDailyRow {
+  date: string
+  balance: number | null
+  equity: number | null
+  highWaterMark: number | null
+  riskStatus: string | null
+}
+
+// A prop-firm cash event (evaluation cost or payout), for the Payouts tab.
+export interface PropMaxPayoutRow {
+  id: number
+  type: string // cost | payout
+  category: string | null
+  amount: number
+  occurredAt: string
+  note: string | null
+}
+
 // A fired alert as the alert center shows it.
 export interface PropMaxAlertView {
   id: number

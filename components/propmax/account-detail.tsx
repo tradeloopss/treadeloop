@@ -31,11 +31,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { PropMaxAccountView } from "@/lib/propmax/account"
-import type { PropMaxAlertView } from "@/lib/propmax/view-types"
+import type { PropMaxAlertView, PropMaxDailyRow, PropMaxPayoutRow } from "@/lib/propmax/view-types"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import type { RuleResult, RuleType, RuleSource } from "@/lib/propmax/types"
 import { closeOpenTrade } from "@/app/actions/trade-manager"
-import { STATUS_META, ruleLabel, formatMoney, formatValue, phaseLabel, confidenceLabel, timeAgo } from "@/components/propmax/display"
+import { removePropMaxAccount } from "@/app/actions/propmax"
+import { STATUS_META, ruleLabel, formatMoney, formatValue, formatSize, phaseLabel, confidenceLabel, timeAgo } from "@/components/propmax/display"
 
 const money = (n: number | null | undefined, ccy = "USD") => (n == null ? "—" : formatMoney(n, ccy))
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -74,12 +75,23 @@ export function PropMaxAccountDetail({
   account,
   positions,
   alerts,
+  daily,
+  payouts,
+  defaultTab,
 }: {
   account: PropMaxAccountView
   positions: OpenTradeView[]
   alerts: PropMaxAlertView[]
+  daily: PropMaxDailyRow[]
+  payouts: PropMaxPayoutRow[]
+  defaultTab?: string
 }) {
   const router = useRouter()
+  const initialTab = ["overview", "running", "rules", "daily", "payouts", "activity", "settings"].includes(defaultTab ?? "")
+    ? (defaultTab as string)
+    : defaultTab === "running-trades"
+      ? "running"
+      : "running"
   const evaln = account.evaluation
   const ccy = account.currency
   const rules = evaln?.rules ?? []
@@ -172,13 +184,15 @@ export function PropMaxAccountDetail({
               This account isn&apos;t set up under PropFirm Max yet. Set it up on the main page to see its rules.
             </div>
           ) : (
-            <Tabs defaultValue="running">
+            <Tabs defaultValue={initialTab}>
               <TabsList variant="line" className="mb-4 w-full justify-start overflow-x-auto">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="running">Running Trades</TabsTrigger>
                 <TabsTrigger value="rules">Rules</TabsTrigger>
+                <TabsTrigger value="daily">Daily History</TabsTrigger>
                 <TabsTrigger value="payouts">Payouts</TabsTrigger>
                 <TabsTrigger value="activity">Activity</TabsTrigger>
+                <TabsTrigger value="settings">Settings</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview">
@@ -202,12 +216,20 @@ export function PropMaxAccountDetail({
                 <RulesTab rules={rules} ccy={ccy} source={account.binding.source} caveat={account.binding.caveat} />
               </TabsContent>
 
+              <TabsContent value="daily">
+                <DailyHistoryTab daily={daily} ccy={ccy} />
+              </TabsContent>
+
               <TabsContent value="payouts">
-                <PayoutsTab account={account} />
+                <PayoutsTab account={account} payouts={payouts} />
               </TabsContent>
 
               <TabsContent value="activity">
                 <ActivityList alerts={alerts} full />
+              </TabsContent>
+
+              <TabsContent value="settings">
+                <SettingsTab account={account} />
               </TabsContent>
             </Tabs>
           )}
@@ -589,27 +611,167 @@ function RulesTab({ rules, ccy, source, caveat }: { rules: RuleResult[]; ccy: st
   )
 }
 
-function PayoutsTab({ account }: { account: PropMaxAccountView }) {
+function PayoutsTab({ account, payouts }: { account: PropMaxAccountView; payouts: PropMaxPayoutRow[] }) {
   const p = account.evaluation!.payout
+  const ccy = account.currency
+  const received = payouts.filter((t) => t.type === "payout")
+  const totalPaid = received.reduce((s, t) => s + t.amount, 0)
   return (
-    <div className="rounded-xl border bg-card p-5">
-      <div className="mb-3 flex items-center gap-2">
-        <span className={cn("flex size-9 items-center justify-center rounded-lg", p.eligible ? TONE.gain.chip : TONE.slate.chip)}>
-          <CircleDollarSign className="size-5" />
-        </span>
-        <div>
-          <p className="font-semibold">{!p.determinable ? "Can't judge payout yet" : p.eligible ? "Eligible for payout" : "Not eligible yet"}</p>
-          <p className="text-xs text-muted-foreground">Based on the current rules and synced trades.</p>
+    <div className="space-y-4">
+      <div className="rounded-xl border bg-card p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <span className={cn("flex size-9 items-center justify-center rounded-lg", p.eligible ? TONE.gain.chip : TONE.slate.chip)}>
+            <CircleDollarSign className="size-5" />
+          </span>
+          <div>
+            <p className="font-semibold">{!p.determinable ? "Can't judge payout yet" : p.eligible ? "Eligible for payout" : "Not eligible yet"}</p>
+            <p className="text-xs text-muted-foreground">Based on the current rules and synced trades.</p>
+          </div>
+          {p.eligible && (
+            <Button size="sm" className="ms-auto" onClick={() => toast("Request a payout from your prop firm's dashboard.")}>
+              Request payout
+            </Button>
+          )}
         </div>
+        <ul className="space-y-1.5 text-sm">
+          {p.reasons.map((r, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span className={p.eligible ? "text-[var(--gain)]" : "text-muted-foreground"}>•</span>
+              <span className="text-muted-foreground">{r}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-      <ul className="space-y-1.5 text-sm">
-        {p.reasons.map((r, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <span className={p.eligible ? "text-[var(--gain)]" : "text-muted-foreground"}>•</span>
-            <span className="text-muted-foreground">{r}</span>
-          </li>
+
+      <div className="rounded-xl border bg-card p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-semibold">Payout history</p>
+          <span className="text-sm text-muted-foreground">Total received <span className="font-medium text-[var(--gain)]">{money(totalPaid, ccy)}</span></span>
+        </div>
+        {payouts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No payouts or costs logged for this account yet.</p>
+        ) : (
+          <ul className="divide-y">
+            {payouts.map((t) => (
+              <li key={t.id} className="flex items-center justify-between py-2 text-sm">
+                <div>
+                  <p className="font-medium capitalize">{t.type === "payout" ? "Payout" : t.category?.replace(/_/g, " ") ?? "Cost"}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(t.occurredAt).toLocaleDateString()}{t.note ? ` · ${t.note}` : ""}</p>
+                </div>
+                <span className={cn("font-medium tabular-nums", t.type === "payout" ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
+                  {t.type === "payout" ? "+" : "−"}{money(t.amount, ccy)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DailyHistoryTab({ daily, ccy }: { daily: PropMaxDailyRow[]; ccy: string }) {
+  if (daily.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+        No daily history yet — snapshots build up one per day as the account syncs.
+      </div>
+    )
+  }
+  // Ascending for the chart; the list stays newest-first.
+  const asc = [...daily].filter((d) => d.balance != null).reverse()
+  const values = asc.map((d) => d.balance as number)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  const points = asc
+    .map((d, i) => `${(i / Math.max(1, asc.length - 1)) * 100},${100 - (((d.balance as number) - min) / span) * 100}`)
+    .join(" ")
+  return (
+    <div className="space-y-4">
+      {asc.length > 1 && (
+        <div className="rounded-xl border bg-card p-5">
+          <p className="mb-3 text-sm font-semibold">Balance</p>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-40 w-full">
+            <polyline points={points} fill="none" stroke="var(--primary)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
+      <div className="overflow-hidden rounded-xl border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs text-muted-foreground">
+              <th className="px-4 py-2.5 font-medium">Date</th>
+              <th className="px-4 py-2.5 font-medium">Balance</th>
+              <th className="px-4 py-2.5 font-medium">Equity</th>
+              <th className="px-4 py-2.5 font-medium">High-water mark</th>
+              <th className="px-4 py-2.5 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {daily.map((d) => {
+              const meta = STATUS_META[(d.riskStatus as keyof typeof STATUS_META) ?? "unknown"] ?? STATUS_META.unknown
+              return (
+                <tr key={d.date} className="border-b">
+                  <td className="px-4 py-2.5">{d.date}</td>
+                  <td className="px-4 py-2.5 tabular-nums">{money(d.balance, ccy)}</td>
+                  <td className="px-4 py-2.5 tabular-nums">{money(d.equity, ccy)}</td>
+                  <td className="px-4 py-2.5 tabular-nums">{money(d.highWaterMark, ccy)}</td>
+                  <td className="px-4 py-2.5"><span className={cn("rounded-full px-2 py-0.5 text-xs", meta.pill)}>{meta.label}</span></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function SettingsTab({ account }: { account: PropMaxAccountView }) {
+  const router = useRouter()
+  const b = account.binding!
+  const [pending, startTransition] = useTransition()
+  function untrack() {
+    if (!confirm(`Stop tracking ${account.name} in PropFirm Max? Its trades and the old tracker are untouched.`)) return
+    startTransition(async () => {
+      try {
+        await removePropMaxAccount(account.accountId)
+        toast.success("Stopped tracking.")
+        router.push("/propfirm-max")
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't remove.")
+      }
+    })
+  }
+  const rows: [string, string][] = [
+    ["Account", account.name],
+    ["Firm", b.firmName ?? "—"],
+    ["Program", b.programName ?? "—"],
+    ["Market", b.market],
+    ["Account size", formatSize(b.accountSize)],
+    ["Phase", phaseLabel(b.phase)],
+    ["Rules version", b.versionLabel ?? "—"],
+    ["Detection", `${b.detectionSource} · ${confidenceLabel(b.detectionConfidence)}`],
+    ["Currency", account.currency],
+  ]
+  return (
+    <div className="space-y-4">
+      <div className="divide-y rounded-xl border bg-card">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between px-4 py-2.5 text-sm">
+            <span className="text-muted-foreground">{k}</span>
+            <span className="font-medium capitalize">{v}</span>
+          </div>
         ))}
-      </ul>
+      </div>
+      <div className="rounded-xl border border-[var(--loss)]/30 bg-[var(--loss)]/5 p-4">
+        <p className="text-sm font-medium">Stop tracking</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Removes this account from PropFirm Max. Its trades and the old tracker are untouched.</p>
+        <Button variant="destructive" size="sm" className="mt-3" onClick={untrack} disabled={pending}>
+          {pending ? "Removing…" : "Stop tracking this account"}
+        </Button>
+      </div>
     </div>
   )
 }

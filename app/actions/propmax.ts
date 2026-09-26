@@ -6,14 +6,14 @@ import { and, desc, eq, isNull } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { assertAdmin } from "@/lib/admin/guard"
-import { tradingAccounts, propAccount, propFirm, propProgram, propRuleVersion, propSnapshot, propAlert } from "@/lib/db/schema"
+import { tradingAccounts, propAccount, propFirm, propProgram, propRuleVersion, propSnapshot, propAlert, propFirmTransactions } from "@/lib/db/schema"
 import { getPropMaxOverview, type PropMaxAccountView } from "@/lib/propmax/account"
 import { seedPropmaxCatalog } from "@/lib/propmax/seed"
 import { deriveAlerts, buildSnapshot } from "@/lib/propmax/alerts"
 import { getAccountOpenPositions } from "@/app/actions/trade-manager"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import type { RuleConfig, RuleType } from "@/lib/propmax/types"
-import type { CatalogOption, PropMaxData, PropMaxAlertView } from "@/lib/propmax/view-types"
+import type { CatalogOption, PropMaxData, PropMaxAlertView, PropMaxDailyRow, PropMaxPayoutRow } from "@/lib/propmax/view-types"
 
 // Build the setup-picker catalog: only firm/program/size/phase combos with an
 // in-force, sourced rule version.
@@ -118,9 +118,14 @@ export async function getPropMaxData(): Promise<PropMaxData> {
 // One account's detail (its evaluation) plus the catalog + its open positions,
 // for the detail page. Read-only (no snapshot/alert writes here — the main
 // page's load already did that).
-export async function getPropMaxAccountDetail(
-  accountId: number,
-): Promise<{ account: PropMaxAccountView | null; catalog: CatalogOption[]; positions: OpenTradeView[]; alerts: PropMaxAlertView[] }> {
+export async function getPropMaxAccountDetail(accountId: number): Promise<{
+  account: PropMaxAccountView | null
+  catalog: CatalogOption[]
+  positions: OpenTradeView[]
+  alerts: PropMaxAlertView[]
+  daily: PropMaxDailyRow[]
+  payouts: PropMaxPayoutRow[]
+}> {
   const userId = await getUserId()
   const [accounts, catalog, positions, alerts] = await Promise.all([
     getPropMaxOverview(userId),
@@ -128,12 +133,29 @@ export async function getPropMaxAccountDetail(
     getAccountOpenPositions(accountId),
     getPropMaxAlerts(),
   ])
-  return {
-    account: accounts.find((a) => a.accountId === accountId) ?? null,
-    catalog,
-    positions,
-    alerts: alerts.filter((a) => a.accountId === accountId),
-  }
+  const account = accounts.find((a) => a.accountId === accountId) ?? null
+
+  const num = (v: string | null) => (v != null ? Number(v) : null)
+  const daily: PropMaxDailyRow[] = account?.propAccountId
+    ? (
+        await db
+          .select({ date: propSnapshot.date, balance: propSnapshot.balance, equity: propSnapshot.equity, highWaterMark: propSnapshot.highWaterMark, riskStatus: propSnapshot.riskStatus })
+          .from(propSnapshot)
+          .where(and(eq(propSnapshot.propAccountId, account.propAccountId), eq(propSnapshot.userId, userId)))
+          .orderBy(desc(propSnapshot.date))
+          .limit(120)
+      ).map((r) => ({ date: r.date, balance: num(r.balance), equity: num(r.equity), highWaterMark: num(r.highWaterMark), riskStatus: r.riskStatus }))
+    : []
+
+  const payouts: PropMaxPayoutRow[] = (
+    await db
+      .select({ id: propFirmTransactions.id, type: propFirmTransactions.type, category: propFirmTransactions.category, amount: propFirmTransactions.amount, occurredAt: propFirmTransactions.occurredAt, note: propFirmTransactions.note })
+      .from(propFirmTransactions)
+      .where(and(eq(propFirmTransactions.userId, userId), eq(propFirmTransactions.accountId, accountId)))
+      .orderBy(desc(propFirmTransactions.occurredAt))
+  ).map((r) => ({ id: r.id, type: r.type, category: r.category, amount: Number(r.amount), occurredAt: r.occurredAt.toISOString(), note: r.note }))
+
+  return { account, catalog, positions, alerts: alerts.filter((a) => a.accountId === accountId), daily, payouts }
 }
 
 // The user's unacknowledged alerts, newest first, for the alert center.
