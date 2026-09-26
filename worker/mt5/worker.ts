@@ -184,7 +184,10 @@ async function claimDue(platform: Platform, limit: number): Promise<Connection[]
      where id in (
        select id from metatrader_connections
         where platform = ${platform}
-          and status in ('pending', 'connected')
+          -- 'error' too: an auth/server failure now keeps a nextSyncAt so the
+          -- worker retries it and it recovers on its own (a null nextSyncAt,
+          -- e.g. unsupported or a new account that gave up, is still parked).
+          and status in ('pending', 'connected', 'error')
           and "nextSyncAt" <= now()
           and ("leaseUntil" is null or "leaseUntil" < now())
         order by (status = 'pending') desc, "nextSyncAt" asc
@@ -359,7 +362,13 @@ async function processOrderCommands() {
 // One account
 
 const MAX_BACKOFF_MS = 30 * 60_000
-const PERMANENT = new Set(["auth", "server", "unsupported"])
+// Only "unsupported" (no broker pack) truly parks a connection — and even that
+// gets requeued when the pack is added (requeueNewlySupported). An auth/server
+// rejection is often transient (a demo that briefly drops, a broker hiccup),
+// so it's RETRYABLE: shown as an error but kept on a backoff so it recovers by
+// itself instead of sitting failed until someone reconnects.
+const PERMANENT = new Set(["unsupported"])
+const RETRY_SHOWN = new Set(["auth", "server"])
 // How the "we don't have this server" error starts — requeueNewlySupported
 // looks for it once a broker is added.
 const UNSUPPORTED_PREFIX = `We don't have "`
@@ -520,10 +529,12 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
     const kind = err instanceof BridgeError ? err.kind : "internal"
     const message = err instanceof Error ? err.message : String(err)
     const permanent = PERMANENT.has(kind)
+    const retryShown = RETRY_SHOWN.has(kind)
     const errorCount = connection.errorCount + 1
-    // A new account that keeps failing for other reasons is reported rather
-    // than retried forever in "connecting".
-    const giveUp = permanent || (connection.status === "pending" && errorCount >= 5)
+    // Park only when there's nothing to keep trying: an unsupported broker, or
+    // a brand-new account that never connected and keeps failing for some other
+    // reason. An auth/server error on any account keeps retrying (retryShown).
+    const giveUp = permanent || (connection.status === "pending" && errorCount >= 5 && !retryShown)
     const backoff = Math.min(SYNC_INTERVAL_MS * 2 ** (errorCount - 1), MAX_BACKOFF_MS)
     if (!permanent) {
       bridge.failures++
@@ -540,7 +551,14 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
               statusMessage: permanent ? message : "Couldn't reach MetaTrader right now — please try connecting again in a few minutes.",
               nextSyncAt: null,
             }
-          : { nextSyncAt: new Date(Date.now() + backoff) }),
+          : retryShown
+            ? {
+                // Show the failure, but keep a nextSyncAt so it auto-recovers.
+                status: "error",
+                statusMessage: `${message} — retrying automatically.`,
+                nextSyncAt: new Date(Date.now() + backoff),
+              }
+            : { nextSyncAt: new Date(Date.now() + backoff) }),
         errorCount,
         lastSyncStatus: "error",
         lastSyncError: message.slice(0, 500),
