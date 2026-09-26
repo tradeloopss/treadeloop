@@ -244,6 +244,28 @@ async function finishCommand(id: number, status: string, message: string, broker
     .where(eq(orderCommands.id, id))
 }
 
+// The MT5 "Algo Trading" button starts off on a headless terminal, so orders
+// are refused (retcode 10027). Toggle it on by sending Ctrl+E to the terminal
+// window (its title starts with the account login). The bridge only reports
+// trade_allowed=false, so a single toggle turns it on.
+function sh(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve) => execFile(cmd, args, { env: { ...process.env, DISPLAY } }, () => resolve()))
+}
+function shOut(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => execFile(cmd, args, { env: { ...process.env, DISPLAY } }, (_e, stdout) => resolve(stdout ?? "")))
+}
+async function enableAutoTrading(login: string): Promise<void> {
+  const out = await shOut("xdotool", ["search", "--name", String(login)])
+  const id = out.split("\n").map((s) => s.trim()).filter(Boolean)[0]
+  if (!id) {
+    console.warn(`[mt5] enableAutoTrading: no window found for ${login}`)
+    return
+  }
+  await sh("xdotool", ["windowactivate", "--sync", id])
+  await sh("xdotool", ["key", "--window", id, "--clearmodifiers", "ctrl+e"])
+  await new Promise((r) => setTimeout(r, 900))
+}
+
 async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connection: Connection) {
   try {
     if (connection.tradingPasswordEnc == null) {
@@ -251,26 +273,32 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       return
     }
     const num = (v: string | null) => (v != null ? Number(v) : null)
-    const result = await callBridge<OrderBridgeResult>(
-      bridge,
-      "/order",
-      {
-        login: connection.login,
-        password: decrypt(connection.tradingPasswordEnc),
-        server: connection.server,
-        kind: cmd.kind,
-        positionRef: cmd.positionRef,
-        orderRef: cmd.orderRef,
-        symbol: cmd.symbol,
-        side: cmd.side,
-        volume: num(cmd.volume),
-        price: num(cmd.price),
-        stopLoss: num(cmd.stopLoss),
-        takeProfit: num(cmd.takeProfit),
-        orderType: cmd.orderType,
-      },
-      60_000,
-    )
+    const body = {
+      login: connection.login,
+      password: decrypt(connection.tradingPasswordEnc),
+      server: connection.server,
+      kind: cmd.kind,
+      positionRef: cmd.positionRef,
+      orderRef: cmd.orderRef,
+      symbol: cmd.symbol,
+      side: cmd.side,
+      volume: num(cmd.volume),
+      price: num(cmd.price),
+      stopLoss: num(cmd.stopLoss),
+      takeProfit: num(cmd.takeProfit),
+      orderType: cmd.orderType,
+    }
+    let result: OrderBridgeResult
+    try {
+      result = await callBridge<OrderBridgeResult>(bridge, "/order", body, 60_000)
+    } catch (err) {
+      // Terminal's Algo Trading is off — turn it on and retry once.
+      if (err instanceof BridgeError && err.kind === "autotrading") {
+        console.log(`[mt5] order ${cmd.id}: AutoTrading off on ${connection.login} — enabling and retrying`)
+        await enableAutoTrading(connection.login)
+        result = await callBridge<OrderBridgeResult>(bridge, "/order", body, 60_000)
+      } else throw err
+    }
     const brokerRef = result.deal && result.deal !== "0" ? result.deal : result.order
     if (result.accepted) {
       await finishCommand(cmd.id, "filled", "Order executed.", brokerRef, result)

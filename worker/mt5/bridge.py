@@ -348,6 +348,13 @@ def order(req):
     except (KeyError, TypeError, ValueError):
         raise BridgeError(400, "request", "login, password, server and kind are required")
     ensure_trading_login(account, password, server)
+    # A headless terminal starts with the "Algo Trading" button off, so
+    # order_send is refused with retcode 10027. Signal the worker (kind
+    # "autotrading") so it can toggle it on (xdotool Ctrl+E) and retry, rather
+    # than firing an order the terminal will reject.
+    info = mt5.terminal_info()
+    if info is not None and not info.trade_allowed:
+        raise BridgeError(409, "autotrading", "AutoTrading is disabled on the terminal")
     if kind == "close":
         return do_close(req, False)
     if kind == "partial_close":
