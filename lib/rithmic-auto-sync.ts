@@ -12,10 +12,21 @@
 // At meaningfully larger scale (many users × many connections) this would
 // want staggering/batching instead of "sync everyone every 60s", but that's
 // not a concern at current scale.
+import { eq } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { rithmicConnections } from "@/lib/db/schema"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
 import { getRithmicSyncIntervalMs } from "@/lib/app-settings"
+
+// After this many consecutive HARD login failures (bad/rejected credentials —
+// not a transient network blip or a concurrent-session refusal), the loop stops
+// auto-syncing this connection. This is the safeguard against a prop firm
+// flagging an account for too many sign-in attempts: a dead login can't recover
+// by retrying, so re-attempting only makes the flag worse. The user re-enables
+// it by fixing the account with their firm and pressing Sync now.
+const HARD_AUTH_PAUSE_AFTER = 3
+const PAUSE_MESSAGE =
+  "Auto-sync paused after repeated login failures — your prop firm may have flagged the sign-ins. Fix the account with your firm, then press Sync now to resume."
 
 const SYNC_INTERVAL_MS = 60_000
 // Floor for the skip window: a connection synced within it is skipped.
@@ -67,6 +78,7 @@ export async function runAllConnections(): Promise<AutoSyncSummary> {
   // by a tick landing just under the window. Never below the cold-start floor.
   const gap = Math.max((await getRithmicSyncIntervalMs()) - 15_000, MIN_RESYNC_GAP_MS)
   const due = connections.filter((c) => {
+    if (c.syncPaused) return false // stopped after repeated login failures; resumed by a manual Sync now
     if (c.lastSyncedAt && now - c.lastSyncedAt.getTime() < gap) return false
     const b = backoff.get(c.id)
     return !b || now >= b.nextAttempt
@@ -85,9 +97,24 @@ export async function runAllConnections(): Promise<AutoSyncSummary> {
         backoff.delete(connection.id)
       } catch (err) {
         const failures = (backoff.get(connection.id)?.failures ?? 0) + 1
-        const delay = Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS)
-        backoff.set(connection.id, { failures, nextAttempt: Date.now() + delay })
-        console.error(`[rithmic-auto-sync] connection ${connection.id} (${connection.login}) failed (#${failures}, next try in ${Math.round(delay / 60_000)}m):`, err instanceof Error ? err.message : err)
+        const msg = err instanceof Error ? err.message : String(err)
+        // A hard auth failure is a rejected/dead login — NOT a concurrent-session
+        // refusal ("permission denied", which clears on its own) or a transient
+        // network error. Repeated ones mean the credentials won't work until the
+        // user acts, so pause rather than keep signing in and worsening a flag.
+        const hardAuth = /login failed/i.test(msg) && !/permission denied/i.test(msg)
+        if (hardAuth && failures >= HARD_AUTH_PAUSE_AFTER) {
+          await db
+            .update(rithmicConnections)
+            .set({ syncPaused: true, syncPausedReason: PAUSE_MESSAGE, lastSyncStatus: "error", lastSyncError: PAUSE_MESSAGE })
+            .where(eq(rithmicConnections.id, connection.id))
+          backoff.delete(connection.id)
+          console.warn(`[rithmic-auto-sync] connection ${connection.id} (${connection.login}) auto-paused after ${failures} login failures`)
+        } else {
+          const delay = Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS)
+          backoff.set(connection.id, { failures, nextAttempt: Date.now() + delay })
+          console.error(`[rithmic-auto-sync] connection ${connection.id} (${connection.login}) failed (#${failures}, next try in ${Math.round(delay / 60_000)}m):`, msg)
+        }
         throw err
       }
     })

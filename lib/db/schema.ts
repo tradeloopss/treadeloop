@@ -360,6 +360,13 @@ export const rithmicConnections = pgTable("rithmic_connections", {
   // signed net qty, avg fill price, floating P&L), refreshed each sync — for
   // the Trades Manager. Null before this existed.
   openPositionsData: jsonb("openPositionsData").$type<RithmicPosition[]>(),
+  // Background auto-sync is paused for this connection. Prop firms (e.g.
+  // Tradeify) flag an account for too many sign-in attempts, and once a login
+  // is dead every background sync is just another failed sign-in — so after
+  // repeated login failures the loop pauses this connection instead of feeding
+  // the alarm. A manual "Sync now" still runs and clears the pause on success.
+  syncPaused: boolean("syncPaused").notNull().default(false),
+  syncPausedReason: text("syncPausedReason"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 

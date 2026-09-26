@@ -103,7 +103,9 @@ export async function importFillsForConnection(
   const now = new Date()
   await db
     .update(rithmicConnections)
-    .set({ lastSyncFrom: now, lastSyncedAt: now, lastSyncStatus: "ok", lastSyncError: null, lastSyncCount: toImport.length })
+    // A successful sync also clears any auto-sync pause (e.g. from a "Sync now"
+    // after the firm reactivated the account), so background sync resumes.
+    .set({ lastSyncFrom: now, lastSyncedAt: now, lastSyncStatus: "ok", lastSyncError: null, lastSyncCount: toImport.length, syncPaused: false, syncPausedReason: null })
     .where(eq(rithmicConnections.id, connectionId))
 
   return toImport.length

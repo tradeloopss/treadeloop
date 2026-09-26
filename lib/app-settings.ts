@@ -25,7 +25,11 @@ export async function setAppSetting(key: string, value: unknown): Promise<void> 
 // last ~5h).
 
 export const RITHMIC_SYNC_INTERVAL_KEY = "rithmic_autosync_interval_ms"
-export const DEFAULT_RITHMIC_SYNC_INTERVAL_MS = 60_000
+// 5 minutes by default: each sync is a Rithmic login (two, actually — the fills
+// plant and the P&L plant), and prop firms flag accounts for too-frequent
+// sign-ins, so a fast cadence isn't worth it for trade journaling. Admins can
+// tighten it to 1 minute or loosen it to hours on the Broker health page.
+export const DEFAULT_RITHMIC_SYNC_INTERVAL_MS = 5 * 60_000
 // Rithmic throttles cloud IPs, so never tighter than 1 minute; 24h is plenty loose.
 const MIN_INTERVAL_MS = 60_000
 const MAX_INTERVAL_MS = 24 * 60 * 60_000
