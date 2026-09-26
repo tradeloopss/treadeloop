@@ -1,0 +1,23 @@
+# /etc/systemd/system/tradeloop-ninjatrader-worker.service
+# TradeLoop NinjaTrader worker — see worker/ninjatrader/README.md.
+[Unit]
+Description=TradeLoop NinjaTrader worker (hands stored Tradovate logins to the NinjaTrader provisioner)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tradeloop
+EnvironmentFile=/etc/tradeloop/db.env
+EnvironmentFile=/etc/tradeloop/ninjatrader-worker.env
+StateDirectory=tradeloop
+ExecStart=/usr/bin/node /srv/tradeloop/ninjatrader-worker/worker.cjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

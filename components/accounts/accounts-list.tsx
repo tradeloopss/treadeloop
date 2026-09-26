@@ -9,7 +9,7 @@ import { disconnectRithmic, syncRithmic } from "@/app/actions/rithmic"
 import { disconnectMetaTrader, syncMetaTraderNow } from "@/app/actions/metatrader"
 import { disconnectTradingView } from "@/app/actions/tradingview"
 import { setTradovateAccountSync, syncTradovateNow } from "@/app/actions/tradovate"
-import { setNinjaTraderAccountSync } from "@/app/actions/ninjatrader"
+import { disconnectTradovateCredentials, setNinjaTraderAccountSync } from "@/app/actions/ninjatrader"
 import { deleteAccount, setAccountArchived } from "@/app/actions/accounts"
 import { syncAllConnections } from "@/app/actions/connections"
 import { cn } from "@/lib/utils"
@@ -127,8 +127,9 @@ export function AccountsList({
             const result = await setTradovateAccountSync(c.providerAccountRowId!, false)
             if (!result.ok) throw new Error(result.error)
           } else if (c.kind === "ninjatrader") {
-            // Just this account; the last one also removes the add-on's key.
-            const result = await setNinjaTraderAccountSync(c.providerAccountRowId!, false)
+            const result = c.credentialLogin
+              ? await disconnectTradovateCredentials(c.connectionId) // the whole VPS login
+              : await setNinjaTraderAccountSync(c.providerAccountRowId!, false) // one account; the last also drops the add-on key
             if (!result.ok) throw new Error(result.error)
           } else await disconnectMetaTrader(c.connectionId)
           toast.success(t("Disconnected"))
@@ -220,7 +221,9 @@ export function AccountsList({
               : confirm?.connection.kind === "tradovate"
                 ? t("Sync from this Tradovate account stops. The account and the trades already imported stay in your journal; disconnecting the last account of a login also deletes its saved Tradovate access.")
                 : confirm?.connection.kind === "ninjatrader"
-                  ? t("TradeLoop stops turning this account's NinjaTrader fills into trades. The account and the trades already imported stay in your journal; disconnecting the last account also switches off the add-on's key.")
+                  ? confirm?.connection.credentialLogin
+                    ? t("We stop connecting this Tradovate login on our server and delete its saved password. The accounts and the trades already imported stay in your journal.")
+                    : t("TradeLoop stops turning this account's NinjaTrader fills into trades. The account and the trades already imported stay in your journal; disconnecting the last account also switches off the add-on's key.")
               : t("Sync stops and the saved login is deleted. The account and the trades already imported stay in your journal.")
         }
         confirmLabel={confirm?.kind === "delete" ? t("Delete account") : t("Disconnect")}

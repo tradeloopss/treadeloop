@@ -19,6 +19,7 @@ import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { ConnectionStepper } from "@/components/accounts/connection-stepper"
 import { TradovateConnect, TradovateProgress, type TradovateProgressState } from "@/components/accounts/tradovate-connect"
 import { NinjaTraderSetup, type NinjaTraderSetupState } from "@/components/accounts/ninjatrader-setup"
+import { TradovateCredentials, type TradovateCredentialsState } from "@/components/accounts/tradovate-credentials"
 import { Badge, PlatformCard, type PlatformBadge } from "@/components/accounts/platform-card"
 import type { PlatformId } from "@/components/accounts/types"
 import type { PlanUsage } from "@/lib/plan-allowance"
@@ -43,10 +44,13 @@ export interface AddAccountRequest {
 // Whether Tradovate can be connected on this deployment (TRADOVATE_MODE and
 // credentials — lib/tradovate/config), and what the sign-in redirect said.
 export interface TradovateSetup {
-  enabled: boolean
+  enabled: boolean // official Tradovate OAuth is configured (TRADOVATE_MODE)
   mock: boolean
   connectionId: number | null
   error: string | null
+  // The VPS NinjaTrader relay is configured, so Tradovate can be connected with
+  // credentials (like MetaTrader). When off, the PC add-on setup is shown.
+  ninjaVps: boolean
 }
 
 type Outcome =
@@ -170,6 +174,21 @@ const PLATFORMS: PlatformDef[] = [
   },
 ]
 
+// Tradovate through NinjaTrader on the VPS (credentials path — like
+// MetaTrader): the trader enters their login, we run it on our server.
+const TRADOVATE_CREDENTIALS: PlatformDef = {
+  id: "tradovate",
+  name: "Tradovate",
+  card: "Futures, live sync with your login",
+  badge: "live",
+  icon: <Logo src="/brokers/sm/tradovate.png" />,
+  live: true,
+  keywords: "futures prop apex tradeify mffu myfundedfutures takeprofit credentials login",
+  about: "Enter your Tradovate login once — we connect it on our server and sync your fills automatically. No NinjaTrader or PC of your own needed.",
+  needs: ["Your Tradovate username and password (from your prop firm)", "Which prop firm the login is with"],
+  security: "Your password is stored encrypted and used only to connect your account on our server, so syncing can continue — never to place or change orders. It's never shown in the app.",
+}
+
 // Tradovate when TRADOVATE_MODE and its credentials are set: official OAuth,
 // so the security note is exact — TradeLoop never sees the Tradovate password,
 // keeps only an encrypted access token, and only reads.
@@ -196,6 +215,7 @@ const CONNECT_COPY: Record<PlatformId, { title: string; description: string }> =
 }
 
 const TRADOVATE_OAUTH_COPY = { title: "Connect Tradovate", description: "Sign in on Tradovate's own page; your accounts then sync on their own." }
+const TRADOVATE_CREDENTIALS_COPY = { title: "Connect Tradovate", description: "Enter your login once — it syncs from our server, like MetaTrader. Nothing to keep open." }
 
 // Why the viewer's plan can't connect this platform, or null if it can.
 // Essential's one live sync is MetaTrader (lib/plan-allowance.ts): available
@@ -252,27 +272,33 @@ export function AddAccountModal({
     setMtStage("form")
     setAttempt(0)
     setNtState("setup")
+    setTvCredState("form")
   }, [request.nonce, request.platform])
 
   const onMtStage = useCallback((stage: MetaTraderStage) => setMtStage(stage), [])
 
-  const platforms = useMemo(() => (tradovate.enabled ? PLATFORMS.map((p) => (p.id === "tradovate" ? TRADOVATE_LIVE : p)) : PLATFORMS), [tradovate.enabled])
+  const tradovateDef = tradovate.enabled ? TRADOVATE_LIVE : tradovate.ninjaVps ? TRADOVATE_CREDENTIALS : null
+  const platforms = useMemo(() => (tradovateDef ? PLATFORMS.map((p) => (p.id === "tradovate" ? tradovateDef : p)) : PLATFORMS), [tradovateDef])
   const def = platforms.find((p) => p.id === selected) ?? platforms[0]
   // Back from Tradovate's sign-in: this window follows that connection's first sync.
   const tradovateProgressId = def.id === "tradovate" && stage === "connect" ? (request.tradovateConnectionId ?? null) : null
   const [tradovateState, setTradovateState] = useState<TradovateProgressState>("running")
   // Tradovate through NinjaTrader: waiting for, then connected to, the add-on.
   const [ntState, setNtState] = useState<NinjaTraderSetupState>("setup")
-  const viaNinjaTrader = def.id === "tradovate" && !tradovate.enabled && stage === "connect"
+  const [tvCredState, setTvCredState] = useState<TradovateCredentialsState>("form")
+  // Tradovate without the official OAuth: credentials (VPS relay) when it's
+  // configured, otherwise the PC add-on.
+  const viaCredentials = def.id === "tradovate" && !tradovate.enabled && tradovate.ninjaVps
+  const viaNinjaTrader = def.id === "tradovate" && !tradovate.enabled && !tradovate.ninjaVps && stage === "connect"
   const isMt = def.id === "mt5" || def.id === "mt4"
   // Reconnecting an account you already have is always allowed (the server
   // checks it's the same login).
   const reconnecting = request.initial?.login != null && request.platform === def.id
   const lock = reconnecting ? null : lockFor(def, isPro, usage)
 
-  const inVerify = outcome != null || (isMt && mtStage !== "form") || tradovateProgressId != null || (viaNinjaTrader && ntState !== "setup")
+  const inVerify = outcome != null || (isMt && mtStage !== "form") || tradovateProgressId != null || (viaNinjaTrader && ntState !== "setup") || (viaCredentials && stage === "connect" && tvCredState !== "form")
   const step: 1 | 2 | 3 = stage === "choose" ? 1 : inVerify ? 3 : 2
-  const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done") || (tradovateProgressId != null && tradovateState === "complete") || (viaNinjaTrader && ntState === "connected")
+  const completed = (outcome != null && outcome.ok) || (isMt && mtStage === "done") || (tradovateProgressId != null && tradovateState === "complete") || (viaNinjaTrader && ntState === "connected") || (viaCredentials && tvCredState === "connected")
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -405,6 +431,8 @@ export function AddAccountModal({
         ) : (
           <TradovateConnect mock={tradovate.mock} error={tradovate.error} />
         )
+    } else if (def.id === "tradovate" && tradovate.ninjaVps) {
+      body = <TradovateCredentials onDone={done} onFile={() => goConnect("file")} onState={setTvCredState} />
     } else if (def.id === "tradovate") {
       body = <NinjaTraderSetup onDone={done} onFile={() => goConnect("file")} onState={setNtState} />
     } else if (def.id === "tradingview") {
@@ -422,7 +450,12 @@ export function AddAccountModal({
       )
     }
   }
-  const copy = def.id === "tradovate" && tradovate.enabled ? TRADOVATE_OAUTH_COPY : CONNECT_COPY[def.id]
+  const copy =
+    def.id === "tradovate" && tradovate.enabled
+      ? TRADOVATE_OAUTH_COPY
+      : def.id === "tradovate" && tradovate.ninjaVps
+        ? TRADOVATE_CREDENTIALS_COPY
+        : CONNECT_COPY[def.id]
 
   // ------------------------------------------------------- the main action
   const action =

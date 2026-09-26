@@ -1,13 +1,75 @@
-# Tradovate through NinjaTrader (the TradeLoop add-on)
+# Tradovate through NinjaTrader
 
 Tradovate only issues API access to live, funded accounts with a $1,000
 minimum and a paid API add-on. Prop-firm and evaluation accounts aren't
 eligible. TradeLoop therefore syncs Tradovate accounts through **NinjaTrader 8**,
-the trader's own desktop platform. Prop firms' Tradovate accounts (Apex,
-Tradeify, MyFundedFutures and others) connect to it with
-the trader's own login.
+which is a Tradovate-sanctioned connection. Prop firms' Tradovate accounts
+(Apex, Tradeify, MyFundedFutures and others) connect to it with the trader's
+own login.
 
-A small TradeLoop add-on, one C# file using NinjaScript (NinjaTrader's public
+NinjaTrader can run two ways, both read-only (nothing places, changes or
+cancels orders) and both feeding the same pipeline (the provider-neutral
+tables → `buildProviderTrades`):
+
+- **On the VPS, with credentials — the default when it's set up.** The trader
+  enters their Tradovate login in TradeLoop, like MetaTrader; NinjaTrader runs
+  on the sync VPS and syncs on its own, no PC of the trader's needed. See
+  "Credentials, on the VPS" below.
+- **On the trader's own PC.** The trader installs a one-file add-on into their
+  own NinjaTrader; it syncs while that's open. See "The add-on, on the PC".
+
+## Credentials, on the VPS (like MetaTrader)
+
+Enabled by setting `NINJATRADER_RELAY_SECRET` on the app and running the
+NinjaTrader worker (`worker/ninjatrader`). When set, Add account → Tradovate
+shows a login form instead of the add-on download.
+
+```
+Trader enters Tradovate login ─► ninjatrader_connections (password AES-256-GCM)
+                                    │
+worker.ts (VPS) ─ /provision (127.0.0.1) ─► provisioner ─► NinjaTrader 8 (VPS)
+                                                             connection "tl-<id>"
+                                                                │
+                     TradeLoop add-on (relay) ─► POST /api/ninjatrader/relay
+                                                                │
+                                      provider_* tables ─► buildProviderTrades ─► trades
+```
+
+- **Storage.** The Tradovate password is a full credential (Tradovate has no
+  read-only one), so it's AES-256-GCM encrypted (`lib/crypto`) in
+  `ninjatrader_connections` — the same treatment as the Rithmic password —
+  used only to log the account in through NinjaTrader on the VPS, and never
+  returned to the browser. This is authorized use of an official connection,
+  not an API bypass.
+- **Worker** (`worker/ninjatrader/worker.ts`). Leases due logins and, over a
+  127.0.0.1-only API (bearer `NINJATRADER_PROVISION_TOKEN`), hands the
+  provisioner the connections to ensure in NinjaTrader (`tl-<id>`) with each
+  login's username and password — decrypted in memory only, never written to
+  disk. It tracks status: a login the relay has seen becomes `connected`; one
+  the provisioner reports rejected becomes `reauth`; one that never connects in
+  ten minutes becomes an error the trader sees.
+- **Relay** (`POST /api/ninjatrader/relay`, `lib/ninjatrader/relay`). The add-on
+  on the VPS posts every login's fills in one payload, keyed with the shared
+  relay secret. Each account is attributed to the user who owns its NinjaTrader
+  connection name (`tl-<id>`) — **only** by connection name, so two users'
+  identically named accounts never cross — and stored per user through the same
+  code as the PC add-on. `splitByUser` (in `relay-core`, unit-tested) does the
+  attribution.
+- **Provisioner + NinjaTrader.** NinjaTrader 8 on the VPS with the relay build
+  of the add-on loaded (the worker writes it to `NINJATRADER_ADDON_FILE`), plus
+  a helper that polls the worker's `/provision` and adds/connects the `tl-<id>`
+  connections to match. NinjaTrader holds many Tradovate connections at once, so
+  one instance serves every user. Setting this helper up is the VPS operator
+  step — see `worker/ninjatrader/README.md`.
+
+On the Accounts page each login is one row (like MetaTrader), showing Sync
+Live / Connecting / Needs reconnect. Disconnecting clears the stored password
+and the provisioner drops the connection.
+
+## The add-on, on the PC
+
+Where the VPS path isn't set up, the trader can run the add-on in their own
+NinjaTrader. A small TradeLoop add-on, one C# file using NinjaScript (NinjaTrader's public
 add-on API), reads the trader's executions inside NinjaTrader and posts them to
 TradeLoop. TradeLoop builds trades from them with the same engine as every
 other fill-based broker.

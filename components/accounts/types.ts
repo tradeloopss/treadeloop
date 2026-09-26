@@ -26,6 +26,7 @@ export interface HubConnection {
   kind: "rithmic" | "mt5" | "mt4" | "tradingview" | "tradovate" | "ninjatrader"
   connectionId: number
   providerAccountRowId?: number // tradovate / ninjatrader: this account's provider_accounts row (per-account disconnect)
+  credentialLogin?: boolean // a Tradovate-via-NinjaTrader VPS login row (disconnect removes the whole login)
   title: string
   subtitle: string
   logoName: string | null // matched against lib/broker-logos

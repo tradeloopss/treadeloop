@@ -952,3 +952,51 @@ export const providerDeviceKeys = pgTable(
   },
   (t) => [uniqueIndex("provider_device_keys_hash").on(t.keyHash), index("provider_device_keys_user").on(t.userId, t.provider)],
 )
+
+// A Tradovate login the trader entered to be synced through NinjaTrader on the
+// VPS (lib/ninjatrader, worker/ninjatrader) — the same idea as an MT5
+// connection, but the "terminal" is NinjaTrader. Tradovate offers no
+// credentials-based API for prop/eval accounts, so the VPS runs NinjaTrader,
+// which is a Tradovate-sanctioned connection, holds each login as a named
+// connection, and the TradeLoop add-on relays that login's fills. Those fills
+// still land in the provider_* tables under the user's "ninjatrader"
+// trading_connection and become trades the same way (lib/tradovate/trades).
+//
+// The password is a full Tradovate credential (there is no read-only one), so
+// it is AES-256-GCM encrypted (lib/crypto) exactly like the Rithmic password,
+// used only to log the account in through NinjaTrader, and never returned to
+// the browser.
+export const ninjatraderConnections = pgTable(
+  "ninjatrader_connections",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    username: text("username").notNull(), // the Tradovate username
+    passwordEnc: text("passwordEnc").notNull(),
+    // The NinjaTrader connection profile this login uses — a prop firm's
+    // Tradovate connection ("Apex", "Tradeify", …) or plain "Tradovate".
+    connectionKind: text("connectionKind").notNull(),
+    // The unique name the VPS gives this login's NinjaTrader connection
+    // ("tl-<id>"). The relay attributes each incoming account to the user by
+    // this name, so two users' logins never cross.
+    ntConnectionName: text("ntConnectionName").notNull(),
+    // pending (entered, waiting for the VPS to provision it) → provisioning →
+    // connected, or reauth (login rejected — the user re-enters) / error.
+    status: text("status").notNull().default("pending"),
+    statusMessage: text("statusMessage"),
+    // The VPS worker's scheduling + who holds it, like metatrader_connections.
+    nextSyncAt: timestamp("nextSyncAt"),
+    leaseUntil: timestamp("leaseUntil"),
+    errorCount: integer("errorCount").notNull().default(0),
+    // The add-on last relayed a fill / saw this connection connected.
+    lastSeenAt: timestamp("lastSeenAt"),
+    lastFillAt: timestamp("lastFillAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ninjatrader_connections_name").on(t.ntConnectionName),
+    index("ninjatrader_connections_user").on(t.userId),
+    index("ninjatrader_connections_due").on(t.status, t.nextSyncAt),
+  ],
+)

@@ -168,15 +168,18 @@ async function storeExecutions(connectionId: number, executions: NormalizedExecu
   return { inserted, updated }
 }
 
-export async function ingestPayload(device: DeviceKeyRow, parsed: NtParsed): Promise<IngestResult> {
-  const connection = await ensureConnection(device.userId)
+// The core: store one payload's accounts and fills for a single TradeLoop
+// user. Used both by the user's own PC add-on (ingestPayload) and, per
+// connection, by the VPS relay (lib/ninjatrader/relay).
+export async function ingestForUser(userId: string, parsed: NtParsed): Promise<IngestResult> {
+  const connection = await ensureConnection(userId)
   const now = new Date()
 
   // Accounts TradeLoop already syncs straight from Rithmic stay there.
   const rithmic = await db
     .select({ id: rithmicConnections.rithmicAccountId, name: rithmicConnections.accountName })
     .from(rithmicConnections)
-    .where(eq(rithmicConnections.userId, device.userId))
+    .where(eq(rithmicConnections.userId, userId))
   const viaRithmic = new Set(rithmic.flatMap((r) => [r.id.toLowerCase(), r.name.toLowerCase()]))
 
   // Every account the add-on listed, plus any only its fills name.
@@ -201,7 +204,7 @@ export async function ingestPayload(device: DeviceKeyRow, parsed: NtParsed): Pro
       skippedAccounts.push({ name: a.name, reason: "disconnected" })
       continue
     }
-    const journal = await ensureJournalAccount(device.userId, row, a.provider)
+    const journal = await ensureJournalAccount(userId, row, a.provider)
     if (journal === "plan_limit") {
       skippedAccounts.push({ name: a.name, reason: "plan_limit" })
       continue
@@ -233,20 +236,26 @@ export async function ingestPayload(device: DeviceKeyRow, parsed: NtParsed): Pro
       updatedAt: now,
     })
     .where(eq(tradingConnections.id, connection.id))
+
+  if (tradesDirty) tlog("executions_received", { provider: PROVIDER, connectionId: connection.id, inserted, updated, accounts: accepted.size })
+  return { connectionId: connection.id, accounts: accepted.size, inserted, updated, skippedAccounts, tradesDirty }
+}
+
+// The user's own PC add-on: one payload, one key, one user.
+export async function ingestPayload(device: DeviceKeyRow, parsed: NtParsed): Promise<IngestResult> {
+  const result = await ingestForUser(device.userId, parsed)
   await db
     .update(providerDeviceKeys)
     .set({
-      lastSeenAt: now,
-      ...(tradesDirty ? { lastSyncAt: now } : {}),
+      lastSeenAt: new Date(),
+      ...(result.tradesDirty ? { lastSyncAt: new Date() } : {}),
       lastStatus: "ok",
       lastError: null,
       ...(parsed.client.machine ? { label: parsed.client.machine } : {}),
       ...(parsed.client.version ? { clientVersion: parsed.client.version } : {}),
     })
     .where(eq(providerDeviceKeys.id, device.id))
-
-  if (tradesDirty) tlog("executions_received", { provider: PROVIDER, connectionId: connection.id, inserted, updated, accounts: accepted.size })
-  return { connectionId: connection.id, accounts: accepted.size, inserted, updated, skippedAccounts, tradesDirty }
+  return result
 }
 
 export async function recordDeviceError(device: DeviceKeyRow, message: string) {

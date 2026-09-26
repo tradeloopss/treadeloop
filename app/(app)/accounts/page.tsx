@@ -14,6 +14,8 @@ import { getT } from "@/lib/i18n/server"
 import { tradovateAvailability } from "@/lib/tradovate/config"
 import { tradovateConnectionsFor } from "@/lib/tradovate/connections"
 import { ninjaTraderViewFor, type NinjaTraderView } from "@/lib/ninjatrader/connections"
+import { listCredentials, type NinjaCredentialView } from "@/lib/ninjatrader/credentials"
+import { relayConfigured } from "@/lib/ninjatrader/relay"
 
 // Connecting Rithmic (login + account discovery + history) and "Sync all"
 // run as server actions on this route and can take up to a minute.
@@ -22,6 +24,17 @@ export const maxDuration = 60
 const num = (v: string | number | null | undefined) => (v == null || v === "" ? null : Number(v))
 
 const CONNECTABLE: PlatformId[] = ["rithmic", "mt5", "mt4", "tradingview", "file", "tradovate"]
+
+// Prop-firm labels for a Tradovate-via-NinjaTrader login's subtitle (mirrors
+// lib/ninjatrader/credentials TRADOVATE_CONNECTION_KINDS).
+const TRADOVATE_KIND_LABELS: Record<string, string> = {
+  Tradovate: "Tradovate",
+  Apex: "Apex Trader Funding",
+  Tradeify: "Tradeify",
+  MyFundedFutures: "My Funded Futures",
+  TakeProfitTrader: "Take Profit Trader",
+  BluSky: "BluSky Trading",
+}
 
 // ?tradovate=<id> — back from Tradovate's sign-in: the Add account window
 // opens on that connection's first-sync progress. ?tradovate_error=<code> —
@@ -41,7 +54,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const initialPlatform = CONNECTABLE.find((p) => p === connect) ?? (tradovateParam ? "tradovate" : null)
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate, ninjatrader] = await Promise.all([
+  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate, ninjatrader, ninjaCreds] = await Promise.all([
     getAccounts(true),
     getRithmicConnections(),
     getMetaTraderConnections(),
@@ -62,6 +75,12 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           return null
         })
       : Promise.resolve(null),
+    session?.user
+      ? listCredentials(session.user.id).catch((err): NinjaCredentialView[] => {
+          console.error("[accounts] tradovate credential connections unavailable:", err instanceof Error ? err.message : err)
+          return []
+        })
+      : Promise.resolve([]),
   ])
   const tradovateStatus = tradovateAvailability()
 
@@ -93,6 +112,10 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     linked.add(id)
     return byId.get(id) ?? null
   }
+
+  // NinjaTrader connection names of the user's VPS credential logins, so their
+  // accounts render as login rows (below) rather than duplicate per-account rows.
+  const vpsConnNames = new Set(ninjaCreds.filter((c) => c.status !== "disconnected").map((c) => c.ntConnectionName.toLowerCase()))
 
   const connections: HubConnection[] = [
     ...rithmic.map((c): HubConnection => {
@@ -220,7 +243,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     // open, so there's no "Sync now"; being offline just means it's closed.
     ...(ninjatrader?.connectionId != null
       ? ninjatrader.accounts
-          .filter((a) => a.enabled)
+          .filter((a) => a.enabled && !(a.connectionName && vpsConnNames.has(a.connectionName.toLowerCase())))
           .map((a): HubConnection => {
             const acct = account(a.tradingAccountId)
             const deviceError = ninjatrader.devices.find((d) => d.lastStatus === "error")
@@ -254,6 +277,53 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
             }
           })
       : []),
+    // Tradovate through NinjaTrader on the VPS (credentials): one row per
+    // login, like MetaTrader. Its accounts land in the same ninjatrader
+    // connection; a login with none yet shows as connecting.
+    ...ninjaCreds
+      .filter((c) => c.status !== "disconnected")
+      .map((c): HubConnection => {
+        const its = (ninjatrader?.accounts ?? []).filter((a) => a.enabled && a.connectionName?.toLowerCase() === c.ntConnectionName.toLowerCase())
+        const solo = its.length === 1 ? account(its[0].tradingAccountId) : null
+        const failing = c.status === "reauth" || c.status === "error"
+        const planLimited = its.some((a) => a.planLimited)
+        const health: HubConnection["health"] = failing || planLimited ? "error" : its.length === 0 ? (c.status === "pending" || c.status === "provisioning" ? "syncing" : "warning") : c.online ? "connected" : "warning"
+        const kindLabel = TRADOVATE_KIND_LABELS[c.connectionKind] ?? c.connectionKind
+        return {
+          key: `ntc:${c.id}`,
+          kind: "ninjatrader",
+          connectionId: c.id,
+          credentialLogin: true,
+          providerAccountRowId: its.length === 1 ? its[0].id : undefined,
+          title: solo?.name ?? its[0]?.name ?? `${kindLabel} — ${c.username}`,
+          subtitle: `${t("Tradovate via NinjaTrader")} · ${kindLabel}${its.length > 1 ? ` · ${t("{n} accounts", { n: its.length })}` : ""}`,
+          logoName: brokerLogo(its[0]?.name ?? c.connectionKind) ? (its[0]?.name ?? c.connectionKind) : (solo?.broker ?? "Tradovate"),
+          health,
+          message: failing
+            ? (c.statusMessage ?? t("Tradovate rejected this login — reconnect with the right username and password."))
+            : planLimited
+              ? t("Over your plan's account limit — upgrade to Pro to sync it.")
+              : its.length === 0
+                ? c.status === "pending" || c.status === "provisioning"
+                  ? t("Connecting your account on our server…")
+                  : t("Waiting for NinjaTrader on our server to connect this login.")
+                : null,
+          currency: its[0]?.currency ?? "USD",
+          balance: its.length === 1 ? its[0].balance : null,
+          equity: its.length === 1 ? its[0].equity : null,
+          openPositions: null,
+          tradeCount: null,
+          lastSyncedAt: c.lastFillAt ? new Date(c.lastFillAt) : c.lastSeenAt ? new Date(c.lastSeenAt) : null,
+          canSync: false,
+          account: solo,
+          reconnect: failing ? { platform: "tradovate" } : null,
+          diagnostics: [
+            { label: t("Sync"), value: c.online ? t("Live") : failing ? t("Needs reconnect") : t("Connecting…") },
+            { label: t("Last fill"), at: c.lastFillAt },
+            ...(its.length > 0 ? [{ label: t("Accounts"), value: String(its.length) }] : []),
+          ],
+        }
+      }),
   ]
 
   const otherAccounts = accounts.filter((a) => !linked.has(a.id)).map((a) => byId.get(a.id)!)
@@ -274,6 +344,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           mock: tradovateStatus.mode === "mock",
           connectionId: tradovateParam && /^\d+$/.test(tradovateParam) ? Number(tradovateParam) : null,
           error: tradovateErrorCode ? (TRADOVATE_ERRORS[tradovateErrorCode] ?? TRADOVATE_ERRORS.exchange) : null,
+          ninjaVps: relayConfigured(),
         }}
       />
   )
