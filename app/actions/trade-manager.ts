@@ -5,9 +5,9 @@ import { revalidatePath } from "next/cache"
 import { and, desc, eq } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { tradingAccounts, trades, providerAccounts, providerPositions } from "@/lib/db/schema"
+import { tradingAccounts, trades, providerAccounts, providerPositions, metatraderConnections } from "@/lib/db/schema"
 import { contractMultiplierForSymbol, computePnl, computeRMultiple } from "@/lib/calc"
-import { openTradeMetrics, type TradeManagerData, type OpenTradeView } from "@/lib/trade-manager"
+import { openTradeMetrics, liveTradeMetrics, type TradeManagerData, type OpenTradeView } from "@/lib/trade-manager"
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -64,6 +64,8 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       side,
       quantity,
       entryPrice,
+      currentPrice: null,
+      unrealizedPnl: null,
       stopLoss,
       takeProfit,
       entryTime: t.entryTime.toISOString(),
@@ -118,6 +120,8 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       side,
       quantity,
       entryPrice,
+      currentPrice: null,
+      unrealizedPnl: null,
       stopLoss: null,
       takeProfit: null,
       entryTime: p.updatedAt.toISOString(),
@@ -125,6 +129,43 @@ async function loadOpenPositions(userId: string, onlyAccountId?: number): Promis
       notes: null,
       metrics: openTradeMetrics({ side, quantity, entryPrice, stopLoss: null, takeProfit: null, contractMultiplier, fees: 0 }),
     })
+  }
+
+  // 3) Live MetaTrader positions — stored on the connection each sync, with
+  //    real floating P&L, current price and SL/TP.
+  const mtConns = await db
+    .select({ accountId: metatraderConnections.accountId, positions: metatraderConnections.openPositionsData, updatedAt: metatraderConnections.lastSyncedAt, platform: metatraderConnections.platform })
+    .from(metatraderConnections)
+    .where(eq(metatraderConnections.userId, userId))
+  for (const c of mtConns) {
+    const accId = c.accountId
+    if (accId == null || !accountById.has(accId)) continue
+    if (onlyAccountId != null && accId !== onlyAccountId) continue
+    const account = accountById.get(accId)!
+    for (const pos of c.positions ?? []) {
+      if (!(Math.abs(pos.volume) > 0)) continue
+      views.push({
+        id: -1 * (accId * 1_000_000 + (Math.abs(hashCode(pos.identifier || pos.symbol)) % 1_000_000)),
+        source: c.platform === "mt4" ? "mt4" : "mt5",
+        origin: "provider",
+        accountId: accId,
+        accountName: account.name,
+        currency: account.currency,
+        symbol: pos.symbol,
+        market: "forex",
+        side: pos.side,
+        quantity: pos.volume,
+        entryPrice: pos.openPrice,
+        currentPrice: pos.currentPrice,
+        unrealizedPnl: pos.profit,
+        stopLoss: pos.stopLoss,
+        takeProfit: pos.takeProfit,
+        entryTime: (c.updatedAt ?? new Date()).toISOString(),
+        contractMultiplier: 1,
+        notes: null,
+        metrics: liveTradeMetrics({ side: pos.side, volume: pos.volume, openPrice: pos.openPrice, currentPrice: pos.currentPrice, profit: pos.profit, stopLoss: pos.stopLoss, takeProfit: pos.takeProfit }),
+      })
+    }
   }
 
   views.sort((a, b) => new Date(b.entryTime).getTime() - new Date(a.entryTime).getTime())

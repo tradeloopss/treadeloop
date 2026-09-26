@@ -198,9 +198,20 @@ function TradeDrawer({ trade, onClose }: { trade: OpenTradeView | null; onClose:
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-5">
+              {trade.unrealizedPnl != null && (
+                <div className={cn("rounded-lg border p-3", trade.unrealizedPnl >= 0 ? "border-[var(--gain)]/30 bg-[var(--gain)]/5" : "border-[var(--loss)]/30 bg-[var(--loss)]/5")}>
+                  <div className="text-xs text-muted-foreground">Unrealized P&amp;L</div>
+                  <div className={cn("text-xl font-bold tabular-nums", trade.unrealizedPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
+                    {trade.unrealizedPnl >= 0 ? "+" : ""}
+                    {formatCurrency(trade.unrealizedPnl, trade.currency)}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Quantity" value={String(trade.quantity)} />
                 <Field label="Entry" value={price(trade.entryPrice)} />
+                <Field label="Current" value={trade.currentPrice != null ? price(trade.currentPrice) : "—"} />
                 <Field label="Stop" value={trade.stopLoss != null ? price(trade.stopLoss) : "none"} tone={trade.stopLoss == null || !trade.metrics.stopConsistent ? "warning" : undefined} />
                 <Field label="Target" value={trade.takeProfit != null ? price(trade.takeProfit) : "—"} />
               </div>

@@ -332,6 +332,19 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
         balance: String(res.account.balance),
         equity: String(res.account.equity),
         openPositions: res.positions.length,
+        // Keep the positions themselves (not just the count) so the app can
+        // show running trades with real floating P&L / current price / SL / TP.
+        openPositionsData: res.positions.map((p) => ({
+          symbol: String(p.symbol ?? ""),
+          side: Number(p.type) === 1 ? "short" : "long", // MT5: 0 buy, 1 sell
+          volume: Number(p.volume ?? 0),
+          openPrice: Number(p.price_open ?? p.priceOpen ?? 0),
+          currentPrice: p.price_current != null ? Number(p.price_current) : p.priceCurrent != null ? Number(p.priceCurrent) : null,
+          stopLoss: p.sl ? Number(p.sl) : null,
+          takeProfit: p.tp ? Number(p.tp) : null,
+          profit: p.profit != null ? Number(p.profit) + Number(p.swap ?? 0) : null,
+          identifier: String(p.identifier ?? p.ticket ?? ""),
+        })),
         ...(measuredZone ? { serverTimeZone: measuredZone } : {}),
         // A different time zone re-dates every trade: rebuild them all.
         ...(zoneChanged ? { normalizedAt: null } : {}),

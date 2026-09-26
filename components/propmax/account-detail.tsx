@@ -455,19 +455,30 @@ function PositionCard({ p, ccy, dailyLoss, drawdown }: { p: OpenTradeView; ccy: 
             </p>
           </div>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-muted-foreground">Risk if stop hit</p>
-          <p className={cn("font-semibold tabular-nums", p.metrics.riskAmount != null ? "text-[var(--loss)]" : "text-amber-500")}>
-            {p.metrics.riskAmount != null ? `−${money(p.metrics.riskAmount, ccy)}` : "no stop"}
-          </p>
+        <div className="flex items-start gap-6">
+          {p.unrealizedPnl != null && (
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">Unrealized P&amp;L</p>
+              <p className={cn("text-lg font-bold tabular-nums", p.unrealizedPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
+                {p.unrealizedPnl >= 0 ? "+" : ""}
+                {money(p.unrealizedPnl, ccy)}
+              </p>
+            </div>
+          )}
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">Risk if stop hit</p>
+            <p className={cn("font-semibold tabular-nums", p.metrics.riskAmount != null ? "text-[var(--loss)]" : "text-amber-500")}>
+              {p.metrics.riskAmount != null ? `−${money(p.metrics.riskAmount, ccy)}` : "no stop"}
+            </p>
+          </div>
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MiniStat label="Entry" value={num(p.entryPrice)} />
+        <MiniStat label="Current" value={p.currentPrice != null ? num(p.currentPrice) : "—"} />
         <MiniStat label="Stop" value={p.stopLoss != null ? num(p.stopLoss) : "—"} tone={p.stopLoss == null || !p.metrics.stopConsistent ? "amber" : undefined} />
         <MiniStat label="Target" value={p.takeProfit != null ? num(p.takeProfit) : "—"} />
-        <MiniStat label="Reward at target" value={p.metrics.rewardAmount != null ? money(p.metrics.rewardAmount, ccy) : "—"} tone="gain" />
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-3 text-xs">
@@ -486,8 +497,8 @@ function PositionCard({ p, ccy, dailyLoss, drawdown }: { p: OpenTradeView; ccy: 
           )}
         </span>
       </div>
-      {p.origin === "provider" && (
-        <p className="mt-2 text-[11px] text-muted-foreground">Live price isn&apos;t available in TradeLoop, so unrealized P&amp;L isn&apos;t shown — the risk above is from this position&apos;s size.</p>
+      {p.origin === "provider" && p.currentPrice == null && (
+        <p className="mt-2 text-[11px] text-muted-foreground">This broker&apos;s snapshot doesn&apos;t include a live price, so unrealized P&amp;L isn&apos;t shown — the risk is from position size.</p>
       )}
     </div>
   )

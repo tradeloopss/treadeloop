@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, boolean, serial, numeric, integer, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core"
 import type { RuleConfig } from "@/lib/propmax/types"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
+import type { Mt5Position } from "@/lib/trade-manager"
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -267,6 +268,11 @@ export const metatraderConnections = pgTable("metatrader_connections", {
   balance: numeric("balance", { precision: 18, scale: 2 }),
   equity: numeric("equity", { precision: 18, scale: 2 }),
   openPositions: integer("openPositions"),
+  // The live open positions themselves (MT5 positions_get → symbol, side,
+  // volume, open/current price, SL/TP, floating P&L), refreshed each sync, so
+  // the Trade Manager / PropFirm Max can show running trades with real
+  // unrealized P&L. Null on connections synced before this existed.
+  openPositionsData: jsonb("openPositionsData").$type<Mt5Position[]>(),
   // How deal times (broker server time) map to UTC: "ny+7" (the common
   // New York close = midnight convention, UTC+2/+3 following US DST) or
   // "fixed:<seconds>". Measured by the worker from the broker's live clock.

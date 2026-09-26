@@ -60,10 +60,26 @@ export function openTradeMetrics(t: OpenTradeInput): OpenTradeMetrics {
 
 // One open position as the Trade Manager UI renders it (server-shaped, plain
 // data — safe to pass to a client component).
+// A live MetaTrader open position, as the MT5 worker records it on the
+// connection each sync. MT5's positions_get() reports floating P&L and the
+// current price, so unlike a bare Tradovate snapshot these carry a real
+// unrealized P&L — no market feed needed on our side.
+export interface Mt5Position {
+  symbol: string
+  side: "long" | "short"
+  volume: number
+  openPrice: number
+  currentPrice: number | null
+  stopLoss: number | null
+  takeProfit: number | null
+  profit: number | null // floating (unrealized) P&L, incl. swap where the broker folds it in
+  identifier: string
+}
+
 export interface OpenTradeView {
   id: number
   // Where this row came from: a `trades` row, or a live broker position
-  // snapshot (provider_positions). Provider rows have no stop/target.
+  // (Tradovate snapshot / MetaTrader). Live rows are managed in the platform.
   origin: "trade" | "provider"
   accountId: number | null
   accountName: string
@@ -73,6 +89,10 @@ export interface OpenTradeView {
   side: "long" | "short"
   quantity: number
   entryPrice: number
+  // Live mark + unrealized P&L when the broker reports them (MetaTrader);
+  // null otherwise (manual trades, Tradovate snapshots) — never fabricated.
+  currentPrice: number | null
+  unrealizedPnl: number | null
   stopLoss: number | null
   takeProfit: number | null
   entryTime: string // ISO
@@ -85,6 +105,37 @@ export interface OpenTradeView {
 export interface TradeManagerData {
   accounts: { id: number; name: string }[]
   trades: OpenTradeView[]
+}
+
+// Metrics for a LIVE broker position that reports its floating P&L (MetaTrader).
+// Rather than guess a forex pip value, we calibrate money-per-price-move from
+// the broker's own unrealized P&L: perUnit = profit ÷ (current − open). Then
+// risk at the stop and reward at the target are exact in account currency.
+// Falls back to null (never a fabricated number) when the position hasn't moved
+// yet (profit ≈ 0 at open) so the calibration isn't defined.
+export function liveTradeMetrics(args: {
+  side: "long" | "short"
+  volume: number
+  openPrice: number
+  currentPrice: number | null
+  profit: number | null
+  stopLoss: number | null
+  takeProfit: number | null
+}): OpenTradeMetrics {
+  const { openPrice, currentPrice, profit, stopLoss, takeProfit } = args
+  const notional = round2(openPrice * args.volume)
+
+  const moved = currentPrice != null && Math.abs(currentPrice - openPrice) > 1e-9
+  const perUnit = moved && profit != null ? profit / (currentPrice! - openPrice) : null
+
+  const riskAmount = perUnit != null && stopLoss != null ? round2(Math.abs(perUnit * (stopLoss - openPrice))) : null
+  const rewardAmount = perUnit != null && takeProfit != null ? round2(Math.abs(perUnit * (takeProfit - openPrice))) : null
+  const riskReward = riskAmount != null && rewardAmount != null && riskAmount > 0 ? round2(rewardAmount / riskAmount) : null
+
+  const dir = args.side === "long" ? 1 : -1
+  const stopConsistent = stopLoss == null ? true : (openPrice - stopLoss) * dir > 0
+
+  return { riskAmount, rewardAmount, riskReward, notional, stopConsistent }
 }
 
 export interface OpenTradesSummary {

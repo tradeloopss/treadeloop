@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { openTradeMetrics, summarizeOpenTrades } from "@/lib/trade-manager"
+import { openTradeMetrics, summarizeOpenTrades, liveTradeMetrics } from "@/lib/trade-manager"
 
 test("long: risk and reward from entry, stop and target", () => {
   // ES long 2 @ 5000, stop 4990, target 5020, mult 50.
@@ -37,6 +37,28 @@ test("fees widen risk and shrink reward", () => {
   const m = openTradeMetrics({ side: "long", quantity: 1, entryPrice: 100, stopLoss: 90, takeProfit: 120, contractMultiplier: 1, fees: 4 })
   assert.equal(m.riskAmount, 14) // 10 + 4
   assert.equal(m.rewardAmount, 16) // 20 − 4
+})
+
+test("liveTradeMetrics calibrates risk/reward from the broker's floating P&L", () => {
+  // EURUSD long: open 1.1000, current 1.1010 (+10 pips) with +$100 floating.
+  // → $10 per pip. Stop 1.0990 (−10) → risk $100; target 1.1030 (+30) → $300.
+  const m = liveTradeMetrics({ side: "long", volume: 1, openPrice: 1.1, currentPrice: 1.101, profit: 100, stopLoss: 1.099, takeProfit: 1.103 })
+  assert.equal(m.riskAmount, 100)
+  assert.equal(m.rewardAmount, 300)
+  assert.equal(m.riskReward, 3)
+  assert.equal(m.stopConsistent, true)
+})
+
+test("liveTradeMetrics is null when the position hasn't moved (no calibration)", () => {
+  const m = liveTradeMetrics({ side: "long", volume: 1, openPrice: 1.1, currentPrice: 1.1, profit: 0, stopLoss: 1.099, takeProfit: 1.103 })
+  assert.equal(m.riskAmount, null)
+  assert.equal(m.rewardAmount, null)
+})
+
+test("liveTradeMetrics flags a wrong-side stop for a short", () => {
+  // Short: valid stop is ABOVE open. Here stop is below → inconsistent.
+  const m = liveTradeMetrics({ side: "short", volume: 1, openPrice: 1.1, currentPrice: 1.099, profit: 100, stopLoss: 1.09, takeProfit: 1.08 })
+  assert.equal(m.stopConsistent, false)
 })
 
 test("summary totals risk and counts the unprotected", () => {
