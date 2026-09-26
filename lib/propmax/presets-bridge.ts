@@ -19,8 +19,16 @@ import type { RuleSet } from "@/lib/propmax/engine"
 
 // The account sizes to seed for a firm that doesn't publish exact per-size
 // figures — its percentages hold across sizes, so we materialize the common
-// ones as concrete currency rule sets the user can pick from.
+// ones as concrete currency rule sets the user can pick from. Futures firms
+// sell 25K–150K; forex/CFD firms sell 10K–200K, so each asset class gets its
+// own default ladder (picked by preset.assetClass in buildCatalogSeed).
 export const DEFAULT_SIZES = [25_000, 50_000, 100_000, 150_000]
+export const DEFAULT_SIZES_FOREX = [10_000, 25_000, 50_000, 100_000, 200_000]
+
+// The default account-size ladder for a preset that lists no exact sizes.
+export function defaultSizesFor(assetClass: string): number[] {
+  return assetClass === "forex" ? DEFAULT_SIZES_FOREX : DEFAULT_SIZES
+}
 
 // The phases a preset has rules for. "funded" only when the preset defines it.
 export function presetPhases(preset: PropFirmPreset): string[] {
@@ -79,7 +87,7 @@ export function presetSource(preset: PropFirmPreset, resolved: ResolvedRules): R
   return {
     name: `${preset.firm} — published rules`,
     type: "official_rules",
-    verifiedAt: "2026-09-01",
+    verifiedAt: preset.verifiedAt ?? "2026-09-27",
     confidence: resolved.exactSize ? "high" : "medium",
   }
 }
@@ -136,17 +144,18 @@ export function buildCatalogSeed(presets: PropFirmPreset[] = PROP_FIRM_PRESETS):
   const versions: SeedRuleVersion[] = []
 
   for (const preset of presets) {
+    const assetClass = preset.assetClass ?? "futures"
     const firmSlug = slugify(preset.firm)
-    if (!firms.has(firmSlug)) firms.set(firmSlug, { slug: firmSlug, name: preset.firm, assetClass: "futures" })
+    if (!firms.has(firmSlug)) firms.set(firmSlug, { slug: firmSlug, name: preset.firm, assetClass })
 
     const programSlug = slugify(preset.program)
     const programKey = `${firmSlug}/${programSlug}`
     if (!programs.has(programKey)) {
-      programs.set(programKey, { firmSlug, slug: programSlug, name: preset.program, assetClass: "futures" })
+      programs.set(programKey, { firmSlug, slug: programSlug, name: preset.program, assetClass })
     }
 
     const sizes = presetSizes(preset)
-    const sizesToSeed = sizes.length > 0 ? sizes : DEFAULT_SIZES
+    const sizesToSeed = sizes.length > 0 ? sizes : defaultSizesFor(assetClass)
     for (const phase of presetPhases(preset)) {
       for (const accountSize of sizesToSeed) {
         const resolved = resolvePresetRules(preset, accountSize, phase)
@@ -159,7 +168,7 @@ export function buildCatalogSeed(presets: PropFirmPreset[] = PROP_FIRM_PRESETS):
           version: 1,
           rules: presetToRuleConfigs(resolved),
           sourceName: source.name,
-          sourceUrl: null,
+          sourceUrl: preset.sourceUrl ?? null,
           sourceType: source.type,
           confidence: source.confidence,
           verifiedAt: source.verifiedAt ?? null,

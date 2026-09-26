@@ -22,6 +22,16 @@
 // mechanics this tracker's simple model can't capture (drawdown "lock"
 // behavior, soft-breach counters, etc.). Treat this as a verified starting
 // point, not a substitute for the firm's own rulebook.
+//
+// As of the 2026-09-27 review this also covers the major FOREX/CFD firms
+// (assetClass: "forex"). Those firms publish everything as percentages of the
+// account balance rather than per-size dollars, so their entries carry
+// percentages, not `sizes` tables, and multi-step challenges are modelled as
+// one preset per phase ("… — Phase 1" / "… — Phase 2") because a single preset
+// only holds one profit target. Every forex and every newly-added futures
+// entry carries a `sourceUrl` pointing at the exact rulebook page its numbers
+// came from — nothing here is invented; where a specific value genuinely
+// couldn't be pinned to a source it's flagged in `notes` and left conservative.
 export type DrawdownType = "trailing" | "static"
 
 // Exact dollar thresholds for one account size.
@@ -58,6 +68,17 @@ export interface PropFirmPreset {
   consistencyPct?: number | null
   sizes?: Record<number, SizeRules>
   funded?: FundedRules
+  // Which market this firm's accounts trade. Drives the catalog's assetClass
+  // and the default account sizes we materialize (forex sells 10K–200K,
+  // futures 25K–150K). Defaults to "futures" when omitted (the original
+  // presets were all futures firms).
+  assetClass?: "futures" | "forex"
+  // A link to the exact rulebook page these numbers came from, stamped onto
+  // every seeded rule version so the source is one click away.
+  sourceUrl?: string
+  // When this entry was last checked against the firm's published rules
+  // (ISO date). Falls back to the module's review date when omitted.
+  verifiedAt?: string
   notes: string
 }
 
@@ -277,6 +298,638 @@ export const PROP_FIRM_PRESETS: PropFirmPreset[] = [
     },
     funded: { consistencyPct: null, minPayoutDays: 5, minDayProfit: 200 },
     notes: "Real-time intraday trailing drawdown variant, with a bigger drawdown than the EOD option in exchange. No consistency rule on standard accounts; payouts need 5 days of $200+ profit.",
+  },
+
+  // ===========================================================================
+  // NEW FUTURES FIRMS (added 2026-09-27) — sourced from each firm's help center
+  // / published rules. Dollar figures listed under `sizes` are verbatim from
+  // the source; percentages are the fallback for unlisted sizes.
+  // ===========================================================================
+  {
+    firm: "Lucid Trading",
+    program: "LucidFlex Evaluation",
+    profitTargetPct: 6,
+    maxDrawdownPct: 4,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: 2,
+    consistencyPct: 50,
+    assetClass: "futures",
+    sourceUrl: "https://support.lucidtrading.com/en/articles/12945795-lucidflex-funded-account",
+    sizes: {
+      50_000: { profitTarget: 3_000, maxDrawdown: 2_000 },
+      100_000: { profitTarget: 6_000, maxDrawdown: 3_000 },
+    },
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "LucidFlex evaluation: 6% target ($50K → $3,000, $100K → $6,000) against an end-of-day trailing max loss ($2,000 / $3,000) that stops trailing once it locks at the starting balance + $100. No daily loss limit, 2 minimum trading days, 50% consistency to pass. Funded accounts drop the consistency rule (optional daily loss) and pay 90/10.",
+  },
+  {
+    firm: "FundedNext Futures",
+    program: "Flex Challenge",
+    profitTargetPct: 5,
+    maxDrawdownPct: 3,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: 3,
+    consistencyPct: 40,
+    assetClass: "futures",
+    sourceUrl: "https://helpfutures.fundednext.com/en/articles/14878751-what-is-fundednext-futures-flex-challenge",
+    sizes: {
+      50_000: { profitTarget: 2_500, maxDrawdown: 1_500 },
+    },
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Futures Flex challenge (single phase): $50K → $2,500 target with an end-of-day trailing max loss of $1,500 that locks at the starting balance + $100. 40% best-day consistency and at least 3 profitable days to pass; no daily loss limit on Flex. FundedNext also runs Rapid Pro / Rapid Daily models with different rules (some carry a 5% daily loss) — verify your exact plan.",
+  },
+  {
+    firm: "Top One Futures",
+    program: "Instant Sim-Funded",
+    profitTargetPct: 6,
+    maxDrawdownPct: 4,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: null,
+    consistencyPct: 20,
+    assetClass: "futures",
+    sourceUrl: "https://help.toponefutures.com/en/articles/11020805-overview-of-the-instant-sim-funded-program",
+    funded: { consistencyPct: 20, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Instant Sim-Funded program (no evaluation phase). End-of-day trailing max drawdown fixed per size — $1,000/25K, $2,000/50K, $4,000/100K, $6,000/150K (a flat 4%) — that locks once your balance peaks. No daily loss limit; 10-second minimum hold. The 6% shown is the first-payout profit threshold (then 5%, then 4% for later payouts), not a pass/fail target. No single day may exceed 20% of total profit.",
+  },
+  {
+    firm: "Traders Launch",
+    program: "Full Session Evaluation",
+    profitTargetPct: 2,
+    maxDrawdownPct: 1,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: null,
+    assetClass: "futures",
+    sourceUrl: "https://propfirmbridge.com/futures-firms/traders-launch-futures-prop-firm-review-2026",
+    sizes: {
+      100_000: { profitTarget: 2_000, maxDrawdown: 1_000 },
+      200_000: { profitTarget: 4_000, maxDrawdown: 2_000 },
+      300_000: { profitTarget: 6_000, maxDrawdown: 3_000 },
+    },
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Full Session evaluation. Unusually low 2% target ($2K/$4K/$6K on 100K/200K/300K) with a very tight 1% end-of-day trailing max loss ($1,000/$2,000/$3,000) that locks at the starting balance. No separate daily loss limit. Contract limits start at 2/4/6 minis (20/40/60 micros). Account sizes are 100K/200K/300K only.",
+  },
+  {
+    firm: "E8 Futures",
+    program: "E8 Signature Futures",
+    profitTargetPct: 6,
+    maxDrawdownPct: 4,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: null,
+    assetClass: "futures",
+    sourceUrl: "https://helpfutures.e8markets.com/en/articles/10148976-e8-trader-stage-objectives-and-rules-for-model-2",
+    sizes: {
+      25_000: { profitTarget: 1_500, maxDrawdown: 1_000 },
+      50_000: { profitTarget: 3_000, maxDrawdown: 2_000 },
+      100_000: { profitTarget: 6_000, maxDrawdown: 3_000 },
+      150_000: { profitTarget: 9_000, maxDrawdown: 4_500 },
+    },
+    funded: { consistencyPct: 35, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "E8 Signature Futures: flat 6% closed-profit target with an end-of-day trailing max loss (4% on 25K/50K → $1,000/$2,000; 3% on 100K/150K → $3,000/$4,500). No daily loss limit, no consistency rule and no minimum days during evaluation; a 35% best-day rule applies only once funded. Must place and close a trade at least every 60 days.",
+  },
+  {
+    firm: "TradeDay",
+    program: "Evaluation (EOD)",
+    profitTargetPct: 6,
+    maxDrawdownPct: 4,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: 5,
+    consistencyPct: 30,
+    assetClass: "futures",
+    sourceUrl: "https://tradeday.freshdesk.com/en/support/solutions/articles/103000008855-what-is-the-maximum-drawdown-rule-",
+    sizes: {
+      50_000: { profitTarget: 3_000, maxDrawdown: 2_000 },
+      100_000: { profitTarget: 6_000, maxDrawdown: 3_000 },
+    },
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "TradeDay evaluation (EOD model): 6% target ($50K → $3,000, $100K → $6,000) against an end-of-day trailing max loss ($2,000 / $3,000) that stops trailing at the starting balance. No daily loss limit, 5 minimum trading days, 30% consistency. TradeDay also offers Intraday and Static drawdown models; the trailing drawdown becomes static once funded. Per-size target confirmed on 50K/100K; other sizes follow the same 6%.",
+  },
+  {
+    firm: "Blue Guardian Futures",
+    program: "Standard Account",
+    profitTargetPct: 6,
+    maxDrawdownPct: 5,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: null,
+    assetClass: "futures",
+    sourceUrl: "https://helpfutures.blueguardian.com/en/articles/15654479-standard-account-rules",
+    funded: { consistencyPct: 40, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Blue Guardian Futures Standard: 6% profit target with an end-of-day trailing max drawdown (a fixed dollar amount per account size, roughly 5% — confirm your size's exact figure) that locks at the starting balance + $100 after your first payout. A 40% consistency rule applies at the funded stage. The Guardian (8% target, no daily loss, 30% consistency), Reserve and Direct models differ — pick the one you bought.",
+  },
+  {
+    firm: "FuturesElite",
+    program: "Elite Evaluation",
+    profitTargetPct: 6,
+    maxDrawdownPct: 4,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: 3,
+    assetClass: "futures",
+    sourceUrl: "https://joinprop.com/prop-firm/futureselite/",
+    sizes: {
+      50_000: { profitTarget: 3_000, maxDrawdown: 2_000 },
+      100_000: { profitTarget: 6_000, maxDrawdown: 3_000 },
+    },
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "FuturesElite 'Elite' evaluation: per-size targets ($50K → $3,000, $100K → $6,000) over at least 3 trading days, with an end-of-day trailing max loss ($2,000 / $3,000). No daily loss limit and no funded consistency rule on Elite; the trailing drawdown locks at the starting balance after the max is reached in profit or after the first payout. Distinct from the forex firm 'FundedElite'.",
+  },
+  {
+    firm: "DayTraders",
+    program: "EOD Account",
+    profitTargetPct: 6,
+    maxDrawdownPct: 5,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: 2,
+    assetClass: "futures",
+    sourceUrl: "https://daytraders.com/help/articles/14473672-eod-account-rules",
+    sizes: {
+      50_000: { profitTarget: 3_000, maxDrawdown: 2_500 },
+      100_000: { profitTarget: 6_000, maxDrawdown: 3_000 },
+    },
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "DayTraders.com EOD account: 6% target ($50K → $3,000, $100K → $6,000) against an end-of-day trailing max loss ($2,500 / $3,000) that locks at the starting balance. Minimum 2 qualifying days (a day whose net profit meets the account's minimum and passes the consistency rule). DayTraders also sells Intraday-Trailing, Static, S2F and S2L account types with their own figures — this is the EOD model.",
+  },
+
+  // ===========================================================================
+  // FOREX / CFD FIRMS (added 2026-09-27) — percentages of the account balance,
+  // sourced from each firm's rulebook. Multi-step challenges are one preset per
+  // phase; the final step carries a `funded` block so the funded stage is
+  // selectable. Firms sell many models — the notes name which one this is.
+  // ===========================================================================
+
+  // --- FundedNext (forex/CFD) ---
+  {
+    firm: "FundedNext",
+    program: "Stellar 2-Step — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 5,
+    assetClass: "forex",
+    sourceUrl: "https://fundednext.com/cfds/stellar-2-step",
+    notes:
+      "Stellar 2-Step CFD challenge, Phase 1 (8% target). The 10% max loss is static (equity must stay above 90% of the initial balance); the 5% daily loss is measured from the day's starting balance. Both phases need 5 trading days.",
+  },
+  {
+    firm: "FundedNext",
+    program: "Stellar 2-Step — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 5,
+    assetClass: "forex",
+    sourceUrl: "https://fundednext.com/cfds/stellar-2-step",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Stellar 2-Step Phase 2 (5% target). Same 10% static max loss and 5% daily loss as Phase 1. The funded stage keeps those limits with no profit target and pays an 80% split (select the 'funded' phase).",
+  },
+
+  // --- FundingPips ---
+  {
+    firm: "FundingPips",
+    program: "2-Step Standard — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://help.fundingpips.com/hc/en-us/articles/34501809112081-2-Step-Standard",
+    notes:
+      "2-Step Standard Phase 1 (8% target). 10% overall max loss is static on the initial balance; the 5% daily loss is on the higher of the day's starting balance or equity. 3 trading days per phase. (The 10% Phase-1 target option was retired 24 July 2026.)",
+  },
+  {
+    firm: "FundingPips",
+    program: "2-Step Standard — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://help.fundingpips.com/hc/en-us/articles/34501809112081-2-Step-Standard",
+    funded: { consistencyPct: 35, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "2-Step Standard Phase 2 (5% target). No consistency rule to pass; once funded a 35% best-day rule caps how much of a payout period's profit any one day can be.",
+  },
+
+  // --- E8 Markets (forex) ---
+  {
+    firm: "E8 Markets",
+    program: "E8 One (8% drawdown track)",
+    profitTargetPct: 12,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 5.3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.e8markets.com/en/articles/11775980-e8-one",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "E8 One is fully configurable: pick a max drawdown of 4/6/8/10/14% (the profit target is 1.5× that = 6/9/12/15/21%) with the paired daily loss of 3/4/5.3/6.6/9.2%. This preset is the 8%-drawdown track (12% target, 5.3% daily). All drawdown is static on the initial balance; no minimum days (one trade every 60 days keeps it active). Adjust to the track you bought.",
+  },
+
+  // --- BrightFunded ---
+  {
+    firm: "BrightFunded",
+    program: "2-Step Bright — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 4,
+    minTradingDays: 5,
+    assetClass: "forex",
+    sourceUrl: "https://brightfunded.com/",
+    notes:
+      "2-Step Bright Phase 1 (8% target). Both the 8% max loss and 4% daily loss are static (fixed from the starting balance — they never move). 5 trading days per phase. Sources differ on whether the overall cap is 8% (this Bright plan) or 10% (the Classic plan) — confirm which you bought.",
+  },
+  {
+    firm: "BrightFunded",
+    program: "2-Step Bright — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 4,
+    minTradingDays: 5,
+    assetClass: "forex",
+    sourceUrl: "https://brightfunded.com/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "2-Step Bright Phase 2 (5% target). Same 8% static max loss and 4% static daily loss. BrightFunded advertises up to a 100% split on early payouts.",
+  },
+
+  // --- The5ers ---
+  {
+    firm: "The5ers",
+    program: "High Stakes — Phase 1",
+    profitTargetPct: 10,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://the5ers.com/challenge-programs-bootcamp-high-stakes-hyper-growth-explained/",
+    notes:
+      "High Stakes 2-step Phase 1 (10% target). 10% overall max loss and 5% daily loss on the initial balance. Each step needs 3 'profitable' days of at least 0.5% of the initial balance (not just any trading day).",
+  },
+  {
+    firm: "The5ers",
+    program: "High Stakes — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://the5ers.com/challenge-programs-bootcamp-high-stakes-hyper-growth-explained/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "High Stakes Phase 2 (5% target). Same 10% max loss and 5% daily loss; again 3 profitable days of 0.5%+. Funding starts at an 80% split.",
+  },
+  {
+    firm: "The5ers",
+    program: "Hyper Growth (1-Step, $25K)",
+    profitTargetPct: 10,
+    maxDrawdownPct: 6,
+    drawdownType: "static",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://the5ers.com/hyper-growth/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Hyper Growth is a one-step $25K program: a single 10% target with a tighter 6% max loss and 3% daily loss, then instant funding.",
+  },
+
+  // --- Alpha Capital ---
+  {
+    firm: "Alpha Capital",
+    program: "Alpha Pro — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://alphacapitalgroup.uk/",
+    notes:
+      "Alpha Pro 8% two-step, Phase 1 (8% target, 8% static max loss = the account's fixed dollar max). Daily loss is 3–5% off the day's starting balance/equity (5% shown). 3 trading days per phase. Alpha also sells 6%- and 10%-drawdown tracks. Average trade duration must exceed 2 minutes and ≥50% of profit must come from trades held over 2 minutes (not modelled here).",
+  },
+  {
+    firm: "Alpha Capital",
+    program: "Alpha Pro — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://alphacapitalgroup.uk/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "Alpha Pro Phase 2 (5% target). Same 8% static max loss; 3 trading days.",
+  },
+
+  // --- AquaFunded ---
+  {
+    firm: "AquaFunded",
+    program: "2-Step Standard — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.aquafunded.com/en/articles/15281226-2-step-standard",
+    notes:
+      "2-Step Standard Phase 1 (8% target). 8% overall max loss is static on the initial balance; 3% daily loss, reset 00:00 UTC. AquaFunded's 2-Step Pro uses a 10% trailing drawdown instead — this is the Standard (static) model.",
+  },
+  {
+    firm: "AquaFunded",
+    program: "2-Step Standard — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.aquafunded.com/en/articles/15281226-2-step-standard",
+    funded: { consistencyPct: 15, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "2-Step Standard Phase 2 (5% target). Funded payouts need the best day under 15% of total profit (breaking it blocks the payout, not the account).",
+  },
+
+  // --- Crypto Fund Trader ---
+  {
+    firm: "Crypto Fund Trader",
+    program: "2-Step — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 12,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://cryptofundtrader.com/",
+    notes:
+      "2-Step challenge Phase 1 (8% target). 12% overall max loss with a 5% daily loss on equity (reset 00:05 UTC). The 1-step and instant variants use a trailing drawdown instead. EAs, news and copy trading are allowed.",
+  },
+  {
+    firm: "Crypto Fund Trader",
+    program: "2-Step — Phase 2",
+    profitTargetPct: 4,
+    maxDrawdownPct: 12,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://cryptofundtrader.com/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "2-Step Phase 2 (4% target). Same 12% max loss and 5% daily loss.",
+  },
+
+  // --- Moneta Funded ---
+  {
+    firm: "Moneta Funded",
+    program: "1-Step Challenge",
+    profitTargetPct: 12,
+    maxDrawdownPct: 6,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    consistencyPct: 20,
+    assetClass: "forex",
+    sourceUrl: "https://www.monetafunded.com/general-rules/",
+    funded: { consistencyPct: 20, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "1-Step Challenge: 12% target, 6% trailing max loss, 3% daily loss. A consistency cap (15% or 20% depending on the add-on) limits any single day's share of profit; 20% shown.",
+  },
+  {
+    firm: "Moneta Funded",
+    program: "2-Step — Phase 1",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 4,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://www.monetafunded.com/general-rules/",
+    notes:
+      "2-Step Phase 1. 10% static max loss, 4% daily loss. Sources list the two-step targets as 5% (Phase 1) then 10% (Phase 2) — an unusually reversed order, so verify against your dashboard. Max loss is 8% or 10% depending on the add-on (10% shown).",
+  },
+  {
+    firm: "Moneta Funded",
+    program: "2-Step — Phase 2",
+    profitTargetPct: 10,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 4,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://www.monetafunded.com/general-rules/",
+    funded: { consistencyPct: 20, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "2-Step Phase 2 (10% target per published rules — confirm, as this is higher than Phase 1). Same 10% static max loss and 4% daily loss.",
+  },
+
+  // --- Top One Trader ---
+  {
+    firm: "Top One Trader",
+    program: "1-Step Flash",
+    profitTargetPct: 10,
+    maxDrawdownPct: 7,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 4,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://help.toponetrader.com/en/articles/8318230-what-are-the-rules-for-the-1-step-flash-challenge-account",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "1-Step Flash: 10% target, 7% trailing max drawdown, 4% daily loss, and at least 3 profitable trading days. On a payout request the max drawdown locks to your starting balance and stops trailing (not modelled). Funded Flash accounts add a 3% daily profit cap.",
+  },
+
+  // --- Blue Guardian (forex/CFD) ---
+  {
+    firm: "Blue Guardian",
+    program: "2-Step Pro — Phase 1",
+    profitTargetPct: 10,
+    maxDrawdownPct: 10,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 4,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.blueguardian.com/en/articles/14062433-2-step-pro-rules",
+    notes:
+      "2-Step Pro (CFD) Phase 1 (10% target). The 10% max drawdown is trailing (relative to peak); 4% daily loss on the higher of balance/equity, reset 5pm EST. Blue Guardian also sells 2-Step Standard (8%→4%) and Nano (8%→5%, 3% daily) — pick your model.",
+  },
+  {
+    firm: "Blue Guardian",
+    program: "2-Step Pro — Phase 2",
+    profitTargetPct: 4,
+    maxDrawdownPct: 10,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 4,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.blueguardian.com/en/articles/14062433-2-step-pro-rules",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "2-Step Pro Phase 2 (4% target). Same 10% trailing max drawdown and 4% daily loss.",
+  },
+
+  // --- Atmos Funded ---
+  {
+    firm: "Atmos Funded",
+    program: "1-Step Standard",
+    profitTargetPct: 10,
+    maxDrawdownPct: 6,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://atmosfunded.com/rules/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "1-Step Standard: 10% target with a 6% trailing max loss (adjusts up as the balance grows and locks after your first payout).",
+  },
+  {
+    firm: "Atmos Funded",
+    program: "1-Step Plus",
+    profitTargetPct: 6,
+    maxDrawdownPct: 3,
+    drawdownType: "trailing",
+    dailyLossLimitPct: null,
+    minTradingDays: null,
+    consistencyPct: 45,
+    assetClass: "forex",
+    sourceUrl: "https://atmosfunded.com/rules/",
+    funded: { consistencyPct: 45, minPayoutDays: null, minDayProfit: null },
+    notes: "1-Step Plus: 6% target, a tight 3% trailing max loss, no daily loss limit, and a 45% consistency rule.",
+  },
+  {
+    firm: "Atmos Funded",
+    program: "Nova Challenge",
+    profitTargetPct: 5,
+    maxDrawdownPct: 8,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 4,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://atmosfunded.com/rules/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "Nova Challenge: 5% target, 8% trailing max loss, 4% daily loss.",
+  },
+
+  // --- Hola Prime ---
+  {
+    firm: "Hola Prime",
+    program: "2-Step Prime — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 10,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://holaprime.com/forex/faq/hola-prime-challenges/hola-prime-2-step-prime-challenge/",
+    notes: "2-Step Prime Phase 1 (8% target). 10% max drawdown is trailing; 5% daily loss. 3 trading days per phase.",
+  },
+  {
+    firm: "Hola Prime",
+    program: "2-Step Prime — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://holaprime.com/forex/faq/hola-prime-challenges/hola-prime-2-step-prime-challenge/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "2-Step Prime Phase 2 (5% target). Same 10% trailing max drawdown and 5% daily loss.",
+  },
+
+  // --- FundedElite (forex — distinct from FuturesElite) ---
+  {
+    firm: "FundedElite",
+    program: "2-Step — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://propfirmmatch.com/prop-firms/fundedelite/challenges",
+    notes:
+      "2-Step evaluation Phase 1 (8% target). 8% max loss is static; daily loss 3–5% depending on plan (5% shown). 3 trading days minimum. Scalping under ~30s–3min and HFT are prohibited (not modelled). Distinct from the futures firm 'FuturesElite'.",
+  },
+  {
+    firm: "FundedElite",
+    program: "2-Step — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://propfirmmatch.com/prop-firms/fundedelite/challenges",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "2-Step Phase 2 (5% target). Same 8% static max loss.",
+  },
+
+  // --- Maven (Maven Trading) ---
+  {
+    firm: "Maven",
+    program: "1-Step",
+    profitTargetPct: 8,
+    maxDrawdownPct: 5,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://propjournal.net/prop-firms/maven-trading/rules",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "Maven 1-Step: 8% target, 5% trailing max drawdown, 3% daily loss, no minimum days.",
+  },
+  {
+    firm: "Maven",
+    program: "2-Step — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 4,
+    minTradingDays: 4,
+    assetClass: "forex",
+    sourceUrl: "https://propjournal.net/prop-firms/maven-trading/rules",
+    notes:
+      "Maven 2-Step Phase 1 (8% target). The 1-step's trailing model becomes an 8% static max drawdown here, with a 4% daily loss and 4 minimum trading days.",
+  },
+  {
+    firm: "Maven",
+    program: "2-Step — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 8,
+    drawdownType: "static",
+    dailyLossLimitPct: 4,
+    minTradingDays: 4,
+    assetClass: "forex",
+    sourceUrl: "https://propjournal.net/prop-firms/maven-trading/rules",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Maven 2-Step Phase 2 (5% target). Same 8% static max drawdown and 4% daily loss. Reviewers note a $10K payout cap.",
   },
 ]
 
