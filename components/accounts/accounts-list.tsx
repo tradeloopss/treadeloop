@@ -214,11 +214,15 @@ export function AccountsList({
 
   return (
     <section aria-labelledby="accounts-list-title" className="@container/list rounded-2xl border bg-card p-4 shadow-[0_1px_2px_rgba(20,21,42,0.03)] @[640px]/page:p-5">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <h2 id="accounts-list-title" className="text-base leading-6 font-semibold text-foreground @[480px]/list:text-lg">
+      {/* The title with "+ Add account" beside it — the one place to add an
+          account, always at the top of the list. Wide cards keep everything
+          on one row; narrow ones put the smaller actions underneath, and the
+          narrowest give the button a full-width row of its own. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-3">
+        <h2 id="accounts-list-title" className="me-auto text-base leading-6 font-semibold text-foreground @[480px]/list:text-lg">
           {t("Connected accounts")}
         </h2>
-        <div className="flex items-center gap-1.5">
+        <div className="order-last flex w-full items-center justify-between gap-1.5 @[640px]/list:order-none @[640px]/list:w-auto @[640px]/list:justify-end">
           {/* Essential shows its allowance ("2 of 3 accounts"), Pro just the count. */}
           <span className="me-1 text-[13px] whitespace-nowrap text-muted-foreground tabular-nums">
             {usage
@@ -244,6 +248,9 @@ export function AccountsList({
             </Button>
           )}
         </div>
+        <Button onClick={onConnect} className="h-11 w-full shrink-0 rounded-[9px] px-3.5 font-semibold hover:bg-primary/90 @[340px]/list:h-10 @[340px]/list:w-auto @[480px]/list:px-4">
+          <Plus className="size-4" /> {t("Add account")}
+        </Button>
       </div>
 
       <div className="mt-4 overflow-hidden rounded-xl border">

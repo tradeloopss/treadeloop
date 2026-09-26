@@ -15,12 +15,14 @@ export default function AccountsLoading() {
             <Bar className="h-8 w-40" />
             <Bar className="h-4 w-80 max-w-full" />
           </div>
-          <Bar className="h-10 w-32 rounded-[9px]" />
         </div>
 
         <div className="grid items-start gap-5 @[1100px]/page:grid-cols-[minmax(0,1fr)_300px]">
           <div className="rounded-2xl border bg-card p-4 @[640px]/page:p-5">
-            <Bar className="h-5 w-44" />
+            <div className="flex items-center justify-between gap-3">
+              <Bar className="h-5 w-44" />
+              <Bar className="h-10 w-32 rounded-[9px]" />
+            </div>
             <div className="mt-4 overflow-hidden rounded-xl border">
               {Array.from({ length: 4 }, (_, i) => (
                 <div key={i} className="flex min-h-[60px] items-center gap-3 border-b px-4 py-2.5 last:border-b-0">

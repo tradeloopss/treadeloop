@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ChevronRight, Plus } from "lucide-react"
+import { ChevronRight } from "lucide-react"
 import type { TradingViewPairingView } from "@/app/actions/tradingview"
-import { Button } from "@/components/ui/button"
 import { useT } from "@/components/locale-provider"
 import { AddAccountModal, type AddAccountRequest } from "@/components/accounts/add-account-modal"
 import { AccountsList } from "@/components/accounts/accounts-list"
@@ -13,9 +12,9 @@ import { SecurityCard } from "@/components/accounts/security-card"
 import type { HubAccount, HubConnection, PlatformId } from "@/components/accounts/types"
 import type { PlanUsage } from "@/lib/plan-allowance"
 
-// Accounts = where trades come from: the page header (breadcrumb, "+ Add
-// account"), the list of accounts with their health, and a short note on how
-// syncing works. Adding an account — from the header, the list, Reconnect or
+// Accounts = where trades come from: the page header (breadcrumb, title),
+// the list of accounts with their health — "+ Add account" sits in its header —
+// and a short note on how syncing works. Adding an account — from the list, Reconnect or
 // /accounts?connect= — happens in the Add account window (choose a platform →
 // connect → verify, reusing each platform's own form).
 //
@@ -78,10 +77,6 @@ export function AccountsHub({
               <span className="hidden @[640px]/page:inline">{t("Manage your connected trading accounts and choose where TradeLoop gets your trades.")}</span>
             </p>
           </div>
-          <Button onClick={() => openModal()} className="h-10 shrink-0 rounded-[9px] px-3 font-semibold hover:bg-primary/90 @[640px]/page:px-4">
-            <Plus className="size-4" />
-            {t("Add account")}
-          </Button>
         </header>
 
         {/* ≥ 1100px: the list, with the "how it works" note in a side column
