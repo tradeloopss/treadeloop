@@ -56,7 +56,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           aria-hidden={locked || undefined}
           inert={locked || undefined}
         >
-          <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} />
+          <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} isPro={plan === "pro"} />
           <main className="flex-1 overflow-y-auto">
             <AnnouncementBanners items={live} />
             {children}

@@ -15,16 +15,18 @@
 import { db } from "@/lib/db"
 import { rithmicConnections } from "@/lib/db/schema"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
+import { getRithmicSyncIntervalMs } from "@/lib/app-settings"
 
 const SYNC_INTERVAL_MS = 60_000
-// A connection synced within this window is skipped. register() (and the
-// runAllConnections it fires) runs on every server boot, so on a platform
-// that spins up a fresh instance per request each cold start would otherwise
-// re-sync every connection immediately — piling concurrent logins onto the
-// same account (Rithmic allows only one session per login, so the extras are
-// refused with "permission denied") and, worse, colliding with a user who's
-// actively connecting that same login right then. Skipping the recently-synced
-// keeps auto-sync to roughly its interval regardless of how often it's kicked.
+// Floor for the skip window: a connection synced within it is skipped.
+// register() (and the runAllConnections it fires) runs on every server boot, so
+// on a platform that spins up a fresh instance per request each cold start
+// would otherwise re-sync every connection immediately — piling concurrent
+// logins onto the same account (Rithmic allows only one session per login, so
+// the extras are refused with "permission denied") and, worse, colliding with a
+// user who's actively connecting that same login right then. The actual gap is
+// max(this, adminInterval − 15s), so it also honors the admin-chosen auto-sync
+// period (lib/app-settings) — a longer period simply skips more ticks.
 const MIN_RESYNC_GAP_MS = 45_000
 
 // Exponential backoff for a connection that keeps failing. Rithmic throttles
@@ -60,8 +62,12 @@ export interface AutoSyncSummary {
 export async function runAllConnections(): Promise<AutoSyncSummary> {
   const connections = await db.select().from(rithmicConnections)
   const now = Date.now()
+  // The admin-configured auto-sync period sets how often each connection syncs;
+  // subtract a small slack so an "every 1 minute" setting isn't pushed to ~2min
+  // by a tick landing just under the window. Never below the cold-start floor.
+  const gap = Math.max((await getRithmicSyncIntervalMs()) - 15_000, MIN_RESYNC_GAP_MS)
   const due = connections.filter((c) => {
-    if (c.lastSyncedAt && now - c.lastSyncedAt.getTime() < MIN_RESYNC_GAP_MS) return false
+    if (c.lastSyncedAt && now - c.lastSyncedAt.getTime() < gap) return false
     const b = backoff.get(c.id)
     return !b || now >= b.nextAttempt
   })

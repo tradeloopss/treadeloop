@@ -11,6 +11,7 @@ export interface CatalogOption {
   id: number // rule_version id
   firmSlug: string
   firmName: string
+  assetClass: string // "futures" | "forex" — the setup picker filters by this
   programSlug: string
   programName: string
   accountSize: number | null

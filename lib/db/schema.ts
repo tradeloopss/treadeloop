@@ -648,6 +648,16 @@ export const announcements = pgTable("announcements", {
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
 
+// Small global key/value store for admin-tunable settings (e.g. the Rithmic
+// auto-sync interval). One row per key; the value is JSON so a setting can be a
+// number, string or object. Written by admins through server actions and read
+// by the background sync loop.
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
 // Sign-ins, failed attempts, password and 2FA changes — written by the auth
 // hook in lib/security.ts, read by the admin Security page.
 export const securityEvents = pgTable(

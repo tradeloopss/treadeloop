@@ -13,6 +13,7 @@ import { logAdminAction } from "@/lib/admin/audit"
 import { isAdminRole, type AdminRole } from "@/lib/admin/access"
 import { isOwnerEmail } from "@/lib/subscription"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
+import { setRithmicSyncIntervalMs, RITHMIC_SYNC_INTERVAL_OPTIONS } from "@/lib/app-settings"
 import { sendEmail } from "@/lib/email"
 import { importCsvText, logImport } from "@/lib/trade-importer"
 import * as whop from "@/lib/admin/whop"
@@ -332,6 +333,18 @@ export async function resyncAllRithmic() {
       }
     })
     return `Re-syncing ${connections.length} Rithmic connection${connections.length === 1 ? "" : "s"} — results appear below as they finish.`
+  })
+}
+
+// How often background sync re-syncs each Rithmic connection. Stored globally
+// (lib/app-settings) and read by the sync loop.
+export async function setRithmicSyncInterval(ms: number) {
+  return run(async () => {
+    const admin = await assertAdmin({ brokers: ["sync"] })
+    const applied = await setRithmicSyncIntervalMs(ms)
+    await logAdminAction(admin, "broker.set_sync_interval", null, { broker: "rithmic", ms: applied })
+    const label = RITHMIC_SYNC_INTERVAL_OPTIONS.find((o) => o.ms === applied)?.label ?? `${Math.round(applied / 60_000)} min`
+    return `Rithmic auto-sync period set to “${label}”.`
   })
 }
 

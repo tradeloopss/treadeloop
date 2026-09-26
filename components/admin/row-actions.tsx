@@ -1,10 +1,10 @@
 "use client"
 
-import { useTransition } from "react"
+import { useState, useTransition } from "react"
 import { toast } from "sonner"
 import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { dismissImport, forceRithmicSync, resyncAllRithmic, retryImport, revokeGrant, setAnnouncementActive, type ActionResult } from "@/app/actions/admin"
+import { dismissImport, forceRithmicSync, resyncAllRithmic, retryImport, revokeGrant, setAnnouncementActive, setRithmicSyncInterval, type ActionResult } from "@/app/actions/admin"
 
 export function ForceSyncButton({ connectionId }: { connectionId: number }) {
   const [pending, startTransition] = useTransition()
@@ -98,4 +98,42 @@ export function DismissImportButton({ importId }: { importId: number }) {
 
 export function ResyncAllButton() {
   return <ActionButton label="Re-sync all Rithmic" busyLabel="Starting…" variant="default" action={() => resyncAllRithmic()} confirmText="Sync every Rithmic connection now?" />
+}
+
+// How often background sync re-syncs each Rithmic connection. Options come from
+// the server (lib/app-settings) so this client bundle stays free of server code.
+export function RithmicSyncIntervalControl({ currentMs, options }: { currentMs: number; options: { label: string; ms: number }[] }) {
+  const [pending, startTransition] = useTransition()
+  const [value, setValue] = useState(currentMs)
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={value}
+        onChange={(e) => setValue(Number(e.target.value))}
+        disabled={pending}
+        aria-label="Rithmic auto-sync period"
+        className="rounded-md border bg-background px-2.5 py-1.5 text-sm"
+      >
+        {options.map((o) => (
+          <option key={o.ms} value={o.ms}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={pending || value === currentMs}
+        onClick={() =>
+          startTransition(async () => {
+            const result = await setRithmicSyncInterval(value)
+            if (result.ok) toast.success(result.message ?? "Saved.")
+            else toast.error(result.error)
+          })
+        }
+      >
+        {pending ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  )
 }

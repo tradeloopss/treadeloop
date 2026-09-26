@@ -119,7 +119,7 @@ export function PropMaxAccountDetail({
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-6">
       <Link href="/propfirm-max" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> PropFirm Max
+        <ArrowLeft className="size-4" /> Propfirm Tracker
       </Link>
 
       {/* Header */}
@@ -181,7 +181,7 @@ export function PropMaxAccountDetail({
         <div className="min-w-0">
           {!evaln || !account.binding ? (
             <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-              This account isn&apos;t set up under PropFirm Max yet. Set it up on the main page to see its rules.
+              This account isn&apos;t set up under Propfirm Tracker yet. Set it up on the main page to see its rules.
             </div>
           ) : (
             <Tabs defaultValue={initialTab}>
@@ -733,7 +733,7 @@ function SettingsTab({ account }: { account: PropMaxAccountView }) {
   const b = account.binding!
   const [pending, startTransition] = useTransition()
   function untrack() {
-    if (!confirm(`Stop tracking ${account.name} in PropFirm Max? Its trades and the old tracker are untouched.`)) return
+    if (!confirm(`Stop tracking ${account.name} in Propfirm Tracker? Its trades and the old tracker are untouched.`)) return
     startTransition(async () => {
       try {
         await removePropMaxAccount(account.accountId)
@@ -767,7 +767,7 @@ function SettingsTab({ account }: { account: PropMaxAccountView }) {
       </div>
       <div className="rounded-xl border border-[var(--loss)]/30 bg-[var(--loss)]/5 p-4">
         <p className="text-sm font-medium">Stop tracking</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">Removes this account from PropFirm Max. Its trades and the old tracker are untouched.</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Removes this account from Propfirm Tracker. Its trades and the old tracker are untouched.</p>
         <Button variant="destructive" size="sm" className="mt-3" onClick={untrack} disabled={pending}>
           {pending ? "Removing…" : "Stop tracking this account"}
         </Button>

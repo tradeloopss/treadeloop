@@ -1138,7 +1138,7 @@ function EnableExecutionDialog({ accountId, accountName, onClose }: { accountId:
           </div>
           <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
             <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
-            On a funded account, orders are still checked against your PropFirm Max rules first — a rule-breaking order is blocked before it reaches the broker.
+            On a funded account, orders are still checked against your Propfirm Tracker rules first — a rule-breaking order is blocked before it reaches the broker.
           </p>
         </div>
         <DialogFooter>

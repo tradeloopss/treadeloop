@@ -649,13 +649,19 @@ export async function getSyncStats() {
   }
 }
 
-export async function listSyncRuns(opts: { status?: string; userId?: string; limit?: number }) {
+export async function listSyncRuns(opts: { status?: string; userId?: string; q?: string; limit?: number }) {
   const params: unknown[] = []
   const where: string[] = []
   if (opts.status === "error") where.push(`r.status = 'error'`)
   if (opts.userId) {
     params.push(opts.userId)
     where.push(`r."userId" = $${params.length}`)
+  }
+  // Search by client email or broker name ("rithmic" / "metatrader").
+  if (opts.q?.trim()) {
+    params.push(`%${opts.q.trim()}%`)
+    const p = `$${params.length}`
+    where.push(`(u.email ilike ${p} or r.broker ilike ${p})`)
   }
   return q<{ id: number; broker: string; connectionId: number; userId: string; email: string | null; trigger: string; status: string; imported: number | null; error: string | null; durationMs: number | null; createdAt: Date }>(
     `select r.id, r.broker, r."connectionId", r."userId", u.email, r.trigger, r.status, r.imported, r.error, r."durationMs", r."createdAt"

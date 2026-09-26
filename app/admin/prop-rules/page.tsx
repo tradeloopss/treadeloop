@@ -51,7 +51,7 @@ export default async function AdminPropRulesPage() {
     <div>
       <AdminPageHeader
         title="Prop firm rules"
-        description="The sourced, versioned rule catalog PropFirm Max evaluates against. Seed it from the researched presets, then publish new versions as firms change their rules — each version keeps its source and history."
+        description="The sourced, versioned rule catalog Propfirm Tracker evaluates against. Seed it from the researched presets, then publish new versions as firms change their rules — each version keeps its source and history."
         action={<PropRulesActions programs={programOptions} seedOnly />}
       />
       <div className="space-y-6 p-4 sm:p-6">

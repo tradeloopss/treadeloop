@@ -2,20 +2,23 @@ import Link from "next/link"
 import { requireAdmin } from "@/lib/admin/guard"
 import { roleCan } from "@/lib/admin/access"
 import { getBrokerHealth, getSyncStats, listSyncRuns } from "@/lib/admin/metrics"
-import { ForceSyncButton, ResyncAllButton } from "@/components/admin/row-actions"
+import { getRithmicSyncIntervalMs, RITHMIC_SYNC_INTERVAL_OPTIONS } from "@/lib/app-settings"
+import { ForceSyncButton, ResyncAllButton, RithmicSyncIntervalControl } from "@/components/admin/row-actions"
 import { AdminPageHeader, EmptyRow, Panel, StatePill, StatRow, StatTile, SyncStatus, fmtAgo, fmtNumber, fmtPercent } from "@/components/admin/ui"
 import { cn } from "@/lib/utils"
 
 const TRIGGER_LABELS: Record<string, string> = { auto: "Background", manual: "User", admin: "Admin", connect: "On connect" }
 
-export default async function AdminBrokersPage({ searchParams }: { searchParams: Promise<{ runs?: string }> }) {
+export default async function AdminBrokersPage({ searchParams }: { searchParams: Promise<{ runs?: string; q?: string }> }) {
   const admin = await requireAdmin({ brokers: ["view"] })
   const canSync = roleCan(admin.role, { brokers: ["sync"] })
-  const { runs: runsView = "error" } = await searchParams
-  const [health, sync, runs] = await Promise.all([
+  const { runs: runsView = "error", q = "" } = await searchParams
+  const query = q.trim()
+  const [health, sync, runs, syncIntervalMs] = await Promise.all([
     getBrokerHealth(),
     getSyncStats(),
-    listSyncRuns({ status: runsView === "error" ? "error" : undefined, limit: 60 }),
+    listSyncRuns({ status: runsView === "error" ? "error" : undefined, q: query, limit: 60 }),
+    getRithmicSyncIntervalMs(),
   ])
   const problems = health.connections.filter((c) => c.health !== "healthy")
   const rithmicSync = sync.perBroker.find((b) => b.broker === "rithmic")
@@ -47,6 +50,15 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
           <p className="rounded-xl border border-[var(--chart-4)]/40 bg-[var(--chart-4)]/10 px-4 py-3 text-sm">
             {sync.rateLimited24h} sync{sync.rateLimited24h === 1 ? "" : "s"} in the last 24 hours failed with a rate-limit or throttling error from the broker.
           </p>
+        )}
+
+        {canSync && (
+          <Panel
+            title="Rithmic auto-sync period"
+            description="How often background sync re-syncs each Rithmic connection. The VPS timer still ticks every 60s — a longer period just syncs each account less often (and eases Rithmic's cloud-IP throttling)."
+          >
+            <RithmicSyncIntervalControl currentMs={syncIntervalMs} options={RITHMIC_SYNC_INTERVAL_OPTIONS} />
+          </Panel>
         )}
 
         <Panel
@@ -91,15 +103,37 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
           title="Sync runs"
           description="One row per sync attempt: the background job, a user's Sync now, an admin's forced sync, or the first sync on connect. Kept for 14 days."
           action={
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <form method="get" className="flex items-center gap-1.5">
+                <input type="hidden" name="runs" value={runsView} />
+                <input
+                  type="search"
+                  name="q"
+                  defaultValue={query}
+                  placeholder="Search broker or email"
+                  className="h-8 w-44 rounded-md border bg-background px-2.5 text-xs"
+                />
+                <button type="submit" className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
+                  Search
+                </button>
+              </form>
               {[
                 ["error", "Failures"],
                 ["all", "All"],
               ].map(([value, label]) => (
-                <Link key={value} href={`?runs=${value}`} className={cn("rounded-full border px-3 py-1 text-xs", runsView === value ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted")}>
+                <Link
+                  key={value}
+                  href={`?runs=${value}${query ? `&q=${encodeURIComponent(query)}` : ""}`}
+                  className={cn("rounded-full border px-3 py-1 text-xs", runsView === value ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted")}
+                >
                   {label}
                 </Link>
               ))}
+              {query && (
+                <Link href={`?runs=${runsView}`} className="rounded-full border px-3 py-1 text-xs hover:bg-muted">
+                  Clear
+                </Link>
+              )}
             </div>
           }
         >
@@ -143,7 +177,7 @@ export default async function AdminBrokersPage({ searchParams }: { searchParams:
                     </td>
                   </tr>
                 ))}
-                {runs.length === 0 && <EmptyRow colSpan={6}>{runsView === "error" ? "No failed syncs recorded." : "No syncs recorded yet."}</EmptyRow>}
+                {runs.length === 0 && <EmptyRow colSpan={6}>{query ? `No syncs match “${query}”.` : runsView === "error" ? "No failed syncs recorded." : "No syncs recorded yet."}</EmptyRow>}
               </tbody>
             </table>
           </div>

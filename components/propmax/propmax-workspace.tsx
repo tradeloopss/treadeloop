@@ -443,7 +443,7 @@ function RowMenu({ accountId, name }: { accountId: number; name: string }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   function untrack() {
-    if (!confirm(`Stop tracking ${name} in PropFirm Max?`)) return
+    if (!confirm(`Stop tracking ${name} in Propfirm Tracker?`)) return
     startTransition(async () => {
       try {
         await removePropMaxAccount(accountId)

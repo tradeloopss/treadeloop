@@ -45,22 +45,37 @@ import { LanguageSwitcher } from "@/components/language-switcher"
 import { LOCALE_CHOICE_OFFERED } from "@/lib/i18n"
 import { useT } from "@/components/locale-provider"
 
-const links = [
+type NavLink = { href: string; label: string; icon: typeof LayoutDashboard; gate?: "pro" | "soon" }
+
+// "gate" marks a Pro-only tab: non-Pro users see a badge and a locked/coming-soon
+// page. "pro" = live but Pro-only; "soon" = Pro feature still being finished
+// (Propfirm Tracker). Trades Manager sits directly under Calendar by request.
+const links: NavLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trades", label: "Trades", icon: ListChecks },
-  { href: "/trade-manager", label: "Trades Manager", icon: Activity },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
+  { href: "/trade-manager", label: "Trades Manager", icon: Activity, gate: "pro" },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/propfirm", label: "Prop Firm", icon: ShieldCheck },
-  { href: "/propfirm-max", label: "PropFirm Max", icon: Gauge },
+  { href: "/propfirm-max", label: "Propfirm Tracker", icon: Gauge, gate: "soon" },
   { href: "/payouts", label: "Payouts", icon: Banknote },
 ]
 
 const COLLAPSED_KEY = "sidebarCollapsed"
 
-export function DashboardSidebar({ userName, userImage, isAdmin = false }: { userName: string; userImage?: string | null; isAdmin?: boolean }) {
+export function DashboardSidebar({
+  userName,
+  userImage,
+  isAdmin = false,
+  isPro = false,
+}: {
+  userName: string
+  userImage?: string | null
+  isAdmin?: boolean
+  isPro?: boolean
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const t = useT()
@@ -187,6 +202,10 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
           {links.map((link) => {
             const active = pathname === link.href || pathname.startsWith(`${link.href}/`)
             const Icon = link.icon
+            // Pro-only tabs badge non-Pro users ("Soon" while a feature is still
+            // being finished, otherwise "Pro"). The badge is hidden on the
+            // collapsed rail, where there's no room for it.
+            const badge = link.gate && !isPro ? (link.gate === "soon" ? t("Soon") : t("Pro")) : null
             return (
               <Tooltip key={link.href}>
                 <TooltipTrigger
@@ -203,6 +222,11 @@ export function DashboardSidebar({ userName, userImage, isAdmin = false }: { use
                     >
                       <Icon className="size-4 shrink-0" />
                       <span className={cn(collapsed && "md:hidden")}>{t(link.label)}</span>
+                      {badge && (
+                        <span className={cn("ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground uppercase", collapsed && "md:hidden")}>
+                          {badge}
+                        </span>
+                      )}
                     </Link>
                   }
                 />

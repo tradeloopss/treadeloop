@@ -931,6 +931,161 @@ export const PROP_FIRM_PRESETS: PropFirmPreset[] = [
     notes:
       "Maven 2-Step Phase 2 (5% target). Same 8% static max drawdown and 4% daily loss. Reviewers note a $10K payout cap.",
   },
+
+  // ===========================================================================
+  // ADDITIONAL PLANS (added 2026-09-27) — alternate models for firms already
+  // listed above (1-step vs 2-step, Standard vs Pro), so a firm's other
+  // published challenges are selectable too. Same sourcing discipline.
+  // ===========================================================================
+
+  // --- FundedNext (1-step) ---
+  {
+    firm: "FundedNext",
+    program: "Stellar 1-Step",
+    profitTargetPct: 10,
+    maxDrawdownPct: 6,
+    drawdownType: "static",
+    dailyLossLimitPct: 3,
+    minTradingDays: 2,
+    assetClass: "forex",
+    sourceUrl: "https://fundednext.com/cfds/stellar-1-step",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Stellar 1-Step CFD challenge: 10% target, 6% overall max loss (equity must stay above 94% of the initial balance — static) and 3% daily loss. At least 2 trading days; 5-day reward cycle.",
+  },
+
+  // --- FundingPips (1-step) ---
+  {
+    firm: "FundingPips",
+    program: "1-Step Standard",
+    profitTargetPct: 10,
+    maxDrawdownPct: 6,
+    drawdownType: "static",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://fundingpips.com/",
+    funded: { consistencyPct: 35, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "1-Step Standard: 10% target, 6% static max loss, 3% daily loss, no minimum trading days. A 35% best-day rule applies to funded payouts.",
+  },
+
+  // --- BrightFunded (2-Step Classic) ---
+  {
+    firm: "BrightFunded",
+    program: "2-Step Classic — Phase 1",
+    profitTargetPct: 10,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 5,
+    assetClass: "forex",
+    sourceUrl: "https://brightfunded.com/",
+    notes:
+      "2-Step Classic Phase 1 (10% target). More room than the Bright plan: 5% daily loss and a 10% static max loss (both fixed from the starting balance). 5 trading days per phase.",
+  },
+  {
+    firm: "BrightFunded",
+    program: "2-Step Classic — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 5,
+    assetClass: "forex",
+    sourceUrl: "https://brightfunded.com/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "2-Step Classic Phase 2 (5% target). Same 10% static max loss and 5% daily loss.",
+  },
+
+  // --- The5ers (Bootcamp) ---
+  {
+    firm: "The5ers",
+    program: "Bootcamp (3-step)",
+    profitTargetPct: 6,
+    maxDrawdownPct: 5,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://the5ers.com/challenge-programs-bootcamp-high-stakes-hyper-growth-explained/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "Bootcamp is a low-cost 3-step scaling program: three 6% steps (then 5% once funded) against a strict 5% max loss and 5% daily loss (a 3% daily pause applies only once funded). A stop-loss is required on every trade (not modelled). This preset represents one 6% step.",
+  },
+
+  // --- Alpha Capital (Alpha Pro 6% track) ---
+  {
+    firm: "Alpha Capital",
+    program: "Alpha Pro 6% — Phase 1",
+    profitTargetPct: 6,
+    maxDrawdownPct: 6,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://alphacapitalgroup.uk/",
+    notes:
+      "Alpha Pro 6% two-step, Phase 1: a 6% target with a matching 6% static max loss (1:1). Daily loss 3–5% off the day's start (5% shown). 3 trading days per phase.",
+  },
+  {
+    firm: "Alpha Capital",
+    program: "Alpha Pro 6% — Phase 2",
+    profitTargetPct: 6,
+    maxDrawdownPct: 6,
+    drawdownType: "static",
+    dailyLossLimitPct: 5,
+    minTradingDays: 3,
+    assetClass: "forex",
+    sourceUrl: "https://alphacapitalgroup.uk/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes: "Alpha Pro 6% Phase 2: another 6% target within the same 6% static max loss.",
+  },
+
+  // --- AquaFunded (2-Step Pro, trailing) ---
+  {
+    firm: "AquaFunded",
+    program: "2-Step Pro — Phase 1",
+    profitTargetPct: 8,
+    maxDrawdownPct: 10,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.aquafunded.com/en/articles/15281229-2-step-pro",
+    notes:
+      "2-Step Pro Phase 1 (8% target). Unlike the Standard model, the 10% max loss is trailing (relative to peak); 3% daily loss, reset 00:00 UTC.",
+  },
+  {
+    firm: "AquaFunded",
+    program: "2-Step Pro — Phase 2",
+    profitTargetPct: 5,
+    maxDrawdownPct: 10,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 3,
+    minTradingDays: null,
+    assetClass: "forex",
+    sourceUrl: "https://help.aquafunded.com/en/articles/15281229-2-step-pro",
+    funded: { consistencyPct: 15, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "2-Step Pro Phase 2 (5% target). Same 10% trailing max loss and 3% daily loss; funded payouts keep the 15% best-day rule.",
+  },
+
+  // --- Hola Prime (1-step) ---
+  {
+    firm: "Hola Prime",
+    program: "1-Step Prime",
+    profitTargetPct: 10,
+    maxDrawdownPct: 6,
+    drawdownType: "trailing",
+    dailyLossLimitPct: 3,
+    minTradingDays: 2,
+    assetClass: "forex",
+    sourceUrl: "https://holaprime.com/",
+    funded: { consistencyPct: null, minPayoutDays: null, minDayProfit: null },
+    notes:
+      "1-Step Prime: 10% target, 6% max drawdown (trailing), 3% daily loss, at least 2 trading days. Some sources list a 6%-target variant — confirm your account type.",
+  },
 ]
 
 export function getPresetPrograms(firm: string): PropFirmPreset[] {

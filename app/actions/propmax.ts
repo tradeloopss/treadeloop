@@ -19,7 +19,7 @@ import type { CatalogOption, PropMaxData, PropMaxAlertView, PropMaxDailyRow, Pro
 // in-force, sourced rule version.
 async function buildCatalog(): Promise<CatalogOption[]> {
   const [firms, programs, versions] = await Promise.all([
-    db.select({ id: propFirm.id, slug: propFirm.slug, name: propFirm.name }).from(propFirm),
+    db.select({ id: propFirm.id, slug: propFirm.slug, name: propFirm.name, assetClass: propFirm.assetClass }).from(propFirm),
     db.select({ id: propProgram.id, firmId: propProgram.firmId, slug: propProgram.slug, name: propProgram.name }).from(propProgram),
     db
       .select({
@@ -46,6 +46,7 @@ async function buildCatalog(): Promise<CatalogOption[]> {
       id: v.id,
       firmSlug: firm.slug,
       firmName: firm.name,
+      assetClass: firm.assetClass ?? "futures",
       programSlug: program.slug,
       programName: program.name,
       accountSize: v.accountSize,

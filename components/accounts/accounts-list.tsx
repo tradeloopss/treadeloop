@@ -172,7 +172,12 @@ export function AccountsList({
     return {
       ...accountActions,
       onSync: c.canSync ? () => void syncOne(c) : undefined,
-      onReconnect: c.reconnect && c.health === "error" ? () => onReconnect(c.reconnect!) : undefined,
+      // Offer Reconnect whenever a connection is failing or needs the user
+      // (error) or is failing-but-retrying (warning) — not only on a hard
+      // error — so a dropped account is one click from being restored and
+      // auto-syncing again. `reconnect` is only set for platforms we can
+      // re-auth (MT5/MT4/Tradovate).
+      onReconnect: c.reconnect && (c.health === "error" || c.health === "warning") ? () => onReconnect(c.reconnect!) : undefined,
       onDisconnect: () => setConfirm({ kind: "disconnect", connection: c }),
     }
   }

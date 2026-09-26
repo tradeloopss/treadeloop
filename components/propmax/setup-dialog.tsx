@@ -43,12 +43,28 @@ export function PropMaxSetupDialog({
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
 
+  // Pick the market first (futures vs forex) so the firm list isn't a wall of
+  // every firm — a futures account never wants a forex firm and vice-versa.
+  // Seed it from a detected firm's asset class when we have one.
+  const detectedMarket = useMemo(
+    () => (detection?.firmSlug ? (catalog.find((c) => c.firmSlug === detection.firmSlug)?.assetClass ?? "") : ""),
+    [catalog, detection?.firmSlug],
+  )
+  const [market, setMarket] = useState<string>(detectedMarket)
   const [firmSlug, setFirmSlug] = useState<string>(detection?.firmSlug ?? "")
   const [programSlug, setProgramSlug] = useState<string>(detection?.programSlug ?? "")
   const [sizeStr, setSizeStr] = useState<string>(detection?.accountSize != null ? String(detection.accountSize) : "")
   const [phase, setPhase] = useState<string>("evaluation")
 
-  const firms = useMemo(() => uniqueBy(catalog, (c) => c.firmSlug).map((c) => ({ slug: c.firmSlug, name: c.firmName })), [catalog])
+  // Only offer markets the catalog actually has firms for.
+  const markets = useMemo(() => {
+    const has = new Set(catalog.map((c) => c.assetClass))
+    return ([{ id: "futures", label: "Futures" }, { id: "forex", label: "Forex" }] as const).filter((m) => has.has(m.id))
+  }, [catalog])
+  const firms = useMemo(
+    () => uniqueBy(catalog.filter((c) => !market || c.assetClass === market), (c) => c.firmSlug).map((c) => ({ slug: c.firmSlug, name: c.firmName })),
+    [catalog, market],
+  )
   const programs = useMemo(
     () => uniqueBy(catalog.filter((c) => c.firmSlug === firmSlug), (c) => c.programSlug).map((c) => ({ slug: c.programSlug, name: c.programName })),
     [catalog, firmSlug],
@@ -62,6 +78,12 @@ export function PropMaxSetupDialog({
 
   const match = scoped.find((c) => String(c.accountSize) === sizeStr && c.phase === phase)
 
+  function pickMarket(v: string) {
+    setMarket(v)
+    setFirmSlug("")
+    setProgramSlug("")
+    setSizeStr("")
+  }
   function pickFirm(v: string) {
     setFirmSlug(v)
     setProgramSlug("")
@@ -94,7 +116,7 @@ export function PropMaxSetupDialog({
       <DialogTrigger render={trigger as React.ReactElement} />
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Set up PropFirm Max</DialogTitle>
+          <DialogTitle>Set up Propfirm Tracker</DialogTitle>
           <DialogDescription>
             Choose the firm, program, account size and phase for <span className="font-medium text-foreground">{accountName}</span>. Only combinations
             with verified, sourced rules are offered — nothing is guessed.
@@ -106,11 +128,32 @@ export function PropMaxSetupDialog({
         )}
 
         <div className="grid gap-4 py-1">
+          {markets.length > 1 && (
+            <div className="grid gap-1.5">
+              <Label>Market</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {markets.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => pickMarket(m.id)}
+                    className={
+                      "rounded-md border px-3 py-2 text-sm font-medium transition-colors " +
+                      (market === m.id ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted")
+                    }
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-1.5">
             <Label>Prop firm</Label>
-            <Select value={firmSlug} onValueChange={(v) => v && pickFirm(v)}>
+            <Select value={firmSlug} onValueChange={(v) => v && pickFirm(v)} disabled={!market}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a firm" />
+                <SelectValue placeholder={market ? "Select a firm" : "Pick a market first"} />
               </SelectTrigger>
               <SelectContent>
                 {firms.map((f) => (
