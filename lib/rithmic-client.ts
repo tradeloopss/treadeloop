@@ -134,26 +134,46 @@ function collectUntilRpCode(root: protobuf.Root, ws: WebSocket, typeName: string
   })
 }
 
-// Collects a fill-history response. Unlike the generic list collector, a
-// message is treated as a fill whenever it carries a symbol — including the
-// terminating message (Rithmic marks the last part of a response with
-// rp_code, and a single-fill response can carry its one fill on that same
-// message, which the generic collector would discard).
-function collectFills(root: protobuf.Root, ws: WebSocket, timeoutMs = 12000): Promise<{ fills: any[]; terminal: any }> {
-  return new Promise((resolve, reject) => {
+// Collects a fill-history response. A message is treated as a fill whenever it
+// carries a symbol — including the terminating message (Rithmic marks the last
+// part of a response with rp_code, and a single-fill response can carry its one
+// fill on that same message).
+//
+// Like collectExecutions, this RESOLVES on the terminator, on quiet, or at a
+// hard cap, and NEVER rejects. That matters: under mild relay throttle the
+// rp_code terminator often arrives slowly (or not at all for an empty window),
+// and the old fixed-timeout reject aborted the entire windowed pull and
+// discarded fills that had already streamed in — surfacing as the recurring
+// "Timed out waiting for ResponseShowFillHistory" sync error. Resolving with
+// whatever arrived (terminal = null when we resolve on quiet) can't lose fills;
+// a genuine request failure still comes back promptly with an error rp_code.
+const FILL_FIRST_MSG_MS = 6000
+const FILL_IDLE_MS = 3000
+const FILL_HARD_CAP_MS = 12000
+function collectFills(root: protobuf.Root, ws: WebSocket): Promise<{ fills: any[]; terminal: any | null }> {
+  return new Promise((resolve) => {
     const fills: any[] = []
-    const timeout = setTimeout(() => {
+    let idle: ReturnType<typeof setTimeout>
+    const finish = (terminal: any | null) => {
+      clearTimeout(hardCap)
+      clearTimeout(idle)
       ws.off("message", onMessage)
-      reject(new Error("Timed out waiting for ResponseShowFillHistory"))
-    }, timeoutMs)
+      resolve({ fills, terminal })
+    }
+    const bumpIdle = (ms: number) => {
+      clearTimeout(idle)
+      idle = setTimeout(() => finish(null), ms)
+    }
+    const hardCap = setTimeout(() => finish(null), FILL_HARD_CAP_MS)
+    bumpIdle(FILL_FIRST_MSG_MS)
     const onMessage = (data: WebSocket.RawData) => {
       const msg = decode(root, "ResponseShowFillHistory", data)
       if (msg.symbol) fills.push(msg)
       if (msg.rpCode && msg.rpCode.length > 0) {
-        clearTimeout(timeout)
-        ws.off("message", onMessage)
-        resolve({ fills, terminal: msg })
+        finish(msg)
+        return
       }
+      bumpIdle(FILL_IDLE_MS)
     }
     ws.on("message", onMessage)
   })
@@ -844,11 +864,11 @@ async function fetchFillsInSession(
       addParsedFill(byId, account.accountId, f)
     }
   }
-  // A hard ceiling on the whole windowed pull. A single hung request already
-  // aborts (collectFills rejects on timeout), but under mild throttle every
-  // window can answer slowly-but-not-quite-timing-out, and 9 windows × two
-  // index formats of that would still run for minutes — so once the budget is
-  // spent, stop with whatever's in hand rather than dragging the sync out.
+  // A hard ceiling on the whole windowed pull. collectFills now resolves (never
+  // rejects) so one slow window no longer aborts the sync, but under mild
+  // throttle every window can answer slowly, and 9 windows × two index formats
+  // of that would still run for minutes — so once the budget is spent, stop
+  // with whatever's in hand rather than dragging the sync out.
   const fetchDeadline = Date.now() + FILL_HISTORY_BUDGET_MS
   const requestWindow = async (indexFormat: "trade_date" | "ssboe", startIndex: number, finishIndex: number) => {
     ws.send(
@@ -863,8 +883,8 @@ async function fetchFillsInSession(
         maxRecordCount: 10000,
       }),
     )
-    const { fills, terminal } = await collectFills(root, ws, 12000)
-    const rp = terminal.rpCode ?? []
+    const { fills, terminal } = await collectFills(root, ws)
+    const rp = terminal?.rpCode ?? []
     if (rp.length > 0 && rp[0] !== "0" && rp[0] !== "7") {
       throw new Error(`Fill history request failed: ${rp.join(", ")}`)
     }
@@ -901,8 +921,8 @@ async function fetchFillsInSession(
   if (byId.size === 0) {
     windows++
     ws.send(encode(root, "RequestShowFillHistory", { templateId: 3512, fcmId: account.fcmId, ibId: account.ibId, accountId: account.accountId, maxRecordCount: 10000 }))
-    const { fills, terminal } = await collectFills(root, ws, 12000)
-    const rp = terminal.rpCode ?? []
+    const { fills, terminal } = await collectFills(root, ws)
+    const rp = terminal?.rpCode ?? []
     if (!(rp.length > 0 && rp[0] !== "0" && rp[0] !== "7")) {
       lastRp = rp
       raw += fills.length
