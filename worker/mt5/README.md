@@ -120,11 +120,14 @@ ssh root@sync 'systemctl restart mt5-bridge@t1 mt5-bridge@t2 mt4-bridge@m1 mt4-b
 ```
 
 Scripts must reach the server with LF line endings (`.gitattributes` pins
-them; a CRLF `add-broker` fails with `python3: No such file or directory`).
+them; a CRLF `add-broker` fails with `python3
+: No such file or directory`).
 
 **Set up (2026-09-26):** MT5 packs `exness`, `ftmo` (prefix `FTMO`: every
-FTMO-Server/-Demo, incl. free trials); MT4 servers from FTMO (FTMO-Demo,
--Demo2, -Server…-Server4) and Exness (Exness-Real*, Exness-Trial*).
+FTMO-Server/-Demo, incl. free trials), `acgmarkets` (prefixes `ACGMarkets`,
+`ACG`: ACGMarkets-Main…), `fundednext` (prefix `FundedNext`: -Demo…, -Server…);
+MT4 servers from FTMO (FTMO-Demo, -Demo2, -Server…-Server4), Exness
+(Exness-Real*, Exness-Trial*) and FundedNext (FundedNext-Demo, -Server).
 
 The worker's environment: `/etc/tradeloop/db.env` (`DATABASE_URL`, the
 `tradeloop_sync` role) and `/etc/tradeloop/mt5-worker.env`
