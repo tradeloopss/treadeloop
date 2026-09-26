@@ -62,6 +62,9 @@ export function openTradeMetrics(t: OpenTradeInput): OpenTradeMetrics {
 // data — safe to pass to a client component).
 export interface OpenTradeView {
   id: number
+  // Where this row came from: a `trades` row, or a live broker position
+  // snapshot (provider_positions). Provider rows have no stop/target.
+  origin: "trade" | "provider"
   accountId: number | null
   accountName: string
   currency: string

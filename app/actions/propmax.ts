@@ -10,6 +10,8 @@ import { tradingAccounts, propAccount, propFirm, propProgram, propRuleVersion, p
 import { getPropMaxOverview, type PropMaxAccountView } from "@/lib/propmax/account"
 import { seedPropmaxCatalog } from "@/lib/propmax/seed"
 import { deriveAlerts, buildSnapshot } from "@/lib/propmax/alerts"
+import { getAccountOpenPositions } from "@/app/actions/trade-manager"
+import type { OpenTradeView } from "@/lib/trade-manager"
 import type { RuleConfig, RuleType } from "@/lib/propmax/types"
 import type { CatalogOption, PropMaxData, PropMaxAlertView } from "@/lib/propmax/view-types"
 
@@ -113,13 +115,25 @@ export async function getPropMaxData(): Promise<PropMaxData> {
   return { accounts, catalog }
 }
 
-// One account's detail (its evaluation) plus the catalog, for the detail page
-// and its "change rules" picker. Read-only (no snapshot/alert writes here — the
-// main page's load already did that).
-export async function getPropMaxAccountDetail(accountId: number): Promise<{ account: PropMaxAccountView | null; catalog: CatalogOption[] }> {
+// One account's detail (its evaluation) plus the catalog + its open positions,
+// for the detail page. Read-only (no snapshot/alert writes here — the main
+// page's load already did that).
+export async function getPropMaxAccountDetail(
+  accountId: number,
+): Promise<{ account: PropMaxAccountView | null; catalog: CatalogOption[]; positions: OpenTradeView[]; alerts: PropMaxAlertView[] }> {
   const userId = await getUserId()
-  const [accounts, catalog] = await Promise.all([getPropMaxOverview(userId), buildCatalog()])
-  return { account: accounts.find((a) => a.accountId === accountId) ?? null, catalog }
+  const [accounts, catalog, positions, alerts] = await Promise.all([
+    getPropMaxOverview(userId),
+    buildCatalog(),
+    getAccountOpenPositions(accountId),
+    getPropMaxAlerts(),
+  ])
+  return {
+    account: accounts.find((a) => a.accountId === accountId) ?? null,
+    catalog,
+    positions,
+    alerts: alerts.filter((a) => a.accountId === accountId),
+  }
 }
 
 // The user's unacknowledged alerts, newest first, for the alert center.

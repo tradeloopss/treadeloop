@@ -197,6 +197,15 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "wa
   )
 }
 
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-[11px] text-muted-foreground">{label}</p>
+      <p className="truncate text-sm font-semibold tabular-nums">{value}</p>
+    </div>
+  )
+}
+
 function RiskPill({ status }: { status: string }) {
   const meta = STATUS_META[status as keyof typeof STATUS_META] ?? STATUS_META.unknown
   const Icon = status === "breached" ? ShieldAlert : status === "safe" ? ShieldCheck : status === "unknown" || status === "stale" ? HelpCircle : TriangleAlert
@@ -246,6 +255,24 @@ function AccountCard({ account }: { account: PropMaxAccountView }) {
             <Clock className="size-3.5" /> stale
           </span>
         )}
+      </div>
+
+      <div className="mb-4 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-3">
+        <MiniMetric label="Balance" value={formatMoney(account.metrics?.balance ?? account.startingBalance, account.currency)} />
+        <MiniMetric
+          label="Drawdown left"
+          value={(() => {
+            const dd = evaln.rules.find((r) => r.type === "max_drawdown")
+            return dd?.remainingValue != null ? formatMoney(dd.remainingValue, account.currency) : "—"
+          })()}
+        />
+        <MiniMetric
+          label="To target"
+          value={(() => {
+            const pt = evaln.rules.find((r) => r.type === "profit_target")
+            return pt?.remainingValue != null ? formatMoney(pt.remainingValue, account.currency) : "—"
+          })()}
+        />
       </div>
 
       {!b.confirmed && (

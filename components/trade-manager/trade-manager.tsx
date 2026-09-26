@@ -228,9 +228,15 @@ function TradeDrawer({ trade, onClose }: { trade: OpenTradeView | null; onClose:
             </div>
 
             <div className="border-t p-4">
-              <Link href={`/trades?highlight=${trade.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
-                Open in Trades <ExternalLink className="size-3.5" />
-              </Link>
+              {trade.origin === "trade" ? (
+                <Link href={`/trades?highlight=${trade.id}`} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+                  Open in Trades <ExternalLink className="size-3.5" />
+                </Link>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-[var(--gain)]" /> Live position synced from {trade.source ?? "your broker"} — manage it in your platform.
+                </span>
+              )}
             </div>
           </>
         )}
