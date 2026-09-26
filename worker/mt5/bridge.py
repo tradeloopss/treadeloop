@@ -14,6 +14,8 @@ parallelism. Listens on 127.0.0.1 only and requires the shared token.
 """
 
 import argparse
+import ctypes
+import ctypes.wintypes as wt
 import os
 import shutil
 import time
@@ -205,10 +207,17 @@ def pick_filling(info):
 
 
 def ensure_trading_login(account, password, server):
-    """Authenticate the terminal with the given (master) password, forcing a
-    re-login even when it's already on this account — a prior /sync may have
-    logged in read-only, and only a master session can send orders."""
-    if mt5.terminal_info() is None:
+    """Make sure the terminal is a CONNECTED, trade-enabled master session on
+    this account. Crucially, it REUSES an already-good session rather than
+    re-logging in: a re-login is slow and resets the "Algo Trading" toolbar
+    button, which would undo the enable the worker just did and bounce the
+    order again. We only (re)login when the current session can't trade
+    (trade_allowed is false — e.g. it's the read-only investor session from the
+    last /sync, or a fresh terminal)."""
+    term = mt5.terminal_info()
+    if term is not None and term.connected and current_login()[0] == account and term.trade_allowed:
+        return
+    if term is None:
         start_terminal(account, password, server)
     elif not mt5.login(account, password=password, server=server, timeout=60_000):
         code, message = last_error()
@@ -220,6 +229,62 @@ def ensure_trading_login(account, password, server):
             return
         time.sleep(0.25)
     raise BridgeError(504, "timeout", "Logged in, but the account never finished connecting")
+
+
+def _terminal_window(account):
+    """The terminal's main window handle. Its title starts with the logged-in
+    account number (e.g. "474587297 - Exness-MT5Trial15: …")."""
+    user32 = ctypes.windll.user32
+    found = []
+    needle = str(account)
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+    def visit(hwnd, _lparam):
+        if user32.IsWindowVisible(hwnd):
+            buf = ctypes.create_unicode_buffer(512)
+            user32.GetWindowTextW(hwnd, buf, 512)
+            title = buf.value or ""
+            # The main terminal window carries the account + server; skip the
+            # tiny "Default IME" helper window.
+            if needle in title and "IME" not in title:
+                found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return found[0] if found else None
+
+
+def _press_algo_button(account):
+    """Toggle the "Algo Trading" toolbar button via Ctrl+E, sent with the
+    Windows API to the terminal window (we're in the same Wine session as it,
+    so this is far more reliable than an X-level key from the Linux side)."""
+    user32 = ctypes.windll.user32
+    hwnd = _terminal_window(account)
+    if not hwnd:
+        return
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.2)
+    VK_CONTROL, VK_E, KEYEVENTF_KEYUP = 0x11, 0x45, 0x0002
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    user32.keybd_event(VK_E, 0, 0, 0)
+    user32.keybd_event(VK_E, 0, KEYEVENTF_KEYUP, 0)
+    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.5)
+
+
+def ensure_algo_trading(account):
+    """Make sure trade_allowed is on before an order. Only toggles when it's
+    off (so it never turns a good session off), and retries a few times."""
+    info = mt5.terminal_info()
+    if info is not None and info.trade_allowed:
+        return
+    for _ in range(5):
+        _press_algo_button(account)
+        info = mt5.terminal_info()
+        if info is not None and info.trade_allowed:
+            return
+        time.sleep(0.4)
+    raise BridgeError(409, "autotrading", "Could not enable AutoTrading on the terminal")
 
 
 def send_order(request):
@@ -348,13 +413,11 @@ def order(req):
     except (KeyError, TypeError, ValueError):
         raise BridgeError(400, "request", "login, password, server and kind are required")
     ensure_trading_login(account, password, server)
-    # A headless terminal starts with the "Algo Trading" button off, so
-    # order_send is refused with retcode 10027. Signal the worker (kind
-    # "autotrading") so it can toggle it on (xdotool Ctrl+E) and retry, rather
-    # than firing an order the terminal will reject.
-    info = mt5.terminal_info()
-    if info is not None and not info.trade_allowed:
-        raise BridgeError(409, "autotrading", "AutoTrading is disabled on the terminal")
+    # A headless terminal starts with the "Algo Trading" button off (and a
+    # re-login resets it), so order_send is refused with retcode 10027. Enable
+    # it in-process — right here, after the login and before the order, so
+    # nothing re-logs in between and resets it.
+    ensure_algo_trading(account)
     if kind == "close":
         return do_close(req, False)
     if kind == "partial_close":

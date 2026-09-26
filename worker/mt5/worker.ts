@@ -262,8 +262,9 @@ async function enableAutoTrading(login: string): Promise<void> {
     return
   }
   await sh("xdotool", ["windowactivate", "--sync", id])
+  await new Promise((r) => setTimeout(r, 300))
   await sh("xdotool", ["key", "--window", id, "--clearmodifiers", "ctrl+e"])
-  await new Promise((r) => setTimeout(r, 900))
+  await new Promise((r) => setTimeout(r, 700))
 }
 
 async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connection: Connection) {
@@ -288,17 +289,24 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       takeProfit: num(cmd.takeProfit),
       orderType: cmd.orderType,
     }
-    let result: OrderBridgeResult
-    try {
-      result = await callBridge<OrderBridgeResult>(bridge, "/order", body, 60_000)
-    } catch (err) {
-      // Terminal's Algo Trading is off — turn it on and retry once.
-      if (err instanceof BridgeError && err.kind === "autotrading") {
-        console.log(`[mt5] order ${cmd.id}: AutoTrading off on ${connection.login} — enabling and retrying`)
-        await enableAutoTrading(connection.login)
+    // Send; if the terminal's Algo Trading is off, toggle it on and resend.
+    // The bridge now reuses the trade-enabled session (no re-login), so the
+    // enable sticks and this succeeds on the next pass instead of thrashing.
+    let result: OrderBridgeResult | null = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
         result = await callBridge<OrderBridgeResult>(bridge, "/order", body, 60_000)
-      } else throw err
+        break
+      } catch (err) {
+        if (err instanceof BridgeError && err.kind === "autotrading" && attempt < 2) {
+          console.log(`[mt5] order ${cmd.id}: AutoTrading off on ${connection.login} — enabling (try ${attempt + 1})`)
+          await enableAutoTrading(connection.login)
+          continue
+        }
+        throw err
+      }
     }
+    if (result == null) throw new BridgeError("order", "order was not sent")
     const brokerRef = result.deal && result.deal !== "0" ? result.deal : result.order
     if (result.accepted) {
       await finishCommand(cmd.id, "filled", "Order executed.", brokerRef, result)
