@@ -1,4 +1,6 @@
 import { pgTable, text, timestamp, boolean, serial, numeric, integer, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core"
+import type { RuleConfig } from "@/lib/propmax/types"
+import type { AccountEvaluation } from "@/lib/propmax/engine"
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -1002,5 +1004,199 @@ export const ninjatraderConnections = pgTable(
     uniqueIndex("ninjatrader_connections_name").on(t.ntConnectionName),
     index("ninjatrader_connections_user").on(t.userId),
     index("ninjatrader_connections_due").on(t.status, t.nextSyncAt),
+  ],
+)
+
+// --- PropFirm Max ----------------------------------------------------------
+// A normalized, versioned, sourced prop-firm rule catalog that feeds the
+// config-driven rule engine (lib/propmax/*). It lives ALONGSIDE the old
+// prop_firm_rules table (which still powers the existing /propfirm tracker) —
+// nothing here replaces that; the new /propfirm-max page reads this set.
+//
+// The chain is: prop_firm → prop_program → prop_rule_version (the actual,
+// dated, sourced rule set as engine-ready JSONB). A user's account is bound to
+// one firm/program and pinned to a specific rule_version (prop_account), so a
+// later rule change never silently rewrites the rules an account was judged
+// under. Daily prop_snapshot rows give history; prop_alert rows are fired
+// threshold crossings.
+
+// A prop firm (catalog / reference data, shared across all users — not
+// user-scoped). Seeded from lib/propfirm-presets.ts and editable by admins.
+export const propFirm = pgTable(
+  "prop_firm",
+  {
+    id: serial("id").primaryKey(),
+    // Stable machine key (e.g. "apex-trader-funding") — what detection and
+    // seeds match on, so renaming the display name never breaks a binding.
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    website: text("website"),
+    // futures | forex | multi — the asset class(es) this firm operates in,
+    // for filtering the picker. Programs carry their own assetClass too.
+    assetClass: text("assetClass").notNull().default("futures"),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("prop_firm_slug").on(t.slug)],
+)
+
+// A specific program / challenge structure within a firm (e.g. Apex's
+// "Evaluation — Intraday" vs "Evaluation — EOD"). The thing a user actually
+// picks; the exact numbers live one level down in prop_rule_version.
+export const propProgram = pgTable(
+  "prop_program",
+  {
+    id: serial("id").primaryKey(),
+    firmId: integer("firmId").notNull(),
+    slug: text("slug").notNull(), // unique within the firm
+    name: text("name").notNull(),
+    assetClass: text("assetClass").notNull().default("futures"), // futures | forex
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("prop_program_firm_slug").on(t.firmId, t.slug), index("prop_program_firm").on(t.firmId)],
+)
+
+// The heart of the catalog: one dated, sourced, versioned rule set for a
+// (program, account size, phase). `rules` is exactly what the engine consumes
+// — a RuleConfig[] — so there's no lossy translation between storage and
+// evaluation. Rules are NEVER guessed: every version records where its numbers
+// came from (source*, verifiedAt, confidence) and when they took effect
+// (effectiveFrom/To). A rule change is a NEW row with a bumped `version` and a
+// `changeReason`, and the old row gets an `effectiveTo` — full history, so an
+// account pinned to an older version keeps being judged by the rules that were
+// real when it started.
+export const propRuleVersion = pgTable(
+  "prop_rule_version",
+  {
+    id: serial("id").primaryKey(),
+    programId: integer("programId").notNull(),
+    // The account size these figures are for (e.g. 50000). Null = size-agnostic
+    // (rules expressed only as percentages that hold across sizes).
+    accountSize: integer("accountSize"),
+    phase: text("phase").notNull().default("evaluation"), // evaluation | verification | funded
+    version: integer("version").notNull().default(1), // bumped on every change
+    // The engine-ready rule set. Each RuleConfig is one rule (type + unit +
+    // value + model/basis/etc). Stored as-is so lib/propmax reads it directly.
+    rules: jsonb("rules").$type<RuleConfig[]>().notNull(),
+    // Provenance — the audit trail the spec requires. Never left empty for a
+    // published version.
+    sourceName: text("sourceName").notNull(), // e.g. "Apex Trader Funding — Help Center"
+    sourceUrl: text("sourceUrl"),
+    sourceType: text("sourceType").notNull().default("official_rules"), // official_rules | help_center | support | third_party | inferred
+    confidence: text("confidence").notNull().default("medium"), // high | medium | low
+    verifiedAt: timestamp("verifiedAt"), // when a human last confirmed these against the source
+    // Effectivity window. effectiveTo null = the currently-in-force version.
+    effectiveFrom: timestamp("effectiveFrom").notNull().defaultNow(),
+    effectiveTo: timestamp("effectiveTo"),
+    changeReason: text("changeReason"), // why this version differs from the last
+    // A free-text caveat carried onto the account (e.g. preset `notes` about
+    // mechanics the simple model can't capture). Shown, never hidden.
+    caveat: text("caveat"),
+    // Which admin authored/edited it (null for seeded rows).
+    createdBy: text("createdBy"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    index("prop_rule_version_program").on(t.programId),
+    // The lookup detection/seeding does: newest in-force version for a
+    // (program, size, phase).
+    index("prop_rule_version_lookup").on(t.programId, t.accountSize, t.phase, t.effectiveTo),
+  ],
+)
+
+// Binds one of a user's trading_accounts to a firm/program and PINS it to a
+// specific rule_version. This is the per-user PropFirm Max record; the old
+// prop_firm_rules row (if any) is left untouched. One binding per account.
+export const propAccount = pgTable(
+  "prop_account",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    accountId: integer("accountId").notNull(), // → trading_accounts.id
+    firmId: integer("firmId"),
+    programId: integer("programId"),
+    // The exact rule set version this account is judged against. Pinned at
+    // bind time so a later catalog change doesn't silently move the goalposts;
+    // the user is offered the newer version instead.
+    ruleVersionId: integer("ruleVersionId"),
+    accountSize: integer("accountSize"),
+    phase: text("phase").notNull().default("evaluation"), // evaluation | verification | funded
+    // How the firm/program was determined and how sure we are — the engine and
+    // UI show low-confidence auto-matches as "verify this", never as fact.
+    detectionSource: text("detectionSource").notNull().default("manual"), // auto | manual
+    detectionConfidence: text("detectionConfidence").notNull().default("high"), // high | medium | low | unknown
+    // True once the user has confirmed/overridden the auto-detected match, so
+    // a later re-detection won't stomp their choice.
+    confirmed: boolean("confirmed").notNull().default(false),
+    // active | passed | funded | breached | archived — lifecycle, set by the
+    // engine (breach) or the user.
+    status: text("status").notNull().default("active"),
+    // Money already made/lost before this account joined the tracker, applied
+    // once as an opening offset (mirrors prop_firm_rules.openingBalanceAdjustment).
+    openingBalanceAdjustment: numeric("openingBalanceAdjustment", { precision: 18, scale: 2 }),
+    // Set when breached: the human root cause behind the mechanical rule.
+    breachReasonTag: text("breachReasonTag"),
+    startedAt: timestamp("startedAt").notNull().defaultNow(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("prop_account_account").on(t.accountId), index("prop_account_user").on(t.userId)],
+)
+
+// A daily point-in-time evaluation of a prop account, for history and charts
+// (the equity/drawdown-over-time view, breach forensics). Written by the sync
+// worker / a cron after each sync, so the tradeloop_sync role gets write
+// access. `evaluation` is the whole AccountEvaluation the engine returned, so
+// the detail page can replay exactly what the trader saw on any past day.
+export const propSnapshot = pgTable(
+  "prop_snapshot",
+  {
+    id: serial("id").primaryKey(),
+    propAccountId: integer("propAccountId").notNull(),
+    userId: text("userId").notNull(),
+    date: text("date").notNull(), // YYYY-MM-DD (the account's trading day)
+    balance: numeric("balance", { precision: 18, scale: 2 }),
+    equity: numeric("equity", { precision: 18, scale: 2 }),
+    highWaterMark: numeric("highWaterMark", { precision: 18, scale: 2 }),
+    riskStatus: text("riskStatus"), // safe | watch | warning | critical | breached | stale | unknown
+    // The full engine result — rules[], risk summary, payout eligibility.
+    evaluation: jsonb("evaluation").$type<AccountEvaluation>(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("prop_snapshot_account_date").on(t.propAccountId, t.date),
+    index("prop_snapshot_user").on(t.userId),
+  ],
+)
+
+// A fired alert — a rule crossing a threshold (WATCH→WARNING→CRITICAL→BREACH)
+// or a payout milestone. Deduped by dedupeKey so the same crossing on the same
+// day isn't repeated. Written by the worker/cron (tradeloop_sync) as well as
+// the app, and acknowledged by the user.
+export const propAlert = pgTable(
+  "prop_alert",
+  {
+    id: serial("id").primaryKey(),
+    propAccountId: integer("propAccountId").notNull(),
+    userId: text("userId").notNull(),
+    ruleType: text("ruleType"), // null for account-level alerts
+    status: text("status").notNull(), // the level reached: watch | warning | critical | breached | ...
+    severity: text("severity").notNull().default("warning"), // info | warning | soft_breach | hard_breach | account_failure
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    percentageUsed: numeric("percentageUsed", { precision: 6, scale: 2 }),
+    // "<propAccountId>:<ruleType>:<status>:<YYYY-MM-DD>" — one alert per level
+    // per rule per day.
+    dedupeKey: text("dedupeKey").notNull(),
+    acknowledgedAt: timestamp("acknowledgedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("prop_alert_dedupe").on(t.dedupeKey),
+    index("prop_alert_account").on(t.propAccountId),
+    index("prop_alert_user_unack").on(t.userId, t.acknowledgedAt),
   ],
 )
