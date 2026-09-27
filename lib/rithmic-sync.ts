@@ -16,6 +16,10 @@ import { repriceAccountTrades } from "@/lib/trade-commission"
 
 export type RithmicConnectionRow = typeof rithmicConnections.$inferSelect
 
+// On a quiet background sync (no fills, no open positions) the balance is
+// refreshed at most this often, to avoid a second Rithmic login every pass.
+const BALANCE_REFRESH_STALE_MS = 30 * 60_000
+
 // Average round-turn commission per contract from the broker's own totals.
 // filled contracts count both sides, so a round-turn is 2 contracts. Guarded to
 // a sane futures range ($0.10–$50/round-turn) so a bad or missing value can
@@ -299,11 +303,19 @@ export async function syncRithmicConnection(connection: RithmicConnectionRow, tr
     const imported = await importFillsForConnection(connection.userId, connection.id, connection.accountId!, fills)
     await recordSyncRun({ broker: "rithmic", connectionId: connection.id, userId: connection.userId, trigger, startedAt, imported })
 
-    // Refresh the balance AND the live open positions from the P&L snapshot.
-    // Positions need to stay fresh for the Trades Manager, so this runs every
-    // pass now (it's the one place they're read); the balance side of it is
-    // cheap and idempotent (a reprice only happens when the rate changes).
-    await refreshBrokerBalance(connection, password, rms)
+    // The balance + open-positions refresh opens a SECOND Rithmic login (the
+    // P&L plant — a different plant than the fills feed, so it can't share the
+    // session). Prop firms flag accounts for too many sign-ins, so we skip that
+    // second login on a quiet sync: no new fills, no open positions on record,
+    // and the balance refreshed recently. Any activity — a new fill or an open
+    // position — or a stale balance still refreshes it, so a trading or funded
+    // account stays fresh while an idle one costs a single login per sync.
+    let refreshBalance = trigger !== "auto" || imported > 0 || (connection.openPositionsData?.length ?? 0) > 0
+    if (!refreshBalance && connection.accountId != null) {
+      const [acct] = await db.select({ at: tradingAccounts.balanceUpdatedAt }).from(tradingAccounts).where(eq(tradingAccounts.id, connection.accountId))
+      refreshBalance = Date.now() - (acct?.at ? acct.at.getTime() : 0) > BALANCE_REFRESH_STALE_MS
+    }
+    if (refreshBalance) await refreshBrokerBalance(connection, password, rms)
     return { imported }
   } catch (err) {
     await db
