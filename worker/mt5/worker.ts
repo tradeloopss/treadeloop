@@ -42,6 +42,12 @@ const TICK_MS = 2_000
 // picked up in ~0.5s instead of waiting up to a full 2s sync tick. The claim
 // query is a single indexed lookup, so polling this often is cheap.
 const ORDER_TICK_MS = 500
+// How long a terminal stays pinned (warm) to an account after an order, so the
+// user's follow-up close/modify actions are instant instead of re-logging in.
+const ORDER_PIN_MS = 90_000
+// Orders get a tighter bridge timeout than syncs so a stuck terminal fails
+// within the user's expected window instead of hanging up to a minute.
+const ORDER_BRIDGE_TIMEOUT_MS = 25_000
 const WORKER_ID = `${os.hostname()}:${process.pid}`
 
 // ---------------------------------------------------------------------------
@@ -118,6 +124,11 @@ interface Bridge {
   failures: number
   lastError: string | null
   alive: boolean // answered /health recently; a down bridge gets no work
+  // After an order we keep this terminal warm on that account (a trade-enabled
+  // master session, AutoTrading on) for a short window, so follow-up orders are
+  // instant and a background sync of a DIFFERENT account can't steal it and
+  // force a slow re-login mid trade-management.
+  orderPin?: { accountId: number; login: string; until: number }
 }
 
 function parseBridges(platform: Platform, spec: string): Bridge[] {
@@ -302,7 +313,7 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
     let result: OrderBridgeResult | null = null
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        result = await callBridge<OrderBridgeResult>(bridge, "/order", body, 60_000)
+        result = await callBridge<OrderBridgeResult>(bridge, "/order", body, ORDER_BRIDGE_TIMEOUT_MS)
         break
       } catch (err) {
         if (err instanceof BridgeError && err.kind === "autotrading" && attempt < 2) {
@@ -314,6 +325,9 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       }
     }
     if (result == null) throw new BridgeError("order", "order was not sent")
+    // The terminal is now a trade-enabled master session on this account; record
+    // it so a following /sync reuses the session (no re-login) and it stays warm.
+    bridge.login = connection.login
     const brokerRef = result.deal && result.deal !== "0" ? result.deal : result.order
     if (result.accepted) {
       await finishCommand(cmd.id, "filled", "Order executed.", brokerRef, result)
@@ -354,10 +368,17 @@ async function processOrderCommands() {
       await db.update(orderCommands).set({ leaseUntil: null }).where(eq(orderCommands.id, cmd.id)) // free it for the next tick
       continue
     }
-    const bridge = pickBridge(avail, conn, brokerFor(conn.server))
+    const now = Date.now()
+    // Prefer a terminal still pinned+warm to this account (no re-login), else
+    // the usual pick. Pinning it means the next order is instant and syncs skip it.
+    const warm = avail.find((b) => b.orderPin && b.orderPin.accountId === cmd.accountId && b.orderPin.until > now)
+    const bridge = warm ?? pickBridge(avail, conn, brokerFor(conn.server))
     bridge.busy = true
+    bridge.orderPin = { accountId: cmd.accountId, login: conn.login, until: now + ORDER_PIN_MS }
     void executeOrderCommand(bridge, cmd, conn).finally(() => {
       bridge.busy = false
+      // Refresh the pin from completion so a burst of manage actions all stay warm.
+      bridge.orderPin = { accountId: cmd.accountId, login: conn.login, until: Date.now() + ORDER_PIN_MS }
     })
   }
 }
@@ -712,17 +733,19 @@ async function tick() {
     await requeueNewlySupported()
   }
   // Orders are handled on their own fast sub-loop in main() now, not here.
+  const now = Date.now()
+  // A terminal pinned to a recent order is reserved for that account's orders —
+  // keep syncs off it so the warm session survives the trade-management session.
+  const syncable = (b: Bridge, platform: Platform) => b.platform === platform && b.alive && !b.busy && !(b.orderPin && b.orderPin.until > now)
   for (const platform of ["mt5", "mt4"] as const) {
-    const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)
+    const free = bridges.filter((b) => syncable(b, platform))
     if (free.length === 0) continue
     const due = await claimDue(platform, free.length)
     for (const connection of due) {
+      const avail = bridges.filter((b) => syncable(b, platform))
+      if (avail.length === 0) break
       const broker = platform === "mt5" ? brokerFor(connection.server) : null
-      const bridge = pickBridge(
-        bridges.filter((b) => b.platform === platform && b.alive && !b.busy),
-        connection,
-        broker,
-      )
+      const bridge = pickBridge(avail, connection, broker)
       bridge.busy = true
       void syncConnection(bridge, connection).finally(() => {
         bridge.busy = false

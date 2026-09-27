@@ -191,7 +191,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
 
   // Poll one command until the worker reports a terminal result (or a timeout —
   // the worker keeps retrying, so a timeout just means "still working").
-  async function confirmOrder(id: number, timeoutMs = 12_000): Promise<{ status: OrderStatus; message: string | null }> {
+  async function confirmOrder(id: number, timeoutMs = 18_000): Promise<{ status: OrderStatus; message: string | null }> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 700))
@@ -202,7 +202,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
   }
 
   // Same, for a batch of commands — one round-trip per poll instead of per order.
-  async function confirmOrders(ids: number[], timeoutMs = 15_000): Promise<Record<number, OrderStatus>> {
+  async function confirmOrders(ids: number[], timeoutMs = 20_000): Promise<Record<number, OrderStatus>> {
     const out: Record<number, OrderStatus> = {}
     const deadline = Date.now() + timeoutMs
     let remaining = [...ids]
