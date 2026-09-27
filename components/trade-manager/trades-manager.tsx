@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition, type ReactNode } from "react"
+import { Fragment, useMemo, useState, useTransition, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -117,6 +117,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
 
   const router = useRouter()
   const [enableFor, setEnableFor] = useState<UITrade | null>(null)
+  const [levelsFor, setLevelsFor] = useState<string | null>(null) // instrument SL/TP-for-all modal
 
   function execFor(t: UITrade): AccountExecution {
     return (t.accountId != null && data.execution[t.accountId]) || { broker: null, supported: false, enabled: false }
@@ -163,6 +164,75 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
       toast.error(err instanceof Error ? err.message : "Order failed")
       return false
     }
+  }
+
+  // --- Instrument-level bulk actions ---------------------------------------
+  // Act on EVERY open position of one symbol in the current view at once —
+  // close them, set the same SL/TP on all, or move each to its own break-even.
+  // Each still goes through runOrder, so a live broker position sends a real
+  // order (rule-checked), a manual trade records a journal close, and a
+  // view-only position updates the UI.
+  function instrumentGroup(symbol: string): UITrade[] {
+    return filtered.filter((t) => t.symbol === symbol && !t.closed)
+  }
+
+  async function closeInstrument(symbol: string) {
+    const group = instrumentGroup(symbol)
+    if (group.length === 0) return
+    let acted = 0
+    for (const t of group) {
+      if (tradable(t)) {
+        const ok = await runOrder(t, { kind: "close", positionRef: t.positionRef })
+        if (ok) {
+          updateTrade(t.id, { closed: true })
+          acted++
+        }
+      } else if (t.origin === "trade" && t.currentPrice != null) {
+        try {
+          await closeOpenTrade(t.id, t.currentPrice)
+          updateTrade(t.id, { closed: true })
+          acted++
+        } catch {
+          // leave it open; the per-row close can report the error
+        }
+      } else {
+        updateTrade(t.id, { closed: true })
+        acted++
+      }
+      pushHistory(t.id, { time: nowLabel(), label: `Closed with all ${symbol}` })
+    }
+    if (group.some((t) => t.id === selectedId)) setSelectedId(null)
+    toast.success(`Closed ${acted} ${symbol} position${acted === 1 ? "" : "s"}`)
+    router.refresh()
+  }
+
+  function breakevenInstrument(symbol: string) {
+    const group = instrumentGroup(symbol)
+    if (group.length === 0) return
+    for (const t of group) {
+      const be = t.entryPrice // each position's own break-even
+      updateTrade(t.id, { stopLoss: be })
+      pushHistory(t.id, { time: nowLabel(), label: `Moved SL to break-even (all ${symbol})`, detail: fmtPrice(be) })
+      if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: be, takeProfit: t.takeProfit })
+    }
+    toast.success(`Moved ${group.length} ${symbol} position${group.length === 1 ? "" : "s"} to break-even`)
+  }
+
+  function setInstrumentLevels(symbol: string, sl: number | null, tp: number | null) {
+    const group = instrumentGroup(symbol)
+    for (const t of group) {
+      updateTrade(t.id, { stopLoss: sl, takeProfit: tp })
+      pushHistory(t.id, { time: nowLabel(), label: `SL/TP set (all ${symbol})`, detail: `SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
+      if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: sl, takeProfit: tp })
+    }
+    toast.success(`Updated SL/TP on ${group.length} ${symbol} position${group.length === 1 ? "" : "s"}`)
+    setLevelsFor(null)
+  }
+
+  function onInstrument(symbol: string, action: "closeAll" | "beAll" | "levelsAll") {
+    if (action === "closeAll") void closeInstrument(symbol)
+    else if (action === "beAll") breakevenInstrument(symbol)
+    else setLevelsFor(symbol)
   }
 
   return (
@@ -256,6 +326,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
               }}
               onCheck={toggleCheck}
               onAction={(id, action) => handleRowAction(id, action)}
+              onInstrument={onInstrument}
             />
           )}
         </div>
@@ -348,6 +419,15 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
 
       {enableFor && enableFor.accountId != null && (
         <EnableExecutionDialog accountId={enableFor.accountId} accountName={enableFor.accountName} onClose={() => setEnableFor(null)} />
+      )}
+
+      {levelsFor && (
+        <InstrumentLevelsModal
+          symbol={levelsFor}
+          count={instrumentGroup(levelsFor).length}
+          onApply={(sl, tp) => setInstrumentLevels(levelsFor, sl, tp)}
+          onClose={() => setLevelsFor(null)}
+        />
       )}
     </div>
   )
@@ -481,6 +561,7 @@ function TradeTable({
   onSelect,
   onCheck,
   onAction,
+  onInstrument,
 }: {
   trades: UITrade[]
   selectedId: number | null
@@ -488,8 +569,22 @@ function TradeTable({
   onSelect: (id: number) => void
   onCheck: (id: number) => void
   onAction: (id: number, action: string) => void
+  onInstrument: (symbol: string, action: "closeAll" | "beAll" | "levelsAll") => void
 }) {
   if (trades.length === 0) return <EmptyBlock title="No open positions" note="When you have a running trade it'll show here with its live risk and P&L." />
+  // Group by symbol (first-seen order). A symbol with more than one open
+  // position gets an instrument header row carrying the "all positions" actions.
+  const groups: { symbol: string; rows: UITrade[] }[] = []
+  const groupIdx = new Map<string, number>()
+  for (const t of trades) {
+    let i = groupIdx.get(t.symbol)
+    if (i === undefined) {
+      i = groups.length
+      groupIdx.set(t.symbol, i)
+      groups.push({ symbol: t.symbol, rows: [] })
+    }
+    groups[i].rows.push(t)
+  }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -507,7 +602,10 @@ function TradeTable({
           </tr>
         </thead>
         <tbody>
-          {trades.map((t) => {
+          {groups.map((g) => (
+            <Fragment key={g.symbol}>
+              {g.rows.length > 1 && <InstrumentHeader symbol={g.symbol} rows={g.rows} onInstrument={onInstrument} />}
+              {g.rows.map((t) => {
             const pct = pnlPercent(t)
             const sel = t.id === selectedId
             return (
@@ -555,10 +653,81 @@ function TradeTable({
                 </td>
               </tr>
             )
-          })}
+              })}
+            </Fragment>
+          ))}
         </tbody>
       </table>
     </div>
+  )
+}
+
+// The header above a group of same-symbol positions — a summary of the whole
+// instrument plus the "all positions" actions (close all / SL-TP all / BE all).
+function InstrumentHeader({ symbol, rows, onInstrument }: { symbol: string; rows: UITrade[]; onInstrument: (symbol: string, action: "closeAll" | "beAll" | "levelsAll") => void }) {
+  const meta = instrument(symbol)
+  const netLots = round4(rows.reduce((s, t) => s + (t.side === "long" ? t.quantity : -t.quantity), 0))
+  const pnls = rows.map((t) => t.unrealizedPnl).filter((v): v is number => v != null)
+  const totalPnl = pnls.length ? pnls.reduce((a, b) => a + b, 0) : null
+  return (
+    <tr className="border-b bg-muted/40">
+      <td colSpan={9} className="px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex items-center gap-2">
+            <span className={cn("flex size-6 items-center justify-center rounded-full text-[9px] font-bold", meta.tone)}>{symbol.replace(/m$/, "").slice(0, 3)}</span>
+            <span className="text-sm font-semibold">{symbol}</span>
+            <span className="hidden text-xs text-muted-foreground sm:inline">{meta.name}</span>
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {rows.length} positions · net {netLots > 0 ? "+" : ""}{netLots} lots
+          </span>
+          {totalPnl != null && (
+            <span className={cn("text-xs font-semibold tabular-nums", totalPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>{signed(totalPnl)}</span>
+          )}
+          <div className="ms-auto" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs"><Layers className="size-3.5" /> Manage all {rows.length}</Button>} />
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => onInstrument(symbol, "levelsAll")}>Set SL/TP for all {rows.length}</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onInstrument(symbol, "beAll")}>Move all to break-even</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => onInstrument(symbol, "closeAll")}>Close all {rows.length}</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+// One SL and one TP applied to every open position of an instrument at once.
+function InstrumentLevelsModal({ symbol, count, onApply, onClose }: { symbol: string; count: number; onApply: (sl: number | null, tp: number | null) => void; onClose: () => void }) {
+  const [sl, setSl] = useState("")
+  const [tp, setTp] = useState("")
+  const slNum = sl.trim() === "" ? null : Number(sl)
+  const tpNum = tp.trim() === "" ? null : Number(tp)
+  const step = pipSize(symbol)
+  const valid = (sl.trim() === "" || Number.isFinite(slNum)) && (tp.trim() === "" || Number.isFinite(tpNum)) && (slNum != null || tpNum != null)
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Set SL/TP for all {symbol}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Applies the same Stop Loss and Take Profit price to all {count} open {symbol} position{count === 1 ? "" : "s"} in view. Leave a field blank to clear it.
+          </p>
+          <LevelInput label="Stop Loss (SL)" value={sl} onChange={setSl} step={step} pips={null} tone="loss" />
+          <LevelInput label="Take Profit (TP)" value={tp} onChange={setTp} step={step} pips={null} tone="gain" />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={!valid} onClick={() => onApply(slNum, tpNum)}>Apply to all {count}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

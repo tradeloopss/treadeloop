@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { AlertCircle, CheckCircle2, Clock, KeyRound, Loader2, ShieldCheck } from "lucide-react"
+import { AlertCircle, AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, ShieldCheck } from "lucide-react"
 import { useIntlLocale, useT } from "@/components/locale-provider"
 
 export type Connection = MetaTraderConnectionView
@@ -242,6 +242,13 @@ export function ConnectFlow({
             <Label htmlFor="mt-password" className="text-xs font-semibold">{t("Investor password")}</Label>
             <Input id="mt-password" name="investorPassword" type="password" autoComplete="off" required className="h-10" />
           </div>
+        </div>
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <p>
+            <span className="font-semibold">{t("Use only the investor (read-only) password.")}</span>{" "}
+            {t("Check with your prop firm before linking any account — some restrict third-party connections. TradeLoop is not responsible for any issue with your prop firm that results from connecting your real (master) trading password. Never enter it here.")}
+          </p>
         </div>
         <div className="space-y-2">
           <Label className="text-xs font-semibold">{t("Import history")}</Label>
