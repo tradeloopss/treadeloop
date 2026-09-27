@@ -27,9 +27,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency } from "@/lib/calc"
 import { closeOpenTrade } from "@/app/actions/trade-manager"
-import { submitOrder, setTradingPassword } from "@/app/actions/orders"
+import { submitOrder, setTradingPassword, getOrderStatus, getOrderStatuses } from "@/app/actions/orders"
 import type { OpenTradeView, ClosedTradeRow, TradesManagerData, AccountExecution } from "@/lib/trade-manager"
-import type { OrderCommandInput } from "@/lib/order-execution/types"
+import type { OrderCommandInput, OrderStatus } from "@/lib/order-execution/types"
 
 // ---------- helpers -------------------------------------------------------
 
@@ -131,10 +131,10 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     return false
   }
 
-  // Send a real order to the broker and report the outcome. Returns true when it
-  // was accepted/queued (so the caller can apply the optimistic UI change).
-  async function runOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<boolean> {
-    if (t.accountId == null) return false
+  // Queue a real order for the broker (no waiting). Returns the command's id +
+  // status; a null id means it never made it to the queue.
+  async function queueOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<{ id: number | null; status: OrderStatus; message: string; reasons: string[] } | null> {
+    if (t.accountId == null) return null
     const e = execFor(t)
     const broker = (e.broker ?? "mt5") as OrderCommandInput["broker"]
     // Rithmic acts by symbol+exchange (no position ticket); a partial close is
@@ -148,22 +148,78 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
           }
         : { positionRef: t.positionRef }
     try {
-      const res = await submitOrder({ accountId: t.accountId, broker, ...brokerFields, ...input })
-      if (res.status === "blocked") {
-        toast.error("Blocked by your prop-firm rules", { description: res.reasons.join(" ") })
-        return false
-      }
-      if (res.status === "pending" || res.status === "filled" || res.status === "sent") {
-        toast.success(res.message)
-        router.refresh()
-        return true
-      }
-      toast.error(res.message || "Order couldn't be sent")
-      return false
+      return await submitOrder({ accountId: t.accountId, broker, ...brokerFields, ...input })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Order failed")
+      return null
+    }
+  }
+
+  // Send an order AND wait for the broker's real outcome, so the user learns
+  // whether it actually executed instead of a hopeful "sent". Returns true only
+  // when the order really filled (or is still working after the wait).
+  async function runOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<boolean> {
+    const res = await queueOrder(t, input)
+    if (!res) return false
+    if (res.status === "blocked") {
+      toast.error("Blocked by your prop-firm rules", { description: res.reasons.join(" ") })
       return false
     }
+    if (res.status === "filled" || res.status === "sent") {
+      toast.success(res.message)
+      router.refresh()
+      return true
+    }
+    if (res.status === "pending" && res.id != null) {
+      const toastId = toast.loading(`Sending to your broker · ${t.symbol}…`)
+      const final = await confirmOrder(res.id)
+      router.refresh()
+      if (final.status === "filled") {
+        toast.success("Order executed", { id: toastId, description: t.symbol })
+        return true
+      }
+      if (final.status === "pending") {
+        toast.message("Order still working", { id: toastId, description: "Your broker hasn't confirmed yet — it'll apply shortly." })
+        return true
+      }
+      toast.error("Order didn't go through", { id: toastId, description: final.message ?? "Your broker rejected it — try again." })
+      return false
+    }
+    toast.error(res.message || "Order couldn't be sent")
+    return false
+  }
+
+  // Poll one command until the worker reports a terminal result (or a timeout —
+  // the worker keeps retrying, so a timeout just means "still working").
+  async function confirmOrder(id: number, timeoutMs = 12_000): Promise<{ status: OrderStatus; message: string | null }> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 700))
+      const s = await getOrderStatus(id)
+      if (s && s.status !== "pending") return s
+    }
+    return { status: "pending", message: null }
+  }
+
+  // Same, for a batch of commands — one round-trip per poll instead of per order.
+  async function confirmOrders(ids: number[], timeoutMs = 15_000): Promise<Record<number, OrderStatus>> {
+    const out: Record<number, OrderStatus> = {}
+    const deadline = Date.now() + timeoutMs
+    let remaining = [...ids]
+    while (remaining.length > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 800))
+      const statuses = await getOrderStatuses(remaining)
+      remaining = remaining.filter((id) => {
+        const st = statuses[id]?.status
+        if (st && st !== "pending") {
+          out[id] = st
+          return false
+        }
+        return true
+      })
+    }
+    for (const id of remaining) out[id] = "pending"
+    return out
   }
 
   // --- Instrument-level bulk actions ---------------------------------------
@@ -176,57 +232,89 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     return filtered.filter((t) => t.symbol === symbol && !t.closed)
   }
 
-  async function closeInstrument(symbol: string) {
+  // Run one action across a whole instrument: queue every order at once (fast),
+  // then wait for the broker outcomes together and report a real summary — so a
+  // partial failure is visible rather than a blanket "done".
+  async function bulkInstrument(
+    symbol: string,
+    verb: "Closing" | "Moving" | "Updating",
+    build: (t: UITrade) => Omit<OrderCommandInput, "accountId" | "broker">,
+    optimistic: (t: UITrade) => void,
+  ) {
     const group = instrumentGroup(symbol)
     if (group.length === 0) return
-    let acted = 0
+    const past = verb === "Closing" ? "Closed" : verb === "Moving" ? "Moved" : "Updated"
+    const toastId = toast.loading(`${verb} ${group.length} ${symbol} position${group.length === 1 ? "" : "s"}…`)
+    const queued: { orderId: number }[] = []
+    let done = 0
+    let failed = 0
     for (const t of group) {
+      optimistic(t)
       if (tradable(t)) {
-        const ok = await runOrder(t, { kind: "close", positionRef: t.positionRef })
-        if (ok) {
-          updateTrade(t.id, { closed: true })
-          acted++
-        }
-      } else if (t.origin === "trade" && t.currentPrice != null) {
+        const res = await queueOrder(t, build(t))
+        if (res?.status === "pending" && res.id != null) queued.push({ orderId: res.id })
+        else if (res?.status === "filled") done++
+        else failed++
+      } else if (verb === "Closing" && t.origin === "trade" && t.currentPrice != null) {
         try {
           await closeOpenTrade(t.id, t.currentPrice)
-          updateTrade(t.id, { closed: true })
-          acted++
+          done++
         } catch {
-          // leave it open; the per-row close can report the error
+          failed++
         }
       } else {
-        updateTrade(t.id, { closed: true })
-        acted++
+        done++ // view-only: the optimistic UI change is the whole action
       }
-      pushHistory(t.id, { time: nowLabel(), label: `Closed with all ${symbol}` })
     }
-    if (group.some((t) => t.id === selectedId)) setSelectedId(null)
-    toast.success(`Closed ${acted} ${symbol} position${acted === 1 ? "" : "s"}`)
+    if (queued.length) {
+      const results = await confirmOrders(queued.map((q) => q.orderId))
+      for (const q of queued) {
+        const st = results[q.orderId]
+        if (st === "filled" || st === "pending") done++
+        else failed++
+      }
+    }
+    if (verb === "Closing" && group.some((t) => t.id === selectedId)) setSelectedId(null)
     router.refresh()
+    if (failed > 0) toast.error(`${past} ${done}/${group.length} ${symbol} — ${failed} didn't go through`, { id: toastId })
+    else toast.success(`${past} ${done} ${symbol} position${done === 1 ? "" : "s"}`, { id: toastId })
+  }
+
+  function closeInstrument(symbol: string) {
+    void bulkInstrument(
+      symbol,
+      "Closing",
+      (t) => ({ kind: "close", positionRef: t.positionRef }),
+      (t) => {
+        updateTrade(t.id, { closed: true })
+        pushHistory(t.id, { time: nowLabel(), label: `Closed with all ${symbol}` })
+      },
+    )
   }
 
   function breakevenInstrument(symbol: string) {
-    const group = instrumentGroup(symbol)
-    if (group.length === 0) return
-    for (const t of group) {
-      const be = t.entryPrice // each position's own break-even
-      updateTrade(t.id, { stopLoss: be })
-      pushHistory(t.id, { time: nowLabel(), label: `Moved SL to break-even (all ${symbol})`, detail: fmtPrice(be) })
-      if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: be, takeProfit: t.takeProfit })
-    }
-    toast.success(`Moved ${group.length} ${symbol} position${group.length === 1 ? "" : "s"} to break-even`)
+    void bulkInstrument(
+      symbol,
+      "Moving",
+      (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit }),
+      (t) => {
+        updateTrade(t.id, { stopLoss: t.entryPrice })
+        pushHistory(t.id, { time: nowLabel(), label: `Moved SL to break-even (all ${symbol})`, detail: fmtPrice(t.entryPrice) })
+      },
+    )
   }
 
   function setInstrumentLevels(symbol: string, sl: number | null, tp: number | null) {
-    const group = instrumentGroup(symbol)
-    for (const t of group) {
-      updateTrade(t.id, { stopLoss: sl, takeProfit: tp })
-      pushHistory(t.id, { time: nowLabel(), label: `SL/TP set (all ${symbol})`, detail: `SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
-      if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: sl, takeProfit: tp })
-    }
-    toast.success(`Updated SL/TP on ${group.length} ${symbol} position${group.length === 1 ? "" : "s"}`)
     setLevelsFor(null)
+    void bulkInstrument(
+      symbol,
+      "Updating",
+      (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: sl, takeProfit: tp }),
+      (t) => {
+        updateTrade(t.id, { stopLoss: sl, takeProfit: tp })
+        pushHistory(t.id, { time: nowLabel(), label: `SL/TP set (all ${symbol})`, detail: `SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
+      },
+    )
   }
 
   function onInstrument(symbol: string, action: "closeAll" | "beAll" | "levelsAll") {

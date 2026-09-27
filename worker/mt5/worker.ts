@@ -38,6 +38,10 @@ const DISPLAY = env("MT5_DISPLAY", ":99")
 const SYNC_INTERVAL_MS = Number(env("MT5_SYNC_INTERVAL_SEC", "60")) * 1000
 const LEASE_MINUTES = 4
 const TICK_MS = 2_000
+// Orders (close / modify) run on their own fast sub-loop so a user action is
+// picked up in ~0.5s instead of waiting up to a full 2s sync tick. The claim
+// query is a single indexed lookup, so polling this often is cheap.
+const ORDER_TICK_MS = 500
 const WORKER_ID = `${os.hostname()}:${process.pid}`
 
 // ---------------------------------------------------------------------------
@@ -707,15 +711,7 @@ async function tick() {
     await flagQueued()
     await requeueNewlySupported()
   }
-  // Orders are user-initiated and time-sensitive — handle them before syncs so
-  // a free terminal executes a close/modify without waiting on a sync pass.
-  // Isolated so an order-processing hiccup (or a not-yet-migrated table) can
-  // never skip the sync pass below.
-  try {
-    await processOrderCommands()
-  } catch (err) {
-    console.error("[mt5] order processing failed:", err instanceof Error ? err.message : err)
-  }
+  // Orders are handled on their own fast sub-loop in main() now, not here.
   for (const platform of ["mt5", "mt4"] as const) {
     const free = bridges.filter((b) => b.platform === platform && b.alive && !b.busy)
     if (free.length === 0) continue
@@ -744,13 +740,26 @@ async function main() {
       stopping = true
     })
   }
+  // Fast base loop: process orders every ORDER_TICK_MS (~0.5s), and run the
+  // heavier sync tick every TICK_MS (~2s). Both run in the same loop, so they
+  // never contend for a bridge concurrently.
+  const syncEvery = Math.max(1, Math.round(TICK_MS / ORDER_TICK_MS))
+  let n = 0
   while (!stopping) {
     try {
-      await tick()
+      await processOrderCommands()
     } catch (err) {
-      console.error("[mt5] tick failed:", err instanceof Error ? err.message : err)
+      console.error("[mt5] order processing failed:", err instanceof Error ? err.message : err)
     }
-    await new Promise((r) => setTimeout(r, TICK_MS))
+    if (n % syncEvery === 0) {
+      try {
+        await tick()
+      } catch (err) {
+        console.error("[mt5] tick failed:", err instanceof Error ? err.message : err)
+      }
+    }
+    n++
+    await new Promise((r) => setTimeout(r, ORDER_TICK_MS))
   }
   // Let in-flight syncs finish (their leases would expire anyway).
   const deadline = Date.now() + 60_000

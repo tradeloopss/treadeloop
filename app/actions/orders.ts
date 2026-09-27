@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { encrypt } from "@/lib/crypto"
@@ -148,4 +148,18 @@ export async function getOrderStatus(id: number): Promise<{ status: OrderStatus;
   const userId = await getUserId()
   const [row] = await db.select({ status: orderCommands.status, resultMessage: orderCommands.resultMessage }).from(orderCommands).where(and(eq(orderCommands.id, id), eq(orderCommands.userId, userId)))
   return row ? { status: row.status as OrderStatus, message: row.resultMessage } : null
+}
+
+// Batch status for several commands at once — so the UI can confirm the real
+// outcome of a bulk action (or a single order) without one round-trip each poll.
+export async function getOrderStatuses(ids: number[]): Promise<Record<number, { status: OrderStatus; message: string | null }>> {
+  const userId = await getUserId()
+  if (ids.length === 0) return {}
+  const rows = await db
+    .select({ id: orderCommands.id, status: orderCommands.status, resultMessage: orderCommands.resultMessage })
+    .from(orderCommands)
+    .where(and(inArray(orderCommands.id, ids), eq(orderCommands.userId, userId)))
+  const out: Record<number, { status: OrderStatus; message: string | null }> = {}
+  for (const r of rows) out[r.id] = { status: r.status as OrderStatus, message: r.resultMessage }
+  return out
 }

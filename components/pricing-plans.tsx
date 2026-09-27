@@ -71,13 +71,20 @@ const PLANS: Plan[] = [
     cta: "Start free trial",
     featured: true,
     groups: [
-      { title: "Accounts", items: [{ text: "Connect unlimited trading accounts", included: true }] },
+      { title: "Accounts", items: [{ text: "Connect up to 40 active trading accounts", included: true }] },
       {
         title: "Import & Sync",
         items: [
           { text: "CSV / file import", included: true },
           { text: "Live broker & prop firm sync (Rithmic)", included: true },
-          { text: "MetaTrader 4 & 5 live sync, any number of accounts", included: true },
+          { text: "MetaTrader 4 & 5 live sync", included: true },
+        ],
+      },
+      {
+        title: "Trade management",
+        items: [
+          { text: "Trades Manager — manage & close live positions", included: true },
+          { text: "Close, modify SL/TP & break-even, one or all at once", included: true },
         ],
       },
       {
