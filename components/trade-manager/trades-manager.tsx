@@ -245,17 +245,16 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     if (group.length === 0) return
     const past = verb === "Closing" ? "Closed" : verb === "Moving" ? "Moved" : "Updated"
     const toastId = toast.loading(`${verb} ${group.length} ${symbol} position${group.length === 1 ? "" : "s"}…`)
-    const queued: { orderId: number }[] = []
     let done = 0
     let failed = 0
+    // Apply the optimistic UI now, then split: live broker orders are QUEUED IN
+    // PARALLEL (so the worker gets them all at once and runs them back-to-back on
+    // the warm terminal), manual/view-only handled inline.
+    const toQueue: UITrade[] = []
     for (const t of group) {
       optimistic(t)
-      if (tradable(t)) {
-        const res = await queueOrder(t, build(t))
-        if (res?.status === "pending" && res.id != null) queued.push({ orderId: res.id })
-        else if (res?.status === "filled") done++
-        else failed++
-      } else if (verb === "Closing" && t.origin === "trade" && t.currentPrice != null) {
+      if (tradable(t)) toQueue.push(t)
+      else if (verb === "Closing" && t.origin === "trade" && t.currentPrice != null) {
         try {
           await closeOpenTrade(t.id, t.currentPrice)
           done++
@@ -265,6 +264,13 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
       } else {
         done++ // view-only: the optimistic UI change is the whole action
       }
+    }
+    const submitted = await Promise.all(toQueue.map((t) => queueOrder(t, build(t))))
+    const queued: { orderId: number }[] = []
+    for (const res of submitted) {
+      if (res?.status === "pending" && res.id != null) queued.push({ orderId: res.id })
+      else if (res?.status === "filled") done++
+      else failed++
     }
     if (queued.length) {
       const results = await confirmOrders(queued.map((q) => q.orderId))

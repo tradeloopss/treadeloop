@@ -349,11 +349,57 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
   }
 }
 
+// Claim the single oldest pending order for one account — used to drain a
+// bulk action (e.g. "SL/TP for all") one at a time on the same warm terminal.
+async function claimOneOrderForAccount(accountId: number): Promise<OrderCommandRow | undefined> {
+  const claimed = await db.execute<{ id: number }>(sql`
+    update order_commands set "leaseUntil" = now() + make_interval(mins => 2), "updatedAt" = now()
+    where id = (
+      select id from order_commands
+      where broker in ('mt5','mt4') and status = 'pending' and "accountId" = ${accountId} and ("leaseUntil" is null or "leaseUntil" < now())
+      order by "createdAt" limit 1 for update skip locked
+    ) returning id`)
+  const id = claimed.rows[0]?.id
+  if (id == null) return undefined
+  const [row] = await db.select().from(orderCommands).where(eq(orderCommands.id, id))
+  return row
+}
+
+// Run every pending order for one account back-to-back on ONE bridge, reusing
+// the warm session — so a bulk close/modify pays the login once, then the rest
+// are instant. Stops if a command comes back still-pending (re-queued after a
+// transient failure) so a bad order can't tight-loop; the fast loop retries it.
+async function runAccountOrders(bridge: Bridge, conn: Connection, first: OrderCommandRow) {
+  const accountId = first.accountId
+  let cmd: OrderCommandRow | undefined = first
+  const seen = new Set<number>()
+  while (cmd && !stopping) {
+    if (seen.has(cmd.id)) break
+    seen.add(cmd.id)
+    await executeOrderCommand(bridge, cmd, conn)
+    bridge.orderPin = { accountId, login: conn.login, until: Date.now() + ORDER_PIN_MS }
+    cmd = await claimOneOrderForAccount(accountId)
+  }
+}
+
 async function processOrderCommands() {
-  const free = bridges.filter((b) => b.alive && !b.busy)
-  if (free.length === 0) return
-  const cmds = await claimOrderCommands(free.length)
+  const now = Date.now()
+  const freeCount = bridges.filter((b) => b.platform === "mt5" && b.alive && !b.busy).length
+  if (freeCount === 0) return
+  // A broker allows one session per login, so two terminals must NEVER log into
+  // the same account at once — that just makes them fight and re-login forever
+  // (the old cause of a slow bulk). So each account's orders run one-at-a-time
+  // on a single warm terminal; other accounts still run in parallel on the
+  // other terminals. Claim a few extra to fill terminals with DISTINCT accounts.
+  const activeAccounts = new Set(bridges.filter((b) => b.busy && b.orderPin && b.orderPin.until > now).map((b) => b.orderPin!.accountId))
+  const cmds = await claimOrderCommands(freeCount + 6)
+  const dispatched = new Set<number>()
+  const defer: number[] = []
   for (const cmd of cmds) {
+    if (activeAccounts.has(cmd.accountId) || dispatched.has(cmd.accountId)) {
+      defer.push(cmd.id) // same account is already being worked; the drain picks it up
+      continue
+    }
     const [conn] = await db.select().from(metatraderConnections).where(eq(metatraderConnections.accountId, cmd.accountId))
     if (!conn) {
       await finishCommand(cmd.id, "failed", "No MetaTrader connection for this account.")
@@ -365,21 +411,21 @@ async function processOrderCommands() {
     }
     const avail = bridges.filter((b) => b.platform === "mt5" && b.alive && !b.busy)
     if (avail.length === 0) {
-      await db.update(orderCommands).set({ leaseUntil: null }).where(eq(orderCommands.id, cmd.id)) // free it for the next tick
+      defer.push(cmd.id)
       continue
     }
-    const now = Date.now()
-    // Prefer a terminal still pinned+warm to this account (no re-login), else
-    // the usual pick. Pinning it means the next order is instant and syncs skip it.
     const warm = avail.find((b) => b.orderPin && b.orderPin.accountId === cmd.accountId && b.orderPin.until > now)
     const bridge = warm ?? pickBridge(avail, conn, brokerFor(conn.server))
     bridge.busy = true
     bridge.orderPin = { accountId: cmd.accountId, login: conn.login, until: now + ORDER_PIN_MS }
-    void executeOrderCommand(bridge, cmd, conn).finally(() => {
+    dispatched.add(cmd.accountId)
+    void runAccountOrders(bridge, conn, cmd).finally(() => {
       bridge.busy = false
-      // Refresh the pin from completion so a burst of manage actions all stay warm.
       bridge.orderPin = { accountId: cmd.accountId, login: conn.login, until: Date.now() + ORDER_PIN_MS }
     })
+  }
+  if (defer.length > 0) {
+    await db.update(orderCommands).set({ leaseUntil: null }).where(inArray(orderCommands.id, defer))
   }
 }
 
