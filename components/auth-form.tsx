@@ -7,7 +7,7 @@ import Link from "next/link"
 import { Eye, EyeOff, Check } from "lucide-react"
 import { authClient } from "@/lib/auth-client"
 import { updateUsername } from "@/app/actions/settings"
-import { resolveLoginEmail } from "@/app/actions/auth-helpers"
+import { resolveLoginEmail, sendSignupOtp, verifySignupOtp } from "@/app/actions/auth-helpers"
 import { BrandMark } from "@/components/brand-mark"
 import { cn } from "@/lib/utils"
 import { useT } from "@/components/locale-provider"
@@ -140,37 +140,11 @@ export function AuthForm({
     setLoading(true)
     try {
       if (isSignUp) {
-        const handle = (username.trim() || email.split("@")[0]).toLowerCase()
-        const { error } = await authClient.signUp.email({ email: email.trim(), password, name: username.trim() || handle })
-        if (error) {
-          if (/exist/i.test(error.message ?? "")) throw new Error(t("An account with this email already exists — try signing in instead."))
-          throw new Error(error.message ?? t("Could not create account"))
-        }
-        // The account now exists and (autoSignIn) the user is signed in. Save
-        // the chosen @handle — best-effort.
-        try {
-          await updateUsername(handle)
-        } catch {
-          /* handle can be set later in Settings */
-        }
-        // Email verification is best-effort: only gate on the code if we could
-        // actually send it. If email delivery isn't configured (or the send
-        // fails), don't strand the already-created, already-signed-in user on a
-        // code screen — send them straight to the dashboard. (Otherwise they'd
-        // hit "User already exists" if they retried the same email.)
-        let otpSent = false
-        try {
-          const { error: otpErr } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim(), type: "email-verification" })
-          otpSent = !otpErr
-        } catch {
-          otpSent = false
-        }
-        if (otpSent) {
-          setStep("verify")
-          return
-        }
-        router.push(redirectTo)
-        router.refresh()
+        // Verify the email FIRST — email a code and move to the code step. The
+        // account isn't created until the code is confirmed (onVerify).
+        const res = await sendSignupOtp(email)
+        if (!res.ok) throw new Error(res.error ?? t("Could not send the verification code"))
+        setStep("verify")
         return
       }
       // Sign in — accept an email or a username.
@@ -193,8 +167,21 @@ export function AuthForm({
     setError(null)
     setLoading(true)
     try {
-      const { error } = await authClient.emailOtp.verifyEmail({ email: email.trim(), otp: otp.replace(/\s/g, "") })
-      if (error) throw new Error(error.message ?? t("That code didn't work. Please try again."))
+      // 1) Confirm the emailed code.
+      const check = await verifySignupOtp(email, otp)
+      if (!check.ok) throw new Error(check.error ?? t("That code didn't work. Please try again."))
+      // 2) Only now create the account and sign in.
+      const handle = (username.trim() || email.split("@")[0]).toLowerCase()
+      const { error } = await authClient.signUp.email({ email: email.trim(), password, name: username.trim() || handle })
+      if (error) {
+        if (/exist/i.test(error.message ?? "")) throw new Error(t("An account with this email already exists — try signing in instead."))
+        throw new Error(error.message ?? t("Could not create account"))
+      }
+      try {
+        await updateUsername(handle)
+      } catch {
+        /* handle can be set later in Settings */
+      }
       router.push(redirectTo)
       router.refresh()
     } catch (err) {
@@ -208,8 +195,8 @@ export function AuthForm({
     setError(null)
     setResent(false)
     try {
-      const { error } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim(), type: "email-verification" })
-      if (error) throw new Error(error.message ?? t("Could not resend the code"))
+      const res = await sendSignupOtp(email)
+      if (!res.ok) throw new Error(res.error ?? t("Could not resend the code"))
       setResent(true)
     } catch (err) {
       setError(err instanceof Error ? t(err.message) : t("Could not resend the code"))
