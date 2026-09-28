@@ -4,10 +4,42 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { after } from "next/server"
 import { revalidatePath } from "next/cache"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { announcements, dailyPnlShares, importEvents, payoutShares, playbooks, rithmicConnections, starterPlaybooks, starterTagGroups, subscriptions, supportMessages, supportTickets, trades, twoFactor, user } from "@/lib/db/schema"
+import {
+  announcements,
+  backtestSessions,
+  csvSchemas,
+  dailyPnlShares,
+  dashboardTemplates,
+  importEvents,
+  journalEntries,
+  metatraderConnections,
+  orderCommands,
+  payoutShares,
+  playbooks,
+  propFirmRules,
+  propFirmTransactions,
+  rithmicConnections,
+  starterPlaybooks,
+  starterTagGroups,
+  subscriptions,
+  supportMessages,
+  supportTickets,
+  tagGroups,
+  tagOptions,
+  tradeTemplates,
+  trades,
+  tradingAccounts,
+  tradingConnections,
+  tradingviewConnections,
+  tradingviewPairings,
+  twoFactor,
+  user,
+  userOnboarding,
+  verification,
+} from "@/lib/db/schema"
 import { assertAdmin } from "@/lib/admin/guard"
 import { logAdminAction } from "@/lib/admin/audit"
 import { isAdminRole, type AdminRole } from "@/lib/admin/access"
@@ -67,6 +99,60 @@ export async function unsuspendUser(userId: string) {
     const admin = await assertAdmin({ user: ["ban"] })
     await auth.api.unbanUser({ body: { userId }, headers: await headers() })
     await logAdminAction(admin, "user.unsuspend", userId)
+  })
+}
+
+// Permanently delete a user and everything they own, so the email is free to
+// sign up again. Restricted to the "delete" permission (super admin). All the
+// app tables are keyed by userId with no cross-FKs, so they delete in any
+// order; deleting the `user` row cascades account/session/twoFactor/user_settings.
+export async function deleteUser(userId: string) {
+  return run(async () => {
+    const admin = await assertAdmin({ user: ["delete"] })
+    if (userId === admin.id) throw new Error("You can't delete your own account from here.")
+    const target = await getTarget(userId)
+    if (isOwnerEmail(target.email)) throw new Error("Site owners can't be deleted.")
+    if (isAdminRole(target.role) && admin.role !== "super_admin") throw new Error("Only a Super Admin can delete another admin.")
+    const email = target.email.toLowerCase()
+
+    // Support messages reference their ticket (FK) — clear them first.
+    const tickets = await db.select({ id: supportTickets.id }).from(supportTickets).where(eq(supportTickets.userId, userId))
+    if (tickets.length) await db.delete(supportMessages).where(inArray(supportMessages.ticketId, tickets.map((t) => t.id)))
+
+    // Everything the user owns, keyed by userId.
+    await db.delete(trades).where(eq(trades.userId, userId))
+    await db.delete(journalEntries).where(eq(journalEntries.userId, userId))
+    await db.delete(backtestSessions).where(eq(backtestSessions.userId, userId))
+    await db.delete(tagOptions).where(eq(tagOptions.userId, userId))
+    await db.delete(tagGroups).where(eq(tagGroups.userId, userId))
+    await db.delete(playbooks).where(eq(playbooks.userId, userId))
+    await db.delete(propFirmTransactions).where(eq(propFirmTransactions.userId, userId))
+    await db.delete(propFirmRules).where(eq(propFirmRules.userId, userId))
+    await db.delete(dailyPnlShares).where(eq(dailyPnlShares.userId, userId))
+    await db.delete(payoutShares).where(eq(payoutShares.userId, userId))
+    await db.delete(dashboardTemplates).where(eq(dashboardTemplates.userId, userId))
+    await db.delete(orderCommands).where(eq(orderCommands.userId, userId))
+    await db.delete(metatraderConnections).where(eq(metatraderConnections.userId, userId))
+    await db.delete(rithmicConnections).where(eq(rithmicConnections.userId, userId))
+    await db.delete(tradingviewConnections).where(eq(tradingviewConnections.userId, userId))
+    await db.delete(tradingviewPairings).where(eq(tradingviewPairings.userId, userId))
+    await db.delete(tradingConnections).where(eq(tradingConnections.userId, userId))
+    await db.delete(csvSchemas).where(eq(csvSchemas.userId, userId))
+    await db.delete(tradeTemplates).where(eq(tradeTemplates.userId, userId))
+    await db.delete(userOnboarding).where(eq(userOnboarding.userId, userId))
+    await db.delete(supportTickets).where(eq(supportTickets.userId, userId))
+    await db.delete(tradingAccounts).where(eq(tradingAccounts.userId, userId))
+
+    // Email-keyed rows, so a fresh signup (and its free trial) starts clean.
+    await db.delete(subscriptions).where(or(eq(subscriptions.userId, userId), eq(subscriptions.email, email)))
+    await db.delete(verification).where(eq(verification.identifier, email))
+
+    // Finally the account — cascades account/session/twoFactor/user_settings —
+    // freeing the email to sign up again.
+    await db.delete(user).where(eq(user.id, userId))
+
+    await logAdminAction(admin, "user.delete", userId, { email })
+    return "Account deleted — the email is free to sign up again."
   })
 }
 

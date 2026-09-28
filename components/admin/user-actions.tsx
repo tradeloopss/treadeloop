@@ -2,16 +2,17 @@
 
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
-import { Ban, Gift, KeyRound, LogIn, LogOut, ShieldCheck, ShieldOff } from "lucide-react"
+import { Ban, Gift, KeyRound, LogIn, LogOut, ShieldCheck, ShieldOff, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { grantPlan, impersonateUser, resetTwoFactor, revokeUserSessions, sendPasswordResetEmail, suspendUser, unsuspendUser, type ActionResult } from "@/app/actions/admin"
+import { deleteUser, grantPlan, impersonateUser, resetTwoFactor, revokeUserSessions, sendPasswordResetEmail, suspendUser, unsuspendUser, type ActionResult } from "@/app/actions/admin"
 
-type Panel = "suspend" | "grant" | null
+type Panel = "suspend" | "grant" | "delete" | null
 
 export function UserActions({
   userId,
   userLabel,
+  userEmail,
   banned,
   isSelf,
   twoFactorEnabled,
@@ -24,7 +25,8 @@ export function UserActions({
   isSelf: boolean
   twoFactorEnabled: boolean
   hasPassword: boolean
-  can: { impersonate: boolean; ban: boolean; revoke: boolean; grant: boolean; security: boolean }
+  can: { impersonate: boolean; ban: boolean; revoke: boolean; grant: boolean; security: boolean; delete: boolean }
+  userEmail: string
 }) {
   const [pending, startTransition] = useTransition()
   const [panel, setPanel] = useState<Panel>(null)
@@ -33,6 +35,7 @@ export function UserActions({
   const [plan, setPlan] = useState<"essential" | "pro">("pro")
   const [grantDays, setGrantDays] = useState("30")
   const [note, setNote] = useState("")
+  const [confirmText, setConfirmText] = useState("")
 
   function perform(action: () => Promise<ActionResult | undefined>, success: string) {
     startTransition(async () => {
@@ -113,7 +116,34 @@ export function UserActions({
               <Ban className="size-4" /> Suspend
             </Button>
           ))}
+        {can.delete && (
+          <Button variant="destructive" disabled={pending} onClick={() => { setConfirmText(""); setPanel(panel === "delete" ? null : "delete") }}>
+            <Trash2 className="size-4" /> Delete account
+          </Button>
+        )}
       </div>
+
+      {panel === "delete" && (
+        <form
+          className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            perform(() => deleteUser(userId), "Account deleted.")
+          }}
+        >
+          <p className="text-sm">
+            <span className="font-semibold text-destructive">Permanently delete {userLabel}</span> and everything they own — trades, journal,
+            connected accounts, subscription and settings. This can&apos;t be undone. The email is freed, so they can sign up again fresh.
+          </p>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Type the account email <span className="font-mono text-foreground">{userEmail}</span> to confirm
+            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={userEmail} autoComplete="off" />
+          </label>
+          <Button type="submit" variant="destructive" disabled={pending || confirmText.trim().toLowerCase() !== userEmail.toLowerCase()}>
+            {pending ? "Deleting…" : "Permanently delete account"}
+          </Button>
+        </form>
+      )}
 
       {panel === "suspend" && (
         <form

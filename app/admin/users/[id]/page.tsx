@@ -53,6 +53,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
     revoke: roleCan(admin.role, { session: ["revoke"] }),
     grant: roleCan(admin.role, { billing: ["manage"] }),
     security: roleCan(admin.role, { security: ["manage"] }) && (!isAdminRole(user.role) || admin.role === "super_admin"),
+    delete: roleCan(admin.role, { user: ["delete"] }) && !owner && (!isAdminRole(user.role) || admin.role === "super_admin"),
   }
   const hasPassword = profile.providers.some((p) => p.providerId === "credential")
   const canSync = roleCan(admin.role, { brokers: ["sync"] })
@@ -80,7 +81,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           </p>
         )}
         <div className="mt-4">
-          <UserActions userId={user.id} userLabel={user.email} banned={!!user.banned} isSelf={user.id === admin.id} twoFactorEnabled={!!user.twoFactorEnabled} hasPassword={hasPassword} can={can} />
+          <UserActions userId={user.id} userLabel={user.email} userEmail={user.email} banned={!!user.banned} isSelf={user.id === admin.id} twoFactorEnabled={!!user.twoFactorEnabled} hasPassword={hasPassword} can={can} />
         </div>
       </div>
 
