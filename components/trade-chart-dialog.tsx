@@ -164,7 +164,7 @@ export function TradeChartDialog({ trade, open, onOpenChange }: { trade: ChartTr
             {candles.length > 0 ? (
               <BacktestChart candles={candles} markers={markers} priceLines={priceLines} />
             ) : (
-              <div className="flex h-full items-center justify-center px-8 text-center text-sm text-muted-foreground">{t("No chart data for this symbol and timeframe.")}</div>
+              <div className="flex h-full items-center justify-center px-8 text-center text-sm text-muted-foreground">{t(data?.error ?? "No chart data for this symbol and timeframe.")}</div>
             )}
           </div>
         )}
