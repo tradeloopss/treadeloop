@@ -13,6 +13,7 @@ import { resolveTimeZone, localDay } from "@/lib/timezone"
 import { resolvePnlPeriod } from "@/lib/pnl-period"
 import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
 import { DashboardHeaderActions } from "@/components/dashboard-header-actions"
+import { ConnectFirstAccountDialog } from "@/components/onboarding/connect-first-account-dialog"
 import { CurrentWeekCalendar } from "@/components/current-week-calendar"
 import { LastWeekReport } from "@/components/last-week-report"
 import type { ReportTrade } from "@/components/period-insights"
@@ -348,6 +349,7 @@ export default async function DashboardPage() {
   void recordRequestTiming("/dashboard", Date.now() - startedAt)
   return (
     <div>
+      <ConnectFirstAccountDialog show={accounts.length === 0} />
       <AutoSyncBanner events={syncEvents} />
       <PageHeader
         sticky
