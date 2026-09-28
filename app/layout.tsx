@@ -2,7 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
-import { IBM_Plex_Sans_Arabic } from 'next/font/google'
+import { IBM_Plex_Sans_Arabic, Inter } from 'next/font/google'
 import { DirectionProvider } from '@base-ui/react/direction-provider'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -19,6 +19,15 @@ const arabicSans = IBM_Plex_Sans_Arabic({
   weight: ['400', '500', '600', '700'],
   subsets: ['arabic', 'latin'],
   variable: '--font-arabic',
+  display: 'swap',
+})
+
+// The Settings section's typeface — the clean UI sans of its reference design.
+// Exposed as a variable and applied only within .settings-scope (globals.css),
+// so the rest of the app keeps Geist.
+const settingsSans = Inter({
+  subsets: ['latin'],
+  variable: '--font-settings',
   display: 'swap',
 })
 
@@ -52,7 +61,7 @@ export default async function RootLayout({
   const dir = dirFor(locale)
   const messages = await loadMessages(locale)
   return (
-    <html lang={locale} dir={dir} className={`${GeistSans.variable} ${GeistMono.variable} ${arabicSans.variable}`} suppressHydrationWarning>
+    <html lang={locale} dir={dir} className={`${GeistSans.variable} ${GeistMono.variable} ${arabicSans.variable} ${settingsSans.variable}`} suppressHydrationWarning>
       <body className="antialiased">
         <LocaleProvider locale={locale} messages={messages}>
           <DirectionProvider direction={dir}>

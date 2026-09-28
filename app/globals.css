@@ -166,6 +166,12 @@
    .settings-scope in dark mode only, so light mode stays consistent with the
    rest of the app. Nested cards/panels/inputs pick these up automatically
    because they read the same tokens. */
+/* The Settings section uses the reference design's UI sans (Inter, loaded in
+   app/layout.tsx). Not applied on Arabic pages, which need their own font. */
+html:not([lang="ar"]) .settings-scope {
+  font-family: var(--font-settings), ui-sans-serif, system-ui, sans-serif;
+}
+
 .dark .settings-scope {
   --background: oklch(0.145 0.004 285);
   --card: oklch(0.172 0.004 285);

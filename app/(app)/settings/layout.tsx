@@ -9,7 +9,7 @@ import { SettingsPageTransition } from "@/components/settings/page-transition"
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="settings-scope min-h-full bg-background">
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 p-4 sm:p-6 lg:flex-row lg:gap-8">
+      <div className="flex w-full flex-col gap-6 p-4 sm:p-6 lg:flex-row lg:gap-8">
         <SettingsNav />
         <div className="min-w-0 flex-1">
           <SettingsPageTransition>{children}</SettingsPageTransition>
