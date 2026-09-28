@@ -17,6 +17,36 @@ export function HelpIcon({ name, className }: { name: string; className?: string
   return <Icon className={className} />
 }
 
+// Turns a YouTube/Vimeo watch URL into its embed URL; returns null for a plain
+// media file (played with <video>).
+function embedUrl(url: string): string | null {
+  const yt = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{6,})/)
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`
+  const vim = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+  if (vim) return `https://player.vimeo.com/video/${vim[1]}`
+  return null
+}
+
+function HelpVideo({ url, title }: { url: string; title?: string }) {
+  const embed = embedUrl(url)
+  return (
+    <div className="overflow-hidden rounded-xl border bg-black">
+      {embed ? (
+        <iframe
+          src={embed}
+          title={title ?? "Video"}
+          className="aspect-video w-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      ) : (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video src={url} controls className="aspect-video w-full" preload="metadata" />
+      )}
+    </div>
+  )
+}
+
 // Renders a guide's structured body into clean, styled elements.
 export function ArticleBody({ blocks }: { blocks: Block[] }) {
   return (
@@ -57,6 +87,8 @@ export function ArticleBody({ blocks }: { blocks: Block[] }) {
                 ))}
               </ol>
             )
+          case "video":
+            return <HelpVideo key={i} url={b.url} title={b.title} />
           case "note":
           case "warn": {
             const warn = b.t === "warn"

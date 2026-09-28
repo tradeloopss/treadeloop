@@ -10,6 +10,14 @@ export type Block =
   | { t: "list"; items: string[] }
   | { t: "note"; text: string }
   | { t: "warn"; text: string }
+  | { t: "video"; url: string; title?: string }
+
+// A quick-start video for the Getting Started guide. Set to a YouTube/Vimeo
+// link or a direct .mp4 URL via NEXT_PUBLIC_HELP_VIDEO_URL — the slot only
+// appears when it's set. (A raw .wmv won't work: browsers can't play WMV, and a
+// 147MB file isn't deployed to the site — host it on YouTube/Vimeo or compress
+// to a small MP4.)
+const INTRO_VIDEO = process.env.NEXT_PUBLIC_HELP_VIDEO_URL ?? ""
 
 export type Article = {
   slug: string
@@ -38,6 +46,7 @@ export const HELP: Category[] = [
         title: "What is TradeLoop?",
         summary: "A trading journal that syncs your trades, tracks your prop-firm rules, and lets you manage live positions.",
         body: [
+          ...(INTRO_VIDEO ? [{ t: "video", url: INTRO_VIDEO, title: "Quick start" } as Block] : []),
           { t: "p", text: "TradeLoop is a trading journal and analytics tool for futures, forex, stocks, options and crypto. It connects to your broker, imports your trades automatically, and turns them into a dashboard, calendar, equity curve and full reports — without manual entry." },
           { t: "h", text: "What you can do" },
           { t: "list", items: [
