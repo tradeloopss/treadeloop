@@ -37,6 +37,7 @@ import {
   Activity,
   Banknote,
   CandlestickChart,
+  Rewind,
   Wallet,
   CreditCard,
 } from "lucide-react"
@@ -263,6 +264,26 @@ export function DashboardSidebar({
               }
             />
             {collapsed && <TooltipContent side="inline-end">{t("Backtesting")}</TooltipContent>}
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  href="/replay"
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    collapsed && "md:justify-center md:px-0",
+                    pathname.startsWith("/replay")
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                  )}
+                >
+                  <Rewind className="size-4 shrink-0" />
+                  <span className={cn(collapsed && "md:hidden")}>{t("Replay")}</span>
+                </Link>
+              }
+            />
+            {collapsed && <TooltipContent side="inline-end">{t("Replay")}</TooltipContent>}
           </Tooltip>
         </nav>
 
