@@ -126,11 +126,11 @@ function Sheet({ open, onClose, title, subtitle, children, footer }: { open: boo
         role="dialog"
         aria-modal="true"
         className={cn(
-          "fixed z-50 flex flex-col bg-card shadow-xl",
+          "fixed z-50 flex flex-col bg-card shadow-2xl",
           // Mobile: bottom sheet
           "inset-x-0 bottom-0 max-h-[88vh] rounded-t-3xl border-t animate-in fade-in slide-in-from-bottom-4 duration-200",
-          // Desktop: right drawer
-          "lg:inset-y-0 lg:end-0 lg:bottom-auto lg:h-full lg:w-[420px] lg:max-h-none lg:rounded-none lg:rounded-s-2xl lg:border-t-0 lg:border-s",
+          // Desktop: centered modal window (zooms in over the dimmed backdrop)
+          "lg:inset-0 lg:m-auto lg:h-fit lg:max-h-[85vh] lg:w-[460px] lg:rounded-2xl lg:border lg:zoom-in-95",
         )}
       >
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-border lg:hidden" />
@@ -873,7 +873,7 @@ function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEdit
           <X className="size-3.5" /> Close {count || total}
         </button>
         {onBreakeven && (
-          <button type="button" onClick={onBreakeven} className="inline-flex items-center gap-1 rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/10">
+          <button type="button" onClick={onBreakeven} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90">
             <Shield className="size-3.5" /> Break-even
           </button>
         )}
