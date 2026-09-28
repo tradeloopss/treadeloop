@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react"
 import { HELP } from "@/lib/help/content"
 import { HelpIcon } from "@/components/help/help-ui"
 import { HelpSearch } from "@/components/help/help-search"
+import { BrandMark } from "@/components/brand-mark"
 
 export default function HelpHome() {
   const searchItems = HELP.flatMap((c) =>
@@ -12,6 +13,10 @@ export default function HelpHome() {
   return (
     <div className="space-y-10">
       <section className="text-center">
+        <div className="mb-5 flex items-center justify-center gap-2.5">
+          <BrandMark className="size-11" alt="TradeLoop" />
+          <span className="text-2xl font-bold tracking-tight">TradeLoop</span>
+        </div>
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">How can we help?</h1>
         <p className="mx-auto mt-2 max-w-xl text-muted-foreground">Guides and answers for getting the most out of TradeLoop.</p>
         <div className="mx-auto mt-6 max-w-xl">

@@ -17,6 +17,15 @@ export function HelpIcon({ name, className }: { name: string; className?: string
   return <Icon className={className} />
 }
 
+// A URL-safe anchor id for a heading (shared by the body and the table of contents).
+export function headingSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+}
+
 // Turns a YouTube/Vimeo watch URL into its embed URL; returns null for a plain
 // media file (played with <video>).
 function embedUrl(url: string): string | null {
@@ -55,14 +64,29 @@ export function ArticleBody({ blocks }: { blocks: Block[] }) {
         switch (b.t) {
           case "h":
             return (
-              <h2 key={i} className="pt-2 text-lg font-semibold tracking-tight">
+              <h2 key={i} id={headingSlug(b.text)} className="scroll-mt-20 pt-3 text-xl font-bold tracking-tight">
                 {b.text}
               </h2>
+            )
+          case "sub":
+            return (
+              <p key={i} className="-mb-2 font-semibold text-foreground">
+                {b.text}
+              </p>
             )
           case "p":
             return (
               <p key={i} className="leading-relaxed text-muted-foreground">
                 {b.text}
+              </p>
+            )
+          case "link":
+            return (
+              <p key={i} className="text-muted-foreground">
+                {b.prefix ? `${b.prefix}: ` : null}
+                <a href={b.href} className="font-medium text-primary underline underline-offset-2 hover:opacity-80">
+                  {b.label}
+                </a>
               </p>
             )
           case "list":

@@ -3,26 +3,29 @@
 // by dropping it into the right category's `articles` array; add a category by
 // adding to HELP. Icons are lucide names resolved in components/help/icon.ts.
 
+import { appHref } from "@/lib/urls"
+
 export type Block =
   | { t: "p"; text: string }
   | { t: "h"; text: string }
+  | { t: "sub"; text: string }
   | { t: "steps"; items: string[] }
   | { t: "list"; items: string[] }
   | { t: "note"; text: string }
   | { t: "warn"; text: string }
   | { t: "video"; url: string; title?: string }
+  | { t: "link"; label: string; href: string; prefix?: string }
 
-// A quick-start video for the Getting Started guide. Set to a YouTube/Vimeo
-// link or a direct .mp4 URL via NEXT_PUBLIC_HELP_VIDEO_URL — the slot only
-// appears when it's set. (A raw .wmv won't work: browsers can't play WMV, and a
-// 147MB file isn't deployed to the site — host it on YouTube/Vimeo or compress
-// to a small MP4.)
-const INTRO_VIDEO = process.env.NEXT_PUBLIC_HELP_VIDEO_URL ?? ""
+// The onboarding video. Defaults to the committed MP4 in /public; override with
+// a YouTube/Vimeo link (auto-embedded) via NEXT_PUBLIC_HELP_VIDEO_URL.
+const INTRO_VIDEO = process.env.NEXT_PUBLIC_HELP_VIDEO_URL ?? "/TradeLoop.mp4"
 
 export type Article = {
   slug: string
   title: string
   summary: string
+  author?: string
+  date?: string // ISO
   body: Block[]
 }
 
@@ -42,21 +45,39 @@ export const HELP: Category[] = [
     icon: "rocket",
     articles: [
       {
-        slug: "what-is-tradeloop",
-        title: "What is TradeLoop?",
-        summary: "A trading journal that syncs your trades, tracks your prop-firm rules, and lets you manage live positions.",
+        slug: "welcome-to-tradeloop",
+        title: "Welcome to TradeLoop",
+        summary: "TradeLoop: your comprehensive trading performance tracker.",
+        author: "TradeLoop Team",
+        date: "2026-09-28",
         body: [
-          ...(INTRO_VIDEO ? [{ t: "video", url: INTRO_VIDEO, title: "Quick start" } as Block] : []),
-          { t: "p", text: "TradeLoop is a trading journal and analytics tool for futures, forex, stocks, options and crypto. It connects to your broker, imports your trades automatically, and turns them into a dashboard, calendar, equity curve and full reports — without manual entry." },
-          { t: "h", text: "What you can do" },
-          { t: "list", items: [
-            "Auto-sync trades from MetaTrader 4/5, Rithmic and Tradovate — or import a CSV.",
-            "See live P&L, a P&L calendar, equity curve and performance reports.",
-            "Journal every session, tag setups and mistakes, and build playbooks.",
-            "Track your prop-firm rules (drawdown, daily loss, targets) as you trade.",
-            "Manage live positions — edit stop loss / take profit, close, partial-close and reverse — from the Trades Manager.",
-          ] },
-          { t: "note", text: "Syncing is read-only by design: it only reads your trade history, never places orders — unless you explicitly turn on order execution for an account (see the Trades Manager guides)." },
+          { t: "p", text: "TradeLoop is designed for traders looking to track and analyze their trading performance for continuous improvement. Here's an overview of what TradeLoop offers:" },
+          { t: "h", text: "TradeLoop Onboarding Overview" },
+          { t: "p", text: "Watch our onboarding video to get started:" },
+          { t: "video", url: INTRO_VIDEO, title: "TradeLoop onboarding" },
+          { t: "h", text: "✅ Importing your trades into TradeLoop" },
+          { t: "p", text: "Effortlessly import your trades using one of three methods: File Upload (CSV), Broker Sync (MetaTrader 4/5, Rithmic, Tradovate), or Manual entry." },
+          { t: "link", prefix: "Step-by-step guide", label: "Connecting accounts", href: "/help/connecting-accounts" },
+          { t: "h", text: "📈 Trade tracking" },
+          { t: "sub", text: "Easily and accurately track your trades" },
+          { t: "p", text: "Get in-depth analytics of each trade — from entries and exits to risk management, setups and more." },
+          { t: "link", prefix: "Direct link", label: "Trades", href: appHref("/trades") },
+          { t: "h", text: "📓 Journaling" },
+          { t: "sub", text: "Personalized journal and note-taking" },
+          { t: "p", text: "Powerful journaling that lets you take notes, tag trades, and understand how you're performing overall." },
+          { t: "link", prefix: "Direct link", label: "Daily Journal", href: appHref("/journal") },
+          { t: "h", text: "📊 Reporting" },
+          { t: "sub", text: "Drilled-down reporting" },
+          { t: "p", text: "Access reports that help you gauge your strengths and weaknesses — discover what's working and what's not, and bring it into your trading plan." },
+          { t: "link", prefix: "Direct link", label: "Reports", href: appHref("/reports") },
+          { t: "h", text: "📘 Playbooks" },
+          { t: "sub", text: "Build and refine your strategies" },
+          { t: "p", text: "Capture each strategy as a playbook and measure exactly how it performs so you can double down on your edge." },
+          { t: "link", prefix: "Direct link", label: "Playbooks", href: appHref("/playbooks") },
+          { t: "h", text: "🛡️ Prop-firm tracking" },
+          { t: "p", text: "Track your prop-firm rules — profit target, daily loss, max drawdown and trading days — automatically as you trade, on both evaluation and funded accounts." },
+          { t: "link", prefix: "Direct link", label: "Propfirm Tracker", href: appHref("/propfirm-max") },
+          { t: "note", text: "If you have any further questions or need assistance with anything regarding TradeLoop, please don't hesitate to contact our support team." },
         ],
       },
       {
