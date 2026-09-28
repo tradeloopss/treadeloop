@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { Loader2, ZoomOut } from "lucide-react"
 import { useIntlLocale, useT } from "@/components/locale-provider"
+import { TradeTradingViewChart } from "@/components/trade-tradingview-chart"
 
 export interface ChartTrade {
   symbol: string
@@ -109,6 +110,7 @@ export function TradeChartDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const [interval, setInterval] = useState(() => defaultInterval(trade.entryTime))
+  const [source, setSource] = useState<"tradeloop" | "tradingview">("tradeloop")
   const [data, setData] = useState<TradeChartData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -271,8 +273,29 @@ export function TradeChartDialog({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {isZoomed && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Chart source: the marked-up TradeLoop chart, or the real TradingView chart. */}
+            <div className="flex items-center gap-1 rounded-lg border p-1">
+              {(
+                [
+                  ["tradeloop", t("TradeLoop")],
+                  ["tradingview", t("TradingView")],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSource(key)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                    source === key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {source === "tradeloop" && isZoomed && (
               <button
                 type="button"
                 onClick={() => setDomain(fullDomain)}
@@ -299,6 +322,10 @@ export function TradeChartDialog({
           </div>
         </div>
 
+        {source === "tradingview" ? (
+          <TradeTradingViewChart symbol={trade.symbol} market={trade.market} interval={interval} />
+        ) : (
+          <>
         {loading && (
           <div className="flex h-[460px] items-center justify-center text-muted-foreground">
             <Loader2 className="size-5 animate-spin" />
@@ -438,6 +465,8 @@ export function TradeChartDialog({
             <p className="text-center text-xs text-muted-foreground">
               {t("Scroll to zoom, drag to pan — just like a real trading platform.")}
             </p>
+          </>
+        )}
           </>
         )}
       </DialogContent>
