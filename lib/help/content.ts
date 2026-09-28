@@ -16,9 +16,10 @@ export type Block =
   | { t: "video"; url: string; title?: string }
   | { t: "link"; label: string; href: string; prefix?: string }
 
-// The onboarding video. Defaults to the committed MP4 in /public; override with
-// a YouTube/Vimeo link (auto-embedded) via NEXT_PUBLIC_HELP_VIDEO_URL.
-const INTRO_VIDEO = process.env.NEXT_PUBLIC_HELP_VIDEO_URL ?? "/TradeLoop.mp4"
+// The onboarding video — the Vimeo walkthrough, auto-embedded. Override with
+// another YouTube/Vimeo link or the local /TradeLoop.mp4 via
+// NEXT_PUBLIC_HELP_VIDEO_URL.
+const INTRO_VIDEO = process.env.NEXT_PUBLIC_HELP_VIDEO_URL ?? "https://vimeo.com/1231022242"
 
 export type Article = {
   slug: string

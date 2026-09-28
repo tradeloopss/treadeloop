@@ -31,8 +31,13 @@ export function headingSlug(text: string): string {
 function embedUrl(url: string): string | null {
   const yt = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{6,})/)
   if (yt) return `https://www.youtube.com/embed/${yt[1]}`
-  const vim = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
-  if (vim) return `https://player.vimeo.com/video/${vim[1]}`
+  // Vimeo — handles vimeo.com/ID, /video/ID, player URLs, and review links like
+  // vimeo.com/reviews/<hash>/videos/ID (the trailing numeric id is the video).
+  const vim = url.match(/vimeo\.com\/(?:.*\/)?(\d{6,})/)
+  if (vim) {
+    const h = url.match(/[?&]h=([\w]+)/)
+    return `https://player.vimeo.com/video/${vim[1]}${h ? `?h=${h[1]}` : ""}`
+  }
   return null
 }
 
