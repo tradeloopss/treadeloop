@@ -45,9 +45,9 @@ export async function importFillsForConnection(
 ): Promise<number> {
   const imported = reconstructTrades(fills, "rithmic")
 
-  const existingIds = imported.length
+  const existingRows = imported.length
     ? await db
-        .select({ externalId: trades.externalId })
+        .select({ externalId: trades.externalId, entryTime: trades.entryTime, exitTime: trades.exitTime })
         .from(trades)
         .where(
           and(
@@ -64,7 +64,8 @@ export async function importFillsForConnection(
           )
         )
     : []
-  const seen = new Set(existingIds.map((r) => r.externalId))
+  const existingByExt = new Map(existingRows.map((r) => [r.externalId, r]))
+  const seen = new Set(existingRows.map((r) => r.externalId))
   const toImport = imported.filter((t) => !seen.has(t.externalId))
 
   // Price new trades net of commission using the rate the broker's snapshot
@@ -74,6 +75,26 @@ export async function importFillsForConnection(
   const rate = account?.commissionPerContract != null ? Number(account.commissionPerContract) : 0
 
   const affectedDays = new Set<string>()
+
+  // Self-heal already-imported trades whose entry/exit time changed since they
+  // were stored — e.g. the fill-date→ssboe timezone fix that stopped dating
+  // evening-session fills a day ahead. Matched by the stable broker fill id, so
+  // it corrects the row in place (no duplicates). Regenerates the journal for
+  // both the old and the corrected day.
+  for (const t of imported) {
+    const ex = existingByExt.get(t.externalId)
+    if (!ex || !ex.entryTime || !ex.exitTime) continue
+    const newEntry = new Date(t.entryTime)
+    const newExit = new Date(t.exitTime)
+    if (ex.entryTime.getTime() === newEntry.getTime() && ex.exitTime.getTime() === newExit.getTime()) continue
+    await db
+      .update(trades)
+      .set({ entryTime: newEntry, exitTime: newExit })
+      .where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), eq(trades.externalId, t.externalId)))
+    affectedDays.add(t.exitTime.slice(0, 10))
+    affectedDays.add(ex.exitTime.toISOString().slice(0, 10))
+  }
+
   for (const t of toImport) {
     const contractMultiplier = contractMultiplierForSymbol(t.symbol)
     const fees = Number((rate * t.quantity).toFixed(2))

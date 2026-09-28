@@ -893,11 +893,16 @@ function addParsedFill(byId: Map<string, ParsedFill>, accountId: string, f: any)
   if (f.accountId != null && f.accountId !== "" && String(f.accountId) !== String(accountId)) return
   const price = f.fillPrice ?? f.avgFillPrice ?? f.price
   const size = f.fillSize ?? f.totalFillSize
+  // Prefer ssboe/usecs — the fill's true instant in UTC epoch seconds. Rithmic's
+  // fill_date is the exchange TRADE/SESSION date (the CME evening session is
+  // labelled with the NEXT calendar day), so building the time from
+  // fill_date+fill_time dated evening trades a day ahead. ssboe has no such
+  // ambiguity; the string fields are only a fallback when it's absent.
   const timestamp =
-    f.fillDate && f.fillTime
-      ? `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`
-      : f.ssboe != null
-        ? new Date(Number(f.ssboe) * 1000).toISOString()
+    f.ssboe != null
+      ? new Date(Number(f.ssboe) * 1000 + Math.floor(Number(f.usecs || 0) / 1000)).toISOString()
+      : f.fillDate && f.fillTime
+        ? `${String(f.fillDate).slice(0, 4)}-${String(f.fillDate).slice(4, 6)}-${String(f.fillDate).slice(6, 8)}T${f.fillTime}Z`
         : null
   if (!(f.symbol && price != null && size != null && Number(size) > 0 && timestamp)) return
   const externalId = f.fillId || `${f.symbol}:${timestamp}:${price}:${size}`
