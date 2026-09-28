@@ -17,8 +17,9 @@ import { useT } from "@/components/locale-provider"
 // this branded auth screen looks the same regardless of the app theme.
 const FIELD =
   "h-12 w-full rounded-xl border bg-white px-4 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-400 border-neutral-300 focus:border-neutral-900 lg:border-white/15 lg:bg-white/[0.04] lg:text-white lg:placeholder:text-white/40 lg:focus:border-white/50"
+// Light/mobile: TradeLoop brand color. Desktop (dark side): white, per the mock.
 const PRIMARY =
-  "flex h-12 w-full items-center justify-center rounded-xl text-base font-semibold transition-colors disabled:opacity-60 bg-neutral-900 text-white hover:bg-neutral-800 lg:bg-white lg:text-neutral-900 lg:hover:bg-white/90"
+  "flex h-12 w-full items-center justify-center rounded-xl text-base font-semibold transition-colors disabled:opacity-60 bg-[#6d4aff] text-white hover:bg-[#5c3ce6] lg:bg-white lg:text-neutral-900 lg:hover:bg-white/90"
 const SOCIAL =
   "flex h-12 w-full items-center justify-center gap-2.5 rounded-xl border text-base font-medium transition-colors border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50 lg:border-white/15 lg:bg-transparent lg:text-white lg:hover:bg-white/5"
 const MUTED = "text-neutral-500 lg:text-white/50"
@@ -220,10 +221,10 @@ export function AuthForm({
     step === "verify" ? t("Enter the 6-digit code we sent to {email}", { email }) : isSignUp ? t("Start journaling your trades") : t("Welcome back")
 
   return (
-    <div className="min-h-svh bg-white text-neutral-900 lg:bg-black lg:text-white">
+    <div className="min-h-svh bg-white text-neutral-900 lg:bg-[oklch(0.17_0.015_285)] lg:text-white">
       <div className="lg:grid lg:min-h-svh lg:grid-cols-2">
         {/* Hero — desktop only */}
-        <aside className="relative hidden overflow-hidden bg-black px-10 py-12 lg:flex lg:flex-col lg:justify-center xl:px-16">
+        <aside className="relative hidden overflow-hidden bg-[oklch(0.17_0.015_285)] px-10 py-12 lg:flex lg:flex-col lg:justify-center lg:border-e lg:border-white/10 xl:px-16">
           <div className="flex items-center gap-2">
             <BrandMark className="size-8" alt="TradeLoop" />
             <span className="text-lg font-semibold tracking-wide text-white uppercase">TradeLoop</span>

@@ -5,7 +5,7 @@ import { getAccounts, getActiveAccountIds } from "@/app/actions/accounts"
 import { getJournalEntries } from "@/app/actions/journal"
 import { getRecentSyncEvents } from "@/app/actions/sync-events"
 import { AutoSyncBanner } from "@/components/auto-sync-banner"
-import { isPro } from "@/lib/subscription"
+import { isPro, getUserPlan } from "@/lib/subscription"
 import { analyze, formatCurrency, type TradeStat } from "@/lib/calc"
 import { computeDayPnl } from "@/lib/day-pnl"
 import { computeDailyAccountPnl, computeAccountPnlInRange } from "@/lib/daily-account-pnl"
@@ -45,7 +45,7 @@ export default async function DashboardPage() {
   const h = await headers()
   const tz = resolveTimeZone(h)
   const session = await auth.api.getSession({ headers: h })
-  const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template] = await Promise.all([
+  const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template, plan] = await Promise.all([
     getTrades(),
     getAccounts(),
     getActiveAccountIds(),
@@ -54,6 +54,7 @@ export default async function DashboardPage() {
     getRecentSyncEvents(),
     getTemplates(),
     getActiveTemplate(),
+    session?.user ? getUserPlan(session.user.id) : Promise.resolve(null),
   ])
   const dayPnlByDay = computeDayPnl(rows, journalEntries, tz)
 
@@ -349,7 +350,9 @@ export default async function DashboardPage() {
   void recordRequestTiming("/dashboard", Date.now() - startedAt)
   return (
     <div>
-      <ConnectFirstAccountDialog show={accounts.length === 0} />
+      {/* Only nudge subscribed users to connect an account — someone with no
+          plan is behind the subscription paywall, so don't pop it for them. */}
+      <ConnectFirstAccountDialog show={accounts.length === 0 && plan !== null} />
       <AutoSyncBanner events={syncEvents} />
       <PageHeader
         sticky
