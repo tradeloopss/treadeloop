@@ -212,9 +212,9 @@ export function AuthForm({
       <div className="lg:grid lg:min-h-svh lg:grid-cols-2">
         {/* Hero — desktop only */}
         <aside className="relative hidden overflow-hidden bg-[oklch(0.17_0.015_285)] px-10 py-12 lg:flex lg:flex-col lg:justify-center lg:border-e lg:border-white/10 xl:px-16">
-          <div className="flex items-center gap-2">
-            <BrandMark className="size-8" alt="TradeLoop" />
-            <span className="text-lg font-semibold tracking-wide text-white uppercase">TradeLoop</span>
+          <div className="flex items-center gap-2.5">
+            <BrandMark className="size-11" alt="TradeLoop" />
+            <span className="text-2xl font-bold tracking-wide text-white uppercase">TradeLoop</span>
           </div>
           <h2 className="mt-14 text-5xl font-extrabold uppercase leading-[1.03] tracking-tight text-white xl:text-6xl">
             {t("Journal your trades.")}
@@ -226,7 +226,7 @@ export function AuthForm({
             <span aria-hidden>•</span>
             <span>{t("Auto-Sync")}</span>
             <span aria-hidden>•</span>
-            <span>{t("Free Plan")}</span>
+            <span>{t("Free Trial")}</span>
           </div>
           <HeroPreview />
         </aside>
@@ -235,9 +235,9 @@ export function AuthForm({
         <main className="flex min-h-svh flex-col justify-center px-5 py-10 sm:px-8 lg:px-12 xl:px-24">
           <div className="mx-auto w-full max-w-md lg:mx-0">
             {/* Logo — centered on mobile only (the hero carries it on desktop) */}
-            <div className="mb-8 flex items-center justify-center gap-2 lg:hidden">
-              <BrandMark className="size-8" alt="TradeLoop" />
-              <span className="text-lg font-semibold tracking-wide uppercase">TradeLoop</span>
+            <div className="mb-8 flex items-center justify-center gap-2.5 lg:hidden">
+              <BrandMark className="size-11" alt="TradeLoop" />
+              <span className="text-2xl font-bold tracking-wide uppercase">TradeLoop</span>
             </div>
 
             <h1 className="text-center text-3xl font-extrabold uppercase tracking-tight sm:text-4xl lg:text-left">{heading}</h1>
