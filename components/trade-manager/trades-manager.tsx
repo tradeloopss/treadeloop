@@ -1,7 +1,6 @@
 "use client"
 
-import { Fragment, useMemo, useState, useTransition, type ReactNode } from "react"
-import Link from "next/link"
+import { Fragment, useEffect, useMemo, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -14,9 +13,23 @@ import {
   X,
   Plus,
   Minus,
-  ShieldCheck,
+  Shield,
   Scissors,
+  Target,
+  Repeat2,
+  Pencil,
+  ChevronDown,
+  UserRound,
+  Zap,
   TrendingUp,
+  CandlestickChart,
+  FileText,
+  Clock,
+  LayoutGrid,
+  RefreshCw,
+  Check,
+  CircleCheck,
+  List,
   Info as InfoIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -24,7 +37,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency } from "@/lib/calc"
 import { closeOpenTrade } from "@/app/actions/trade-manager"
 import { submitOrder, setTradingPassword, getOrderStatus, getOrderStatuses } from "@/app/actions/orders"
@@ -47,18 +59,27 @@ const INSTRUMENTS: Record<string, { name: string; tone: string }> = {
   NAS100: { name: "Nasdaq 100", tone: "bg-cyan-500/10 text-cyan-600" },
   ES: { name: "E-mini S&P 500", tone: "bg-sky-500/10 text-sky-600" },
   NQ: { name: "E-mini Nasdaq", tone: "bg-cyan-500/10 text-cyan-600" },
+  MNQ: { name: "Micro E-mini Nasdaq", tone: "bg-primary/10 text-primary" },
+  MES: { name: "Micro E-mini S&P", tone: "bg-primary/10 text-primary" },
 }
 
 function instrument(symbol: string): { name: string; tone: string } {
   const base = symbol.replace(/m$/, "").toUpperCase()
-  return INSTRUMENTS[base] ?? { name: symbol, tone: "bg-primary/10 text-primary" }
+  // Futures carry a month/year code (MNQZ6) — strip it for the lookup + badge.
+  const root = base.replace(/[FGHJKMNQUVXZ]\d{1,2}$/, "")
+  return INSTRUMENTS[root] ?? INSTRUMENTS[base] ?? { name: symbol, tone: "bg-primary/10 text-primary" }
+}
+
+function badgeText(symbol: string): string {
+  const base = symbol.replace(/m$/, "").toUpperCase().replace(/[FGHJKMNQUVXZ]\d{1,2}$/, "")
+  return base.slice(0, 3) || symbol.slice(0, 3)
 }
 
 function pipSize(symbol: string): number {
   const s = symbol.toUpperCase()
   if (s.includes("JPY")) return 0.01
   if (/^[A-Z]{6}M?$/.test(s) && !s.startsWith("XA")) return 0.0001 // FX majors
-  return 1 // metals/indices/crypto shown in points
+  return 0.25 // futures/indices tick — display in points
 }
 
 function pips(level: number, ref: number, symbol: string): number {
@@ -66,47 +87,132 @@ function pips(level: number, ref: number, symbol: string): number {
 }
 
 const fmtPrice = (n: number | null) => (n == null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 5 }))
+const signed = (n: number) => `${n >= 0 ? "+" : ""}${formatCurrency(n)}`
+const round4 = (n: number) => Math.round(n * 10000) / 10000
 
-// A trade the panel can locally edit (prototype: SL/TP/close reflect in the UI
-// and are wired for broker integration; only closing a MANUAL trade actually
-// executes today, since TradeLoop syncs read-only).
+function pnlPercent(t: OpenTradeView): number | null {
+  if (t.currentPrice == null || t.entryPrice === 0) return null
+  const dir = t.side === "long" ? 1 : -1
+  return Math.round(((t.currentPrice - t.entryPrice) / t.entryPrice) * 100 * dir * 100) / 100
+}
+
+// Favourable points — sign matches the trade's P&L (a short in profit shows +).
+function favPoints(t: OpenTradeView): number | null {
+  if (t.currentPrice == null) return null
+  const dir = t.side === "long" ? 1 : -1
+  return Math.round((((t.currentPrice - t.entryPrice) * dir) / pipSize(t.symbol)) * 100) / 100
+}
+
 type UITrade = OpenTradeView & { closed?: boolean; trailing?: { distance: number; step: number; active: boolean } }
 type HistEvent = { time: string; label: string; detail?: string }
+type EditorKind = "sl" | "tp" | "partial" | "close" | "reverse" | "bulk" | "trailing"
+type Editor = { kind: EditorKind; tradeId?: number }
 
-// ---------- main ----------------------------------------------------------
+// ==========================================================================
+// A panel that is a bottom sheet on mobile and a right-side drawer on desktop.
+// ==========================================================================
+function Sheet({ open, onClose, title, subtitle, children, footer }: { open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose()
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open, onClose])
+  if (!open) return null
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/40 animate-in fade-in" onClick={onClose} aria-hidden />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          "fixed z-50 flex flex-col bg-card shadow-xl",
+          // Mobile: bottom sheet
+          "inset-x-0 bottom-0 max-h-[88vh] rounded-t-3xl border-t animate-in fade-in slide-in-from-bottom-4 duration-200",
+          // Desktop: right drawer
+          "lg:inset-y-0 lg:end-0 lg:bottom-auto lg:h-full lg:w-[420px] lg:max-h-none lg:rounded-none lg:rounded-s-2xl lg:border-t-0 lg:border-s",
+        )}
+      >
+        <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-border lg:hidden" />
+        <div className="flex items-start justify-between gap-3 px-5 pb-3 pt-3 lg:pt-5">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 pb-4">{children}</div>
+        {footer && <div className="flex gap-2 border-t px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:pb-3">{footer}</div>}
+      </div>
+    </>
+  )
+}
 
+function TypePill({ side, size = "sm" }: { side: "long" | "short"; size?: "sm" | "xs" }) {
+  const long = side === "long"
+  return (
+    <span className={cn("inline-flex items-center rounded-md font-semibold uppercase", size === "xs" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs", long ? "bg-[var(--gain)]/12 text-[var(--gain)]" : "bg-[var(--loss)]/12 text-[var(--loss)]")}>
+      {long ? "BUY" : "SELL"}
+    </span>
+  )
+}
+
+function SymbolBadge({ symbol, className }: { symbol: string; className?: string }) {
+  const meta = instrument(symbol)
+  return <span className={cn("flex shrink-0 items-center justify-center rounded-full text-[10px] font-bold", meta.tone, className)}>{badgeText(symbol)}</span>
+}
+
+function Pnl({ value, className }: { value: number | null; className?: string }) {
+  if (value == null) return <span className={cn("text-muted-foreground", className)}>—</span>
+  return <span className={cn("tabular-nums", value >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]", className)}>{signed(value)}</span>
+}
+
+// ==========================================================================
+// Main
+// ==========================================================================
 export function TradesManager({ data }: { data: TradesManagerData }) {
+  const router = useRouter()
   const [trades, setTrades] = useState<UITrade[]>(() => data.openTrades.map((t) => ({ ...t })))
   const [tab, setTab] = useState<"open" | "pending" | "closed" | "all">("open")
-  const [account, setAccount] = useState("all")
+  const [account, setAccount] = useState<string>("all")
   const [query, setQuery] = useState("")
-  const [selectedId, setSelectedId] = useState<number | null>(() => data.openTrades[0]?.id ?? null)
+  const [side, setSide] = useState<"all" | "long" | "short">("all")
+  const [sortDesc, setSortDesc] = useState(true)
+  const [expandedId, setExpandedId] = useState<number | null>(() => data.openTrades[0]?.id ?? null)
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [history, setHistory] = useState<Record<number, HistEvent[]>>({})
-  const [panelTab, setPanelTab] = useState<"manage" | "info" | "history">("manage")
+  const [editor, setEditor] = useState<Editor | null>(null)
+  const [bulkCloseOpen, setBulkCloseOpen] = useState(false)
+  const [enableFor, setEnableFor] = useState<UITrade | null>(null)
 
   const openTrades = trades.filter((t) => !t.closed)
   const stats = data.stats
+  const totalCount = stats.openCount + data.closedToday.length
+  const live = data.openTrades.some((t) => t.origin === "provider")
 
   const filtered = useMemo(() => {
-    let list: UITrade[] = openTrades
+    let list = openTrades
     if (account !== "all") list = list.filter((t) => String(t.accountId) === account)
+    if (side !== "all") list = list.filter((t) => t.side === side)
     const q = query.trim().toLowerCase()
     if (q) list = list.filter((t) => t.symbol.toLowerCase().includes(q) || t.accountName.toLowerCase().includes(q))
-    return list
-  }, [openTrades, account, query])
+    return [...list].sort((a, b) => ((b.unrealizedPnl ?? 0) - (a.unrealizedPnl ?? 0)) * (sortDesc ? 1 : -1))
+  }, [openTrades, account, side, query, sortDesc])
 
-  const selected = selectedId != null ? trades.find((t) => t.id === selectedId) ?? null : null
+  const accountLabel = account === "all" ? "All accounts" : data.accounts.find((a) => String(a.id) === account)?.name ?? "All accounts"
+  const editorTrade = editor?.tradeId != null ? trades.find((t) => t.id === editor.tradeId) ?? null : null
+  const checkedTrades = trades.filter((t) => checked.has(t.id) && !t.closed)
 
+  // --- small state helpers -------------------------------------------------
+  const nowLabel = () => new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
   function pushHistory(id: number, ev: HistEvent) {
     setHistory((h) => ({ ...h, [id]: [...(h[id] ?? []), ev] }))
   }
-  const nowLabel = () => new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-
   function updateTrade(id: number, patch: Partial<UITrade>) {
     setTrades((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)))
   }
-
   function toggleCheck(id: number) {
     setChecked((c) => {
       const next = new Set(c)
@@ -114,16 +220,14 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
       return next
     })
   }
+  function toggleAll() {
+    setChecked((c) => (c.size === filtered.length ? new Set() : new Set(filtered.map((t) => t.id))))
+  }
 
-  const router = useRouter()
-  const [enableFor, setEnableFor] = useState<UITrade | null>(null)
-  const [levelsFor, setLevelsFor] = useState<string | null>(null) // instrument SL/TP-for-all modal
-
+  // --- execution capability ------------------------------------------------
   function execFor(t: UITrade): AccountExecution {
     return (t.accountId != null && data.execution[t.accountId]) || { broker: null, supported: false, enabled: false }
   }
-  // A live position on an account with execution on → real orders. MetaTrader
-  // closes by ticket (needs positionRef); Rithmic flattens by symbol/exchange.
   function tradable(t: UITrade): boolean {
     const e = execFor(t)
     if (e.broker === "mt5" || e.broker === "mt4") return t.origin === "provider" && !!t.positionRef && e.enabled
@@ -131,14 +235,11 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     return false
   }
 
-  // Queue a real order for the broker (no waiting). Returns the command's id +
-  // status; a null id means it never made it to the queue.
+  // --- order plumbing (preserved) -----------------------------------------
   async function queueOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<{ id: number | null; status: OrderStatus; message: string; reasons: string[] } | null> {
     if (t.accountId == null) return null
     const e = execFor(t)
     const broker = (e.broker ?? "mt5") as OrderCommandInput["broker"]
-    // Rithmic acts by symbol+exchange (no position ticket); a partial close is
-    // an opposite-side order.
     const brokerFields: Partial<OrderCommandInput> =
       broker === "rithmic"
         ? {
@@ -155,9 +256,36 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     }
   }
 
-  // Send an order AND wait for the broker's real outcome, so the user learns
-  // whether it actually executed instead of a hopeful "sent". Returns true only
-  // when the order really filled (or is still working after the wait).
+  async function confirmOrder(id: number, timeoutMs = 18_000): Promise<{ status: OrderStatus; message: string | null }> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 700))
+      const s = await getOrderStatus(id)
+      if (s && s.status !== "pending") return s
+    }
+    return { status: "pending", message: null }
+  }
+
+  async function confirmOrders(ids: number[], timeoutMs = 20_000): Promise<Record<number, OrderStatus>> {
+    const out: Record<number, OrderStatus> = {}
+    const deadline = Date.now() + timeoutMs
+    let remaining = [...ids]
+    while (remaining.length > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 800))
+      const statuses = await getOrderStatuses(remaining)
+      remaining = remaining.filter((id) => {
+        const st = statuses[id]?.status
+        if (st && st !== "pending") {
+          out[id] = st
+          return false
+        }
+        return true
+      })
+    }
+    for (const id of remaining) out[id] = "pending"
+    return out
+  }
+
   async function runOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<boolean> {
     const res = await queueOrder(t, input)
     if (!res) return false
@@ -189,67 +317,14 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     return false
   }
 
-  // Poll one command until the worker reports a terminal result (or a timeout —
-  // the worker keeps retrying, so a timeout just means "still working").
-  async function confirmOrder(id: number, timeoutMs = 18_000): Promise<{ status: OrderStatus; message: string | null }> {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 700))
-      const s = await getOrderStatus(id)
-      if (s && s.status !== "pending") return s
-    }
-    return { status: "pending", message: null }
-  }
-
-  // Same, for a batch of commands — one round-trip per poll instead of per order.
-  async function confirmOrders(ids: number[], timeoutMs = 20_000): Promise<Record<number, OrderStatus>> {
-    const out: Record<number, OrderStatus> = {}
-    const deadline = Date.now() + timeoutMs
-    let remaining = [...ids]
-    while (remaining.length > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 800))
-      const statuses = await getOrderStatuses(remaining)
-      remaining = remaining.filter((id) => {
-        const st = statuses[id]?.status
-        if (st && st !== "pending") {
-          out[id] = st
-          return false
-        }
-        return true
-      })
-    }
-    for (const id of remaining) out[id] = "pending"
-    return out
-  }
-
-  // --- Instrument-level bulk actions ---------------------------------------
-  // Act on EVERY open position of one symbol in the current view at once —
-  // close them, set the same SL/TP on all, or move each to its own break-even.
-  // Each still goes through runOrder, so a live broker position sends a real
-  // order (rule-checked), a manual trade records a journal close, and a
-  // view-only position updates the UI.
-  function instrumentGroup(symbol: string): UITrade[] {
-    return filtered.filter((t) => t.symbol === symbol && !t.closed)
-  }
-
-  // Run one action across a whole instrument: queue every order at once (fast),
-  // then wait for the broker outcomes together and report a real summary — so a
-  // partial failure is visible rather than a blanket "done".
-  async function bulkInstrument(
-    symbol: string,
-    verb: "Closing" | "Moving" | "Updating",
-    build: (t: UITrade) => Omit<OrderCommandInput, "accountId" | "broker">,
-    optimistic: (t: UITrade) => void,
-  ) {
-    const group = instrumentGroup(symbol)
+  // Run one action across a group of positions — queue live orders in parallel,
+  // handle manual/view-only inline, wait for outcomes, report a real summary.
+  async function runGroup(group: UITrade[], verb: "Closing" | "Moving" | "Updating", label: string, build: (t: UITrade) => Omit<OrderCommandInput, "accountId" | "broker">, optimistic: (t: UITrade) => void) {
     if (group.length === 0) return
     const past = verb === "Closing" ? "Closed" : verb === "Moving" ? "Moved" : "Updated"
-    const toastId = toast.loading(`${verb} ${group.length} ${symbol} position${group.length === 1 ? "" : "s"}…`)
+    const toastId = toast.loading(`${verb} ${group.length} ${label}…`)
     let done = 0
     let failed = 0
-    // Apply the optimistic UI now, then split: live broker orders are QUEUED IN
-    // PARALLEL (so the worker gets them all at once and runs them back-to-back on
-    // the warm terminal), manual/view-only handled inline.
     const toQueue: UITrade[] = []
     for (const t of group) {
       optimistic(t)
@@ -261,420 +336,698 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
         } catch {
           failed++
         }
-      } else {
-        done++ // view-only: the optimistic UI change is the whole action
-      }
+      } else done++
     }
     const submitted = await Promise.all(toQueue.map((t) => queueOrder(t, build(t))))
-    const queued: { orderId: number }[] = []
+    const queued: number[] = []
     for (const res of submitted) {
-      if (res?.status === "pending" && res.id != null) queued.push({ orderId: res.id })
+      if (res?.status === "pending" && res.id != null) queued.push(res.id)
       else if (res?.status === "filled") done++
       else failed++
     }
     if (queued.length) {
-      const results = await confirmOrders(queued.map((q) => q.orderId))
-      for (const q of queued) {
-        const st = results[q.orderId]
+      const results = await confirmOrders(queued)
+      for (const id of queued) {
+        const st = results[id]
         if (st === "filled" || st === "pending") done++
         else failed++
       }
     }
-    if (verb === "Closing" && group.some((t) => t.id === selectedId)) setSelectedId(null)
     router.refresh()
-    if (failed > 0) toast.error(`${past} ${done}/${group.length} ${symbol} — ${failed} didn't go through`, { id: toastId })
-    else toast.success(`${past} ${done} ${symbol} position${done === 1 ? "" : "s"}`, { id: toastId })
+    if (failed > 0) toast.error(`${past} ${done}/${group.length} — ${failed} didn't go through`, { id: toastId })
+    else toast.success(`${past} ${done} position${done === 1 ? "" : "s"}`, { id: toastId })
   }
 
-  function closeInstrument(symbol: string) {
-    void bulkInstrument(
-      symbol,
-      "Closing",
-      (t) => ({ kind: "close", positionRef: t.positionRef }),
-      (t) => {
-        updateTrade(t.id, { closed: true })
-        pushHistory(t.id, { time: nowLabel(), label: `Closed with all ${symbol}` })
-      },
-    )
+  // --- per-trade actions ---------------------------------------------------
+  function applyLevels(t: UITrade, sl: number | null, tp: number | null) {
+    updateTrade(t.id, { stopLoss: sl, takeProfit: tp })
+    if (sl !== t.stopLoss) pushHistory(t.id, { time: nowLabel(), label: "Stop Loss modified", detail: fmtPrice(sl) })
+    if (tp !== t.takeProfit) pushHistory(t.id, { time: nowLabel(), label: "Take Profit modified", detail: fmtPrice(tp) })
+    if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: sl, takeProfit: tp })
+    else toast.success("Levels updated", { description: `${t.symbol} · SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
+  }
+  function moveBE(t: UITrade) {
+    updateTrade(t.id, { stopLoss: t.entryPrice })
+    pushHistory(t.id, { time: nowLabel(), label: "Moved SL to break-even", detail: fmtPrice(t.entryPrice) })
+    if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit })
+    else toast.success("Stop moved to break-even", { description: `${t.symbol} · SL ${fmtPrice(t.entryPrice)}` })
+  }
+  function doPartial(t: UITrade, lots: number) {
+    const remaining = Math.max(0, round4(t.quantity - lots))
+    pushHistory(t.id, { time: nowLabel(), label: "Partial close", detail: `${lots} lots` })
+    if (tradable(t)) void runOrder(t, { kind: "partial_close", positionRef: t.positionRef, volume: lots })
+    else toast.success("Partial close sent", { description: `${lots} of ${t.symbol}` })
+    if (remaining <= 0) {
+      updateTrade(t.id, { closed: true })
+      if (expandedId === t.id) setExpandedId(null)
+    } else updateTrade(t.id, { quantity: remaining })
+  }
+  async function doClose(t: UITrade, exitPrice?: number): Promise<boolean> {
+    if (t.origin === "trade") {
+      const price = exitPrice ?? t.currentPrice
+      if (price == null || !Number.isFinite(price)) {
+        toast.error("Enter the exit price.")
+        return false
+      }
+      try {
+        const { pnl } = await closeOpenTrade(t.id, price)
+        toast.success(`Closed ${t.symbol}`, { description: `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)} realized` })
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't close.")
+        return false
+      }
+    } else if (tradable(t)) {
+      const ok = await runOrder(t, { kind: "close", positionRef: t.positionRef })
+      if (!ok) return false
+    } else {
+      toast.success(`Close request queued · ${t.symbol}`)
+    }
+    updateTrade(t.id, { closed: true })
+    if (expandedId === t.id) setExpandedId(null)
+    pushHistory(t.id, { time: nowLabel(), label: "Position closed" })
+    router.refresh()
+    return true
+  }
+  async function reverseTrade(t: UITrade) {
+    const opp = t.side === "long" ? "short" : "long"
+    if (tradable(t)) {
+      const closed = await runOrder(t, { kind: "close", positionRef: t.positionRef })
+      if (!closed) return
+      await runOrder(t, { kind: "place", symbol: t.symbol, side: opp, volume: t.quantity, orderType: "market" })
+    } else {
+      updateTrade(t.id, { side: opp })
+      toast.success("Position reversed", { description: `${t.symbol} is now ${opp === "long" ? "BUY" : "SELL"}` })
+    }
+    pushHistory(t.id, { time: nowLabel(), label: "Position reversed", detail: `${t.side === "long" ? "BUY" : "SELL"} → ${opp === "long" ? "BUY" : "SELL"}` })
   }
 
-  function breakevenInstrument(symbol: string) {
-    void bulkInstrument(
-      symbol,
-      "Moving",
-      (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit }),
-      (t) => {
-        updateTrade(t.id, { stopLoss: t.entryPrice })
-        pushHistory(t.id, { time: nowLabel(), label: `Moved SL to break-even (all ${symbol})`, detail: fmtPrice(t.entryPrice) })
-      },
-    )
-  }
-
-  function setInstrumentLevels(symbol: string, sl: number | null, tp: number | null) {
-    setLevelsFor(null)
-    void bulkInstrument(
-      symbol,
+  // --- bulk across the selection ------------------------------------------
+  function bulkModify(sl: number | null, tp: number | null) {
+    setEditor(null)
+    void runGroup(
+      checkedTrades,
       "Updating",
-      (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: sl, takeProfit: tp }),
-      (t) => {
-        updateTrade(t.id, { stopLoss: sl, takeProfit: tp })
-        pushHistory(t.id, { time: nowLabel(), label: `SL/TP set (all ${symbol})`, detail: `SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
-      },
-    )
+      `selected position${checkedTrades.length === 1 ? "" : "s"}`,
+      (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: sl ?? t.stopLoss, takeProfit: tp ?? t.takeProfit }),
+      (t) => updateTrade(t.id, { stopLoss: sl ?? t.stopLoss, takeProfit: tp ?? t.takeProfit }),
+    ).then(() => setChecked(new Set()))
+  }
+  function bulkClose() {
+    setBulkCloseOpen(false)
+    const group = checkedTrades
+    void runGroup(
+      group,
+      "Closing",
+      `selected position${group.length === 1 ? "" : "s"}`,
+      (t) => ({ kind: "close", positionRef: t.positionRef }),
+      (t) => updateTrade(t.id, { closed: true }),
+    ).then(() => {
+      setChecked(new Set())
+      setExpandedId(null)
+    })
   }
 
-  function onInstrument(symbol: string, action: "closeAll" | "beAll" | "levelsAll") {
-    if (action === "closeAll") void closeInstrument(symbol)
-    else if (action === "beAll") breakevenInstrument(symbol)
-    else setLevelsFor(symbol)
+  // --- instrument bulk (preserved, via runGroup) ---------------------------
+  function instrumentGroup(symbol: string): UITrade[] {
+    return filtered.filter((t) => t.symbol === symbol && !t.closed)
   }
+  function onInstrument(symbol: string, action: "closeAll" | "beAll" | "levelsAll") {
+    const group = instrumentGroup(symbol)
+    if (action === "closeAll") {
+      void runGroup(group, "Closing", `${symbol} position${group.length === 1 ? "" : "s"}`, (t) => ({ kind: "close", positionRef: t.positionRef }), (t) => updateTrade(t.id, { closed: true }))
+    } else if (action === "beAll") {
+      void runGroup(group, "Moving", `${symbol} to break-even`, (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit }), (t) => updateTrade(t.id, { stopLoss: t.entryPrice }))
+    } else {
+      // reuse the selection: check the group and open the bulk sheet
+      setChecked(new Set(group.map((t) => t.id)))
+      setEditor({ kind: "bulk" })
+    }
+  }
+
+  function onTrailing(t: UITrade, cfg: { distance: number; step: number; active: boolean }) {
+    updateTrade(t.id, { trailing: cfg })
+    toast.success(cfg.active ? "Trailing stop active — TradeLoop will trail your stop" : "Trailing stop off")
+  }
+
+  const tabs = (
+    <TabBar tab={tab} onTab={setTab} counts={{ open: openTrades.length, pending: 0, closed: data.closedToday.length }} />
+  )
 
   return (
-    <div className="mx-auto w-full max-w-[1500px] px-4 py-6 md:px-6">
-      {/* Header */}
-      <div className="mb-6 flex items-center gap-3">
-        <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Activity className="size-5" />
-        </span>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Trades Manager</h1>
-          <p className="text-sm text-muted-foreground">Manage your open trades, modify levels, or close positions — all in one place.</p>
+    <div className="pb-24 lg:pb-6">
+      {/* ============================ MOBILE ============================ */}
+      <div className="px-4 pt-4 lg:hidden">
+        <div className="mb-3 flex items-center justify-end">
+          <ConnectionStatus live={live} />
         </div>
+        <AccountSelectorCard label={accountLabel} accounts={data.accounts} onPick={setAccount} />
+        <div className="mb-4 mt-4 flex items-center gap-3">
+          <span className="flex size-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <Activity className="size-5" />
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Trades Manager</h1>
+            <p className="text-sm text-muted-foreground">Manage live positions, edit SL/TP, and close trades.</p>
+          </div>
+        </div>
+
+        <SummaryCard open={stats.openCount} total={totalCount} today={stats.todayRealized} winRate={stats.winRate} totalPnl={stats.totalUnrealized} />
+
+        <div className="mb-3 mt-4 -mx-4 overflow-x-auto px-4">{tabs}</div>
+
+        {tab === "open" || tab === "all" ? (
+          <>
+            <BulkActionBar
+              total={filtered.length}
+              count={checked.size}
+              allChecked={filtered.length > 0 && checked.size === filtered.length}
+              onToggleAll={toggleAll}
+              onEditSL={() => setEditor({ kind: "bulk" })}
+              onEditTP={() => setEditor({ kind: "bulk" })}
+              onClose={() => {
+                if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id)))
+                setBulkCloseOpen(true)
+              }}
+            />
+            {filtered.length === 0 ? (
+              <EmptyBlock title="No open trades" note="You currently have no live positions." className="mt-3" />
+            ) : (
+              <div className="mt-3 space-y-3">
+                {filtered.map((t) => (
+                  <TradeCard
+                    key={t.id}
+                    trade={t}
+                    expanded={expandedId === t.id}
+                    checked={checked.has(t.id)}
+                    onToggleExpand={() => setExpandedId((id) => (id === t.id ? null : t.id))}
+                    onCheck={() => toggleCheck(t.id)}
+                    onEditSL={() => setEditor({ kind: "sl", tradeId: t.id })}
+                    onEditTP={() => setEditor({ kind: "tp", tradeId: t.id })}
+                    onClose={() => setEditor({ kind: "close", tradeId: t.id })}
+                    onPartial={() => setEditor({ kind: "partial", tradeId: t.id })}
+                    onReverse={() => setEditor({ kind: "reverse", tradeId: t.id })}
+                    onBE={() => moveBE(t)}
+                    onTrailing={() => setEditor({ kind: "trailing", tradeId: t.id })}
+                  />
+                ))}
+              </div>
+            )}
+            <LiveBanner live={live} className="mt-4" />
+          </>
+        ) : tab === "pending" ? (
+          <EmptyBlock title="No Pending Orders" note="No orders are currently waiting. Pending orders you place will appear here." className="mt-3" />
+        ) : (
+          <div className="mt-3 rounded-2xl border bg-card">
+            <ClosedList rows={data.closedToday} />
+          </div>
+        )}
       </div>
 
-      {/* KPIs */}
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Total Open Trades" value={String(stats.openCount)} foot={`${stats.buys} Buy · ${stats.shorts} Sell`} icon={TrendingUp} />
-        <KpiCard
-          label="Total P&L"
-          value={stats.totalUnrealized != null ? signed(stats.totalUnrealized) : "—"}
-          foot={stats.totalUnrealized != null ? "across live positions" : "no live P&L feed"}
-          tone={stats.totalUnrealized != null ? (stats.totalUnrealized >= 0 ? "gain" : "loss") : undefined}
-          spark={stats.totalUnrealized != null}
-        />
-        <KpiCard label="Today's P&L" value={signed(stats.todayRealized)} foot="realized, closed today" tone={stats.todayRealized >= 0 ? "gain" : "loss"} spark />
-        <KpiCard label="Win Rate" value={stats.winRate != null ? `${stats.winRate}%` : "—"} foot={stats.winRate != null ? `${stats.wins} / ${stats.wins + stats.losses}` : "nothing closed today"} ring={stats.winRate} />
-      </div>
+      {/* ============================ DESKTOP =========================== */}
+      <div className="mx-auto hidden w-full max-w-[1500px] px-6 py-6 lg:block">
+        <div className="mb-6 flex items-center gap-3">
+          <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Activity className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight">Trades Manager</h1>
+            <p className="text-sm text-muted-foreground">Manage live positions, edit SL/TP, and close trades.</p>
+          </div>
+          <div className="ms-auto flex items-center gap-3">
+            <ConnectionStatus live={live} />
+            <AccountSelectorInline label={accountLabel} accounts={data.accounts} onPick={setAccount} />
+            <Button variant="outline" size="icon" className="size-9" aria-label="Refresh" onClick={() => router.refresh()}>
+              <RefreshCw className="size-4" />
+            </Button>
+          </div>
+        </div>
 
-      {/* Two columns */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_360px]">
-        {/* List card */}
-        <div className="min-w-0 rounded-2xl border bg-card">
+        <div className="mb-6 grid grid-cols-4 gap-3">
+          <KpiCard label="Open Trades" value={String(stats.openCount)} foot={`of ${totalCount} total`} icon={Layers} />
+          <KpiCard label="Today's P&L" value={signed(stats.todayRealized)} foot="realized, closed today" tone={stats.todayRealized >= 0 ? "gain" : "loss"} />
+          <KpiCard label="Win Rate" value={stats.winRate != null ? `${stats.winRate}%` : "—"} foot={stats.winRate != null ? `${stats.wins}/${stats.wins + stats.losses}` : "nothing closed today"} icon={Target} />
+          <KpiCard label="Total P&L" value={stats.totalUnrealized != null ? signed(stats.totalUnrealized) : signed(stats.todayRealized)} foot="across live positions" tone={(stats.totalUnrealized ?? stats.todayRealized) >= 0 ? "gain" : "loss"} icon={TrendingUp} />
+        </div>
+
+        <div className="rounded-2xl border bg-card">
           <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-            <Tab active={tab === "open"} onClick={() => setTab("open")} dot>
-              Open Trades ({openTrades.length})
-            </Tab>
-            <Tab active={tab === "pending"} onClick={() => setTab("pending")}>
-              Pending (0)
-            </Tab>
-            <Tab active={tab === "closed"} onClick={() => setTab("closed")}>
-              Closed Today ({data.closedToday.length})
-            </Tab>
-            <Tab active={tab === "all"} onClick={() => setTab("all")}>
-              All Trades
-            </Tab>
-
+            {tabs}
             <div className="ms-auto flex items-center gap-2">
               <div className="relative hidden sm:block">
                 <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search trades…" className="h-8 w-44 ps-8" />
+                <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search trades…" className="h-9 w-48 ps-8" />
               </div>
-              <Select value={account} onValueChange={(v) => v && setAccount(v)}>
-                <SelectTrigger className="h-8 w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    <span className="flex items-center gap-1.5">
-                      <Layers className="size-3.5" /> All accounts
-                    </span>
-                  </SelectItem>
-                  {data.accounts.map((a) => (
-                    <SelectItem key={a.id} value={String(a.id)}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="icon" className="size-8" aria-label="Sort">
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-9 gap-1.5"><SlidersHorizontal className="size-4" /> {side === "all" ? "Filter" : side === "long" ? "Buys" : "Sells"}</Button>} />
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuItem onClick={() => setSide("all")}>All sides</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSide("long")}>Buy only</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSide("short")}>Sell only</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="outline" size="icon" className="size-9" aria-label="Sort by P&L" onClick={() => setSortDesc((s) => !s)}>
                 <ArrowDownUp className="size-4" />
-              </Button>
-              <Button variant="outline" size="icon" className="size-8" aria-label="Filter">
-                <SlidersHorizontal className="size-4" />
               </Button>
             </div>
           </div>
 
+          {(tab === "open" || tab === "all") && checked.size > 0 && (
+            <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-primary/5 px-4 py-2.5">
+              <span className="text-sm font-semibold text-primary">{checked.size} selected</span>
+              <div className="ms-auto flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setEditor({ kind: "bulk" })}><Shield className="size-4" /> Edit SL</Button>
+                <Button variant="outline" size="sm" onClick={() => setEditor({ kind: "bulk" })}><Target className="size-4" /> Edit TP</Button>
+                <Button variant="destructive" size="sm" onClick={() => setBulkCloseOpen(true)}><X className="size-4" /> Close {checked.size}</Button>
+                <button type="button" onClick={() => setChecked(new Set())} aria-label="Clear" className="rounded-md p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button>
+              </div>
+            </div>
+          )}
+
           {tab === "closed" ? (
             <ClosedList rows={data.closedToday} />
           ) : tab === "pending" ? (
-            <EmptyBlock title="No pending orders" note="Pending orders you place with your broker will appear here." />
+            <EmptyBlock title="No Pending Orders" note="Pending orders you place with your broker will appear here." />
           ) : (
-            <TradeTable
+            <DesktopTable
               trades={filtered}
-              selectedId={selectedId}
+              expandedId={expandedId}
               checked={checked}
-              onSelect={(id) => {
-                setSelectedId(id)
-                setPanelTab("manage")
-              }}
+              onToggleExpand={(id) => setExpandedId((cur) => (cur === id ? null : id))}
               onCheck={toggleCheck}
-              onAction={(id, action) => handleRowAction(id, action)}
+              onEditSL={(id) => setEditor({ kind: "sl", tradeId: id })}
+              onEditTP={(id) => setEditor({ kind: "tp", tradeId: id })}
+              onClose={(id) => setEditor({ kind: "close", tradeId: id })}
+              onPartial={(id) => setEditor({ kind: "partial", tradeId: id })}
+              onReverse={(id) => setEditor({ kind: "reverse", tradeId: id })}
+              onBE={(id) => { const t = trades.find((x) => x.id === id); if (t) moveBE(t) }}
               onInstrument={onInstrument}
             />
           )}
         </div>
-
-        {/* Management panel — right column on xl, slide-over drawer below */}
-        {selected && (
-          <div
-            className="fixed inset-0 z-40 bg-black/40 xl:hidden"
-            onClick={() => setSelectedId(null)}
-            aria-hidden="true"
-          />
-        )}
-        <aside
-          className={cn(
-            "fixed inset-y-0 end-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-s bg-card transition-transform duration-200",
-            "xl:static xl:z-auto xl:max-w-none xl:translate-x-0 xl:rounded-2xl xl:border xl:shadow-sm",
-            selected ? "translate-x-0" : "translate-x-full xl:translate-x-0",
-          )}
-        >
-          {selected ? (
-            <ManagementPanel
-              key={selected.id}
-              trade={selected}
-              execution={execFor(selected)}
-              tradable={tradable(selected)}
-              onEnableExecution={() => setEnableFor(selected)}
-              onOrder={(input) => runOrder(selected, input)}
-              panelTab={panelTab}
-              onPanelTab={setPanelTab}
-              history={history[selected.id] ?? [{ time: openLabel(selected), label: "Position opened", detail: `${selected.quantity} @ ${fmtPrice(selected.entryPrice)}` }]}
-              onClose={() => setSelectedId(null)}
-              onModifyLevels={(sl, tp) => {
-                const prev = selected
-                updateTrade(selected.id, { stopLoss: sl, takeProfit: tp })
-                if (sl !== prev.stopLoss) pushHistory(prev.id, { time: nowLabel(), label: "Stop Loss modified", detail: fmtPrice(sl) })
-                if (tp !== prev.takeProfit) pushHistory(prev.id, { time: nowLabel(), label: "Take Profit modified", detail: fmtPrice(tp) })
-                if (tradable(selected)) void runOrder(selected, { kind: "modify", positionRef: selected.positionRef, stopLoss: sl, takeProfit: tp })
-                else toast.success("Levels updated", { description: `${selected.symbol} · SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
-              }}
-              onMoveBE={(buffer) => {
-                const be = selected.entryPrice + (selected.side === "long" ? buffer : -buffer)
-                updateTrade(selected.id, { stopLoss: be })
-                pushHistory(selected.id, { time: nowLabel(), label: "Moved SL to break-even", detail: fmtPrice(be) })
-                if (tradable(selected)) void runOrder(selected, { kind: "modify", positionRef: selected.positionRef, stopLoss: be, takeProfit: selected.takeProfit })
-                else toast.success("Stop moved to break-even", { description: `${selected.symbol} · SL ${fmtPrice(be)}` })
-              }}
-              onTrailing={(cfg) => {
-                updateTrade(selected.id, { trailing: cfg })
-                pushHistory(selected.id, { time: nowLabel(), label: cfg.active ? "Trailing stop enabled" : "Trailing stop disabled", detail: cfg.active ? `${cfg.distance} pips` : undefined })
-                toast.success(cfg.active ? "Trailing stop active — TradeLoop will trail your stop" : "Trailing stop off")
-              }}
-              onPartial={(lots) => {
-                const remaining = Math.max(0, round4(selected.quantity - lots))
-                pushHistory(selected.id, { time: nowLabel(), label: "Partial close", detail: `${lots} lots` })
-                if (tradable(selected)) void runOrder(selected, { kind: "partial_close", positionRef: selected.positionRef, volume: lots })
-                else toast.success("Partial close sent", { description: `${lots} lots of ${selected.symbol}` })
-                if (remaining <= 0) {
-                  updateTrade(selected.id, { closed: true })
-                  setSelectedId(null)
-                } else updateTrade(selected.id, { quantity: remaining })
-              }}
-              onClosed={() => {
-                updateTrade(selected.id, { closed: true })
-                setSelectedId(null)
-                pushHistory(selected.id, { time: nowLabel(), label: "Position closed" })
-              }}
-            />
-          ) : (
-            <div className="hidden flex-col items-center justify-center p-10 text-center xl:flex">
-              <Activity className="mb-2 size-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">Select a trade to manage it.</p>
-            </div>
-          )}
-        </aside>
+        <LiveBanner live={live} className="mt-4" />
       </div>
 
-      {/* Bulk action bar */}
-      {checked.size > 0 && (
-        <BulkBar
-          count={checked.size}
-          onClear={() => setChecked(new Set())}
-          onCloseAll={() => {
-            setTrades((ts) => ts.map((t) => (checked.has(t.id) ? { ...t, closed: true } : t)))
-            toast.success(`Close request sent for ${checked.size} trade${checked.size > 1 ? "s" : ""}`)
-            setChecked(new Set())
-            setSelectedId(null)
-          }}
+      {/* ============================ SHARED ============================ */}
+      {editorTrade && (editor?.kind === "sl" || editor?.kind === "tp") && (
+        <EditLevelSheet field={editor.kind} trade={editorTrade} onClose={() => setEditor(null)} onApply={(sl, tp) => { applyLevels(editorTrade, sl, tp); setEditor(null) }} onBE={() => { moveBE(editorTrade); setEditor(null) }} />
+      )}
+      {editorTrade && editor?.kind === "partial" && (
+        <PartialSheet trade={editorTrade} onClose={() => setEditor(null)} onExecute={(lots) => { doPartial(editorTrade, lots); setEditor(null) }} />
+      )}
+      {editorTrade && editor?.kind === "close" && (
+        <CloseSheet trade={editorTrade} tradable={tradable(editorTrade)} onClose={() => setEditor(null)} onConfirm={async (exit) => { const ok = await doClose(editorTrade, exit); if (ok) setEditor(null) }} />
+      )}
+      {editorTrade && editor?.kind === "reverse" && (
+        <ReverseSheet trade={editorTrade} onClose={() => setEditor(null)} onConfirm={() => { void reverseTrade(editorTrade); setEditor(null) }} />
+      )}
+      {editorTrade && editor?.kind === "trailing" && (
+        <TrailingSheet active={!!editorTrade.trailing?.active} onClose={() => setEditor(null)} onApply={(cfg) => { onTrailing(editorTrade, cfg); setEditor(null) }} />
+      )}
+      {editor?.kind === "bulk" && (
+        <BulkEditSheet trades={checkedTrades} onClose={() => setEditor(null)} onApply={bulkModify} />
+      )}
+      {bulkCloseOpen && (
+        <ConfirmSheet
+          title={`Close ${checkedTrades.length} position${checkedTrades.length === 1 ? "" : "s"}?`}
+          body={<BulkCloseBody trades={checkedTrades} />}
+          confirmLabel={`Close ${checkedTrades.length}`}
+          destructive
+          onCancel={() => setBulkCloseOpen(false)}
+          onConfirm={bulkClose}
         />
       )}
-
       {enableFor && enableFor.accountId != null && (
         <EnableExecutionDialog accountId={enableFor.accountId} accountName={enableFor.accountName} onClose={() => setEnableFor(null)} />
       )}
 
-      {levelsFor && (
-        <InstrumentLevelsModal
-          symbol={levelsFor}
-          count={instrumentGroup(levelsFor).length}
-          onApply={(sl, tp) => setInstrumentLevels(levelsFor, sl, tp)}
-          onClose={() => setLevelsFor(null)}
-        />
-      )}
+      <BottomNav tab={tab} onTab={setTab} />
     </div>
   )
-
-  function handleRowAction(id: number, action: string) {
-    const t = trades.find((x) => x.id === id)
-    if (!t) return
-    setSelectedId(id)
-    if (action === "manage" || action === "modify") setPanelTab("manage")
-    if (action === "info") setPanelTab("info")
-    if (action === "history") setPanelTab("history")
-  }
 }
 
-// ---------- KPIs ----------------------------------------------------------
+type TabKey = "open" | "pending" | "closed" | "all"
 
-const signed = (n: number) => `${n >= 0 ? "+" : ""}${formatCurrency(n)}`
-const round4 = (n: number) => Math.round(n * 10000) / 10000
+// ---------- chrome --------------------------------------------------------
 
-function KpiCard({
-  label,
-  value,
-  foot,
-  icon: Icon,
-  tone,
-  spark,
-  ring,
-}: {
-  label: string
-  value: string
-  foot: string
-  icon?: typeof TrendingUp
-  tone?: "gain" | "loss"
-  spark?: boolean
-  ring?: number | null
-}) {
+function ConnectionStatus({ live }: { live: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="relative flex size-2.5">
+        {live && <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--gain)] opacity-60" />}
+        <span className={cn("relative inline-flex size-2.5 rounded-full", live ? "bg-[var(--gain)]" : "bg-muted-foreground")} />
+      </span>
+      <div className="leading-tight">
+        <p className={cn("text-sm font-bold", live ? "text-[var(--gain)]" : "text-muted-foreground")}>{live ? "LIVE" : "SYNC ONLY"}</p>
+        <p className="text-xs text-muted-foreground">{live ? "Broker Connected" : "Read-only feed"}</p>
+      </div>
+    </div>
+  )
+}
+
+function AccountSelectorCard({ label, accounts, onPick }: { label: string; accounts: { id: number; name: string }[]; onPick: (v: string) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button type="button" className="flex w-full items-center gap-3 rounded-2xl border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/40">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <UserRound className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">Trading Account</span>
+              <span className="block truncate text-sm text-muted-foreground">{label}</span>
+            </span>
+            <ChevronDown className="size-5 shrink-0 text-muted-foreground" />
+          </button>
+        }
+      />
+      <DropdownMenuContent className="w-[calc(100vw-2rem)] max-w-sm">
+        <DropdownMenuItem onClick={() => onPick("all")}>All accounts</DropdownMenuItem>
+        {accounts.map((a) => (
+          <DropdownMenuItem key={a.id} onClick={() => onPick(String(a.id))}>
+            {a.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function AccountSelectorInline({ label, accounts, onPick }: { label: string; accounts: { id: number; name: string }[]; onPick: (v: string) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-9 gap-1.5"><UserRound className="size-4" /> {label} <ChevronDown className="size-4" /></Button>} />
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem onClick={() => onPick("all")}>All accounts</DropdownMenuItem>
+        {accounts.map((a) => (
+          <DropdownMenuItem key={a.id} onClick={() => onPick(String(a.id))}>
+            {a.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function SummaryCard({ open, total, today, winRate, totalPnl }: { open: number; total: number; today: number; winRate: number | null; totalPnl: number | null }) {
+  const cells: { label: string; icon: typeof Layers; value: string; foot?: string; tone?: "gain" | "loss" }[] = [
+    { label: "Open Trades", icon: Layers, value: String(open), foot: `of ${total} total` },
+    { label: "Today's P&L", icon: TrendingUp, value: signed(today), tone: today >= 0 ? "gain" : "loss" },
+    { label: "Win Rate", icon: Target, value: winRate != null ? `${winRate}%` : "—" },
+    { label: "Total P&L", icon: Activity, value: totalPnl != null ? signed(totalPnl) : signed(today), tone: (totalPnl ?? today) >= 0 ? "gain" : "loss" },
+  ]
+  return (
+    <div className="grid grid-cols-4 divide-x rounded-2xl border bg-card">
+      {cells.map((c) => (
+        <div key={c.label} className="min-w-0 px-2.5 py-3">
+          <div className="flex items-center justify-between gap-1 text-muted-foreground">
+            <span className="truncate text-[10px] font-medium">{c.label}</span>
+            <c.icon className="hidden size-3.5 shrink-0 sm:block" />
+          </div>
+          <p className={cn("mt-1 truncate text-[15px] font-bold tabular-nums", c.tone === "gain" && "text-[var(--gain)]", c.tone === "loss" && "text-[var(--loss)]")}>{c.value}</p>
+          {"foot" in c && c.foot && <p className="truncate text-[10px] text-muted-foreground">{c.foot}</p>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TabBar({ tab, onTab, counts }: { tab: TabKey; onTab: (t: TabKey) => void; counts: { open: number; pending: number; closed: number } }) {
+  const items: { key: TabKey; label: string; dot?: boolean; icon?: typeof Clock }[] = [
+    { key: "open", label: `Open (${counts.open})`, dot: true },
+    { key: "pending", label: `Pending (${counts.pending})`, icon: Clock },
+    { key: "closed", label: `Closed Today (${counts.closed})`, icon: CircleCheck },
+    { key: "all", label: "All Trades", icon: List },
+  ]
+  return (
+    <div className="flex gap-2">
+      {items.map((it) => {
+        const active = tab === it.key
+        return (
+          <button
+            key={it.key}
+            type="button"
+            onClick={() => onTab(it.key)}
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors",
+              active ? "bg-primary text-primary-foreground shadow-sm" : "border bg-card text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {it.dot && <span className={cn("size-1.5 rounded-full", active ? "bg-white" : "bg-[var(--gain)]")} />}
+            {it.icon && <it.icon className="size-4" />}
+            {it.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEditTP, onClose }: { total: number; count: number; allChecked: boolean; onToggleAll: () => void; onEditSL: () => void; onEditTP: () => void; onClose: () => void }) {
+  const has = count > 0
+  return (
+    <div className="flex items-center gap-2 rounded-2xl border bg-card p-2.5">
+      <button type="button" onClick={onToggleAll} className="flex items-center gap-2 px-1 text-sm font-medium">
+        <span className={cn("flex size-5 items-center justify-center rounded-md border", allChecked ? "border-primary bg-primary text-white" : "border-border")}>{allChecked && <Check className="size-3.5" strokeWidth={3} />}</span>
+        {has ? `${count} selected` : "Select all"}
+      </button>
+      <div className="ms-auto flex items-center gap-1">
+        <button type="button" disabled={!has} onClick={onEditSL} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors", has ? "text-foreground hover:bg-muted" : "cursor-not-allowed text-muted-foreground/40")}>
+          <Pencil className="size-3.5" /> Edit SL
+        </button>
+        <button type="button" disabled={!has} onClick={onEditTP} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors", has ? "text-foreground hover:bg-muted" : "cursor-not-allowed text-muted-foreground/40")}>
+          <Target className="size-3.5" /> Edit TP
+        </button>
+        <button type="button" onClick={onClose} className="inline-flex items-center gap-1 rounded-lg bg-[var(--loss)] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90">
+          <X className="size-3.5" /> Close {count || total}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LiveBanner({ live, className }: { live: boolean; className?: string }) {
+  return (
+    <div className={cn("flex items-center gap-2 rounded-xl bg-primary/10 px-4 py-2.5 text-sm", className)}>
+      <Zap className="size-4 shrink-0 text-primary" />
+      <span className="text-muted-foreground">Live prices &amp; P&amp;L update in real-time</span>
+      <span className="ms-auto flex items-center gap-1.5 text-xs font-semibold">
+        <span className={cn("size-1.5 rounded-full", live ? "bg-[var(--gain)]" : "bg-muted-foreground")} /> {live ? "LIVE" : "OFF"}
+      </span>
+    </div>
+  )
+}
+
+function EmptyBlock({ title, note, className }: { title: string; note: string; className?: string }) {
+  return (
+    <div className={cn("flex flex-col items-center justify-center rounded-2xl border bg-card px-6 py-14 text-center", className)}>
+      <span className="mb-3 flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <Activity className="size-6" />
+      </span>
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 max-w-xs text-sm text-muted-foreground">{note}</p>
+    </div>
+  )
+}
+
+function ClosedList({ rows }: { rows: ClosedTradeRow[] }) {
+  if (rows.length === 0) return <p className="px-4 py-12 text-center text-sm text-muted-foreground">Nothing closed today.</p>
+  return (
+    <div className="divide-y">
+      {rows.map((r) => (
+        <div key={r.id} className="flex items-center gap-3 px-4 py-3">
+          <SymbolBadge symbol={r.symbol} className="size-8" />
+          <div className="min-w-0">
+            <p className="font-medium leading-tight">{r.symbol}</p>
+            <p className="truncate text-xs text-muted-foreground">{r.accountName}</p>
+          </div>
+          <TypePill side={r.side} size="xs" />
+          <span className="ms-auto">
+            <Pnl value={r.pnl} className="font-semibold" />
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function KpiCard({ label, value, foot, icon: Icon, tone }: { label: string; value: string; foot: string; icon?: typeof Layers; tone?: "gain" | "loss" }) {
   return (
     <div className="rounded-2xl border bg-card p-4">
-      <div className="flex items-start justify-between">
+      <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">{label}</p>
         {Icon && <Icon className="size-4 text-muted-foreground/60" />}
-        {ring != null && <MiniRing pct={ring} />}
-        {spark && !ring && <Sparkline up={tone !== "loss"} />}
       </div>
-      <p className={cn("mt-1 text-2xl font-semibold tabular-nums", tone === "gain" && "text-[var(--gain)]", tone === "loss" && "text-[var(--loss)]")}>{value}</p>
+      <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone === "gain" && "text-[var(--gain)]", tone === "loss" && "text-[var(--loss)]")}>{value}</p>
       <p className="mt-0.5 text-xs text-muted-foreground">{foot}</p>
     </div>
   )
 }
 
-function Sparkline({ up }: { up: boolean }) {
-  const d = up ? "M0 20 L12 14 L24 16 L36 8 L48 10 L60 2" : "M0 4 L12 8 L24 6 L36 14 L48 12 L60 20"
-  return (
-    <svg viewBox="0 0 60 22" className="h-6 w-16" fill="none">
-      <path d={d} stroke={up ? "var(--gain)" : "var(--loss)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
+// ---------- mobile trade card --------------------------------------------
 
-function MiniRing({ pct }: { pct: number }) {
-  const r = 9
-  const circ = 2 * Math.PI * r
+function TradeCard({
+  trade,
+  expanded,
+  checked,
+  onToggleExpand,
+  onCheck,
+  onEditSL,
+  onEditTP,
+  onClose,
+  onPartial,
+  onReverse,
+  onBE,
+  onTrailing,
+}: {
+  trade: UITrade
+  expanded: boolean
+  checked: boolean
+  onToggleExpand: () => void
+  onCheck: () => void
+  onEditSL: () => void
+  onEditTP: () => void
+  onClose: () => void
+  onPartial: () => void
+  onReverse: () => void
+  onBE: () => void
+  onTrailing: () => void
+}) {
+  const pts = favPoints(trade)
   return (
-    <svg viewBox="0 0 24 24" className="size-6 -rotate-90">
-      <circle cx="12" cy="12" r={r} fill="none" stroke="currentColor" strokeWidth="3" className="text-muted" />
-      <circle cx="12" cy="12" r={r} fill="none" stroke="var(--primary)" strokeWidth="3" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)} />
-    </svg>
-  )
-}
-
-// ---------- tabs / table --------------------------------------------------
-
-function Tab({ active, onClick, dot, children }: { active: boolean; onClick: () => void; dot?: boolean; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted",
-      )}
-    >
-      {dot && <span className="size-1.5 rounded-full bg-[var(--gain)]" />}
-      {children}
-    </button>
-  )
-}
-
-function TypePill({ side }: { side: "long" | "short" }) {
-  const long = side === "long"
-  return (
-    <span className={cn("inline-flex rounded-md px-2 py-0.5 text-xs font-semibold", long ? "bg-[var(--gain)]/10 text-[var(--gain)]" : "bg-[var(--loss)]/10 text-[var(--loss)]")}>
-      {long ? "BUY" : "SELL"}
-    </span>
-  )
-}
-
-function SymbolCell({ symbol }: { symbol: string }) {
-  const meta = instrument(symbol)
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold", meta.tone)}>{symbol.replace(/m$/, "").slice(0, 3)}</span>
-      <div className="min-w-0">
-        <p className="font-medium leading-tight">{symbol}</p>
-        <p className="truncate text-xs text-muted-foreground">{meta.name}</p>
+    <div className={cn("overflow-hidden rounded-2xl border bg-card", checked && "ring-2 ring-primary/40")}>
+      <div className="flex items-center gap-3 p-4">
+        <button type="button" onClick={onCheck} aria-label="Select trade" className={cn("flex size-6 shrink-0 items-center justify-center rounded-lg border transition-colors", checked ? "border-primary bg-primary text-white" : "border-border")}>
+          {checked && <Check className="size-4" strokeWidth={3} />}
+        </button>
+        <SymbolBadge symbol={trade.symbol} className="size-10" />
+        <button type="button" onClick={onToggleExpand} className="min-w-0 flex-1 text-left">
+          <span className="block text-base font-bold leading-tight">{trade.symbol}</span>
+          <span className="mt-1 block">
+            <TypePill side={trade.side} />
+          </span>
+        </button>
+        <div className="text-right">
+          <p className="flex items-center justify-end gap-1 text-[11px] font-semibold text-[var(--gain)]">
+            <TrendingUp className="size-3" /> LIVE P&amp;L
+          </p>
+          <Pnl value={trade.unrealizedPnl} className="text-lg font-extrabold" />
+        </div>
+        {expanded ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<button type="button" aria-label="More" className="rounded-md p-1 text-muted-foreground hover:bg-muted"><MoreHorizontal className="size-5" /></button>} />
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={onBE}>Move SL to break-even</DropdownMenuItem>
+              <DropdownMenuItem onClick={onTrailing}>Set trailing stop</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button type="button" onClick={onToggleExpand} aria-label="Expand" className="rounded-md p-1 text-muted-foreground hover:bg-muted">
+            <ChevronDown className="size-5" />
+          </button>
+        )}
       </div>
+
+      {expanded && (
+        <div className="animate-in fade-in border-t px-4 pb-4 pt-3">
+          <div className="grid grid-cols-5 gap-2 border-b pb-3">
+            <Stat label="Qty" value={String(trade.quantity)} />
+            <Stat label="Entry" value={fmtPrice(trade.entryPrice)} />
+            <Stat label="Current" value={fmtPrice(trade.currentPrice)} />
+            <Stat label="P&L (pts)" value={pts != null ? `${pts >= 0 ? "+" : ""}${pts}` : "—"} tone={pts != null ? (pts >= 0 ? "gain" : "loss") : undefined} />
+            <Stat label="P&L (USD)" node={<Pnl value={trade.unrealizedPnl} className="text-[13px] font-bold" />} />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <LevelBox tone="loss" icon={Shield} label="Stop Loss" value={trade.stopLoss} onEdit={onEditSL} />
+            <LevelBox tone="gain" icon={Target} label="Take Profit" value={trade.takeProfit} onEdit={onEditTP} />
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <ActionBtn primary icon={X} title="Close" sub="Full close" onClick={onClose} />
+            <ActionBtn icon={Scissors} title="Partial" sub="Close part" onClick={onPartial} />
+            <ActionBtn icon={Repeat2} title="Reverse" sub="Flip side" onClick={onReverse} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function pnlPercent(t: OpenTradeView): number | null {
-  if (t.currentPrice == null || t.entryPrice === 0) return null
-  const dir = t.side === "long" ? 1 : -1
-  return Math.round(((t.currentPrice - t.entryPrice) / t.entryPrice) * 100 * dir * 100) / 100
+function Stat({ label, value, node, tone }: { label: string; value?: string; node?: ReactNode; tone?: "gain" | "loss" }) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-[10px] font-medium text-muted-foreground">{label}</p>
+      {node ?? <p className={cn("truncate text-[13px] font-bold tabular-nums", tone === "gain" && "text-[var(--gain)]", tone === "loss" && "text-[var(--loss)]")}>{value}</p>}
+    </div>
+  )
 }
 
-const ROW_ACTIONS: { key: string; label: string }[] = [
-  { key: "manage", label: "Manage Trade" },
-  { key: "modify", label: "Modify SL/TP" },
-  { key: "partial", label: "Partial Close" },
-  { key: "be", label: "Move SL to Break Even" },
-  { key: "close", label: "Close Trade" },
-  { key: "info", label: "View Trade Details" },
-  { key: "history", label: "View History" },
-]
+function LevelBox({ tone, icon: Icon, label, value, onEdit }: { tone: "gain" | "loss"; icon: typeof Shield; label: string; value: number | null; onEdit: () => void }) {
+  const gain = tone === "gain"
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <Icon className={cn("size-3.5", gain ? "text-[var(--gain)]" : "text-[var(--loss)]")} />
+        {label}
+        <span className={cn("size-1.5 rounded-full", gain ? "bg-[var(--gain)]" : "bg-[var(--loss)]")} />
+      </div>
+      <p className="mt-1 text-base font-bold tabular-nums">{fmtPrice(value)}</p>
+      <button type="button" onClick={onEdit} className={cn("mt-2 inline-flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold", gain ? "bg-[var(--gain)]/10 text-[var(--gain)]" : "bg-[var(--loss)]/10 text-[var(--loss)]")}>
+        <Pencil className="size-3" /> Edit
+      </button>
+    </div>
+  )
+}
 
-function TradeTable({
+function ActionBtn({ primary, icon: Icon, title, sub, onClick }: { primary?: boolean; icon: typeof X; title: string; sub: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={cn("flex flex-col items-center justify-center gap-0.5 rounded-xl px-2 py-2.5 text-center transition-colors", primary ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border hover:bg-muted")}>
+      <span className="flex items-center gap-1.5 text-sm font-semibold">
+        <Icon className="size-4" /> {title}
+      </span>
+      <span className={cn("text-[10px]", primary ? "text-primary-foreground/70" : "text-muted-foreground")}>{sub}</span>
+    </button>
+  )
+}
+
+// ---------- desktop table -------------------------------------------------
+
+function DesktopTable({
   trades,
-  selectedId,
+  expandedId,
   checked,
-  onSelect,
+  onToggleExpand,
   onCheck,
-  onAction,
+  onEditSL,
+  onEditTP,
+  onClose,
+  onPartial,
+  onReverse,
+  onBE,
   onInstrument,
 }: {
   trades: UITrade[]
-  selectedId: number | null
+  expandedId: number | null
   checked: Set<number>
-  onSelect: (id: number) => void
+  onToggleExpand: (id: number) => void
   onCheck: (id: number) => void
-  onAction: (id: number, action: string) => void
+  onEditSL: (id: number) => void
+  onEditTP: (id: number) => void
+  onClose: (id: number) => void
+  onPartial: (id: number) => void
+  onReverse: (id: number) => void
+  onBE: (id: number) => void
   onInstrument: (symbol: string, action: "closeAll" | "beAll" | "levelsAll") => void
 }) {
-  if (trades.length === 0) return <EmptyBlock title="No open positions" note="When you have a running trade it'll show here with its live risk and P&L." />
-  // Group by symbol (first-seen order). A symbol with more than one open
-  // position gets an instrument header row carrying the "all positions" actions.
+  if (trades.length === 0) return <EmptyBlock title="No open positions" note="When you have a running trade it'll show here with its live risk and P&L." className="m-4" />
   const groups: { symbol: string; rows: UITrade[] }[] = []
-  const groupIdx = new Map<string, number>()
+  const idx = new Map<string, number>()
   for (const t of trades) {
-    let i = groupIdx.get(t.symbol)
+    let i = idx.get(t.symbol)
     if (i === undefined) {
       i = groups.length
-      groupIdx.set(t.symbol, i)
+      idx.set(t.symbol, i)
       groups.push({ symbol: t.symbol, rows: [] })
     }
     groups[i].rows.push(t)
@@ -684,15 +1037,16 @@ function TradeTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left text-xs text-muted-foreground">
-            <th className="w-8 px-4 py-2.5"></th>
-            <th className="px-2 py-2.5 font-medium">Symbol</th>
-            <th className="px-2 py-2.5 font-medium">Type</th>
-            <th className="px-2 py-2.5 font-medium">Lots</th>
-            <th className="px-2 py-2.5 font-medium">Entry</th>
-            <th className="px-2 py-2.5 font-medium">Current</th>
-            <th className="px-2 py-2.5 font-medium">P&L</th>
-            <th className="px-2 py-2.5 font-medium">SL / TP</th>
-            <th className="px-2 py-2.5 font-medium text-right">Actions</th>
+            <th className="w-10 px-4 py-3" />
+            <th className="px-2 py-3 font-medium">Symbol</th>
+            <th className="px-2 py-3 font-medium">Side</th>
+            <th className="px-2 py-3 font-medium">Qty</th>
+            <th className="px-2 py-3 font-medium">Entry</th>
+            <th className="px-2 py-3 font-medium">Current</th>
+            <th className="px-2 py-3 font-medium">P&L</th>
+            <th className="px-2 py-3 font-medium">Stop Loss</th>
+            <th className="px-2 py-3 font-medium">Take Profit</th>
+            <th className="px-2 py-3 text-right font-medium">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -700,53 +1054,67 @@ function TradeTable({
             <Fragment key={g.symbol}>
               {g.rows.length > 1 && <InstrumentHeader symbol={g.symbol} rows={g.rows} onInstrument={onInstrument} />}
               {g.rows.map((t) => {
-            const pct = pnlPercent(t)
-            const sel = t.id === selectedId
-            return (
-              <tr
-                key={t.id}
-                onClick={() => onSelect(t.id)}
-                className={cn("cursor-pointer border-b transition-colors hover:bg-muted/40", sel && "bg-primary/5 ring-1 ring-inset ring-primary/20")}
-              >
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" checked={checked.has(t.id)} onChange={() => onCheck(t.id)} className="size-4 rounded border-border accent-[var(--primary)]" />
-                </td>
-                <td className="px-2 py-3">
-                  <SymbolCell symbol={t.symbol} />
-                </td>
-                <td className="px-2 py-3">
-                  <TypePill side={t.side} />
-                </td>
-                <td className="px-2 py-3 tabular-nums">{t.quantity}</td>
-                <td className="px-2 py-3 tabular-nums">{fmtPrice(t.entryPrice)}</td>
-                <td className="px-2 py-3 tabular-nums">{fmtPrice(t.currentPrice)}</td>
-                <td className="px-2 py-3">
-                  {t.unrealizedPnl != null ? (
-                    <div className={cn("font-medium tabular-nums", t.unrealizedPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
-                      {signed(t.unrealizedPnl)}
-                      {pct != null && <div className="text-xs font-normal">{pct >= 0 ? "+" : ""}{pct}%</div>}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-                <td className="px-2 py-3 text-xs tabular-nums text-muted-foreground">
-                  {t.stopLoss != null || t.takeProfit != null ? `${fmtPrice(t.stopLoss)} / ${fmtPrice(t.takeProfit)}` : "—"}
-                </td>
-                <td className="px-2 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-7" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>} />
-                    <DropdownMenuContent align="end" className="w-48">
-                      {ROW_ACTIONS.map((a) => (
-                        <DropdownMenuItem key={a.key} variant={a.key === "close" ? "destructive" : undefined} onClick={() => onAction(t.id, a.key)}>
-                          {a.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </td>
-              </tr>
-            )
+                const open = expandedId === t.id
+                return (
+                  <Fragment key={t.id}>
+                    <tr className={cn("border-b transition-colors hover:bg-muted/40", open && "bg-primary/5")}>
+                      <td className="px-4 py-3">
+                        <input type="checkbox" checked={checked.has(t.id)} onChange={() => onCheck(t.id)} className="size-4 rounded border-border accent-[var(--primary)]" aria-label="Select" />
+                      </td>
+                      <td className="cursor-pointer px-2 py-3" onClick={() => onToggleExpand(t.id)}>
+                        <div className="flex items-center gap-2.5">
+                          <SymbolBadge symbol={t.symbol} className="size-8" />
+                          <div className="min-w-0">
+                            <p className="font-semibold leading-tight">{t.symbol}</p>
+                            <p className="truncate text-xs text-muted-foreground">{instrument(t.symbol).name}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-2 py-3"><TypePill side={t.side} /></td>
+                      <td className="px-2 py-3 tabular-nums">{t.quantity}</td>
+                      <td className="px-2 py-3 tabular-nums">{fmtPrice(t.entryPrice)}</td>
+                      <td className="px-2 py-3 tabular-nums">{fmtPrice(t.currentPrice)}</td>
+                      <td className="px-2 py-3"><Pnl value={t.unrealizedPnl} className="font-semibold" /></td>
+                      <td className="px-2 py-3">
+                        <InlineLevel value={t.stopLoss} tone="loss" onEdit={() => onEditSL(t.id)} />
+                      </td>
+                      <td className="px-2 py-3">
+                        <InlineLevel value={t.takeProfit} tone="gain" onEdit={() => onEditTP(t.id)} />
+                      </td>
+                      <td className="px-2 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="destructive" size="xs" onClick={() => onClose(t.id)}>Close</Button>
+                          <Button variant="outline" size="xs" onClick={() => onPartial(t.id)}>Partial</Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label="More"><MoreHorizontal className="size-4" /></Button>} />
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => onReverse(t.id)}>Reverse position</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => onBE(t.id)}>Move SL to break-even</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => onToggleExpand(t.id)}>{open ? "Hide details" : "View details"}</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr className="border-b bg-primary/5">
+                        <td />
+                        <td colSpan={9} className="px-2 pb-4">
+                          <div className="grid grid-cols-2 gap-x-8 gap-y-2 rounded-xl border bg-card p-4 text-sm sm:grid-cols-4">
+                            <Detail k="Account" v={t.accountName} />
+                            <Detail k="Platform" v={(t.source ?? "—").toUpperCase()} />
+                            <Detail k="Opened" v={new Date(t.entryTime).toLocaleString()} />
+                            <Detail k="Ticket" v={t.origin === "trade" ? `#${t.id}` : "live"} />
+                            <Detail k="P&L %" v={pnlPercent(t) != null ? `${pnlPercent(t)! >= 0 ? "+" : ""}${pnlPercent(t)}%` : "—"} />
+                            <Detail k="Points" v={favPoints(t) != null ? `${favPoints(t)! >= 0 ? "+" : ""}${favPoints(t)}` : "—"} />
+                            <Detail k="Stop Loss" v={fmtPrice(t.stopLoss)} />
+                            <Detail k="Take Profit" v={fmtPrice(t.takeProfit)} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
               })}
             </Fragment>
           ))}
@@ -756,29 +1124,41 @@ function TradeTable({
   )
 }
 
-// The header above a group of same-symbol positions — a summary of the whole
-// instrument plus the "all positions" actions (close all / SL-TP all / BE all).
+function Detail({ k, v }: { k: string; v: string }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{k}</p>
+      <p className="font-medium tabular-nums">{v}</p>
+    </div>
+  )
+}
+
+function InlineLevel({ value, tone, onEdit }: { value: number | null; tone: "gain" | "loss"; onEdit: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="tabular-nums">{fmtPrice(value)}</span>
+      <button type="button" onClick={onEdit} className={cn("inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-medium opacity-70 hover:opacity-100", tone === "gain" ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
+        <Pencil className="size-3" /> Edit
+      </button>
+    </div>
+  )
+}
+
 function InstrumentHeader({ symbol, rows, onInstrument }: { symbol: string; rows: UITrade[]; onInstrument: (symbol: string, action: "closeAll" | "beAll" | "levelsAll") => void }) {
-  const meta = instrument(symbol)
   const netLots = round4(rows.reduce((s, t) => s + (t.side === "long" ? t.quantity : -t.quantity), 0))
   const pnls = rows.map((t) => t.unrealizedPnl).filter((v): v is number => v != null)
   const totalPnl = pnls.length ? pnls.reduce((a, b) => a + b, 0) : null
   return (
     <tr className="border-b bg-muted/40">
-      <td colSpan={9} className="px-3 py-2">
+      <td colSpan={10} className="px-3 py-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="flex items-center gap-2">
-            <span className={cn("flex size-6 items-center justify-center rounded-full text-[9px] font-bold", meta.tone)}>{symbol.replace(/m$/, "").slice(0, 3)}</span>
+            <SymbolBadge symbol={symbol} className="size-6" />
             <span className="text-sm font-semibold">{symbol}</span>
-            <span className="hidden text-xs text-muted-foreground sm:inline">{meta.name}</span>
           </span>
-          <span className="text-xs text-muted-foreground">
-            {rows.length} positions · net {netLots > 0 ? "+" : ""}{netLots} lots
-          </span>
-          {totalPnl != null && (
-            <span className={cn("text-xs font-semibold tabular-nums", totalPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>{signed(totalPnl)}</span>
-          )}
-          <div className="ms-auto" onClick={(e) => e.stopPropagation()}>
+          <span className="text-xs text-muted-foreground">{rows.length} positions · net {netLots > 0 ? "+" : ""}{netLots}</span>
+          {totalPnl != null && <Pnl value={totalPnl} className="text-xs font-semibold" />}
+          <div className="ms-auto">
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs"><Layers className="size-3.5" /> Manage all {rows.length}</Button>} />
               <DropdownMenuContent align="end" className="w-56">
@@ -795,585 +1175,323 @@ function InstrumentHeader({ symbol, rows, onInstrument }: { symbol: string; rows
   )
 }
 
-// One SL and one TP applied to every open position of an instrument at once.
-function InstrumentLevelsModal({ symbol, count, onApply, onClose }: { symbol: string; count: number; onApply: (sl: number | null, tp: number | null) => void; onClose: () => void }) {
-  const [sl, setSl] = useState("")
-  const [tp, setTp] = useState("")
-  const slNum = sl.trim() === "" ? null : Number(sl)
-  const tpNum = tp.trim() === "" ? null : Number(tp)
-  const step = pipSize(symbol)
-  const valid = (sl.trim() === "" || Number.isFinite(slNum)) && (tp.trim() === "" || Number.isFinite(tpNum)) && (slNum != null || tpNum != null)
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Set SL/TP for all {symbol}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <p className="text-xs text-muted-foreground">
-            Applies the same Stop Loss and Take Profit price to all {count} open {symbol} position{count === 1 ? "" : "s"} in view. Leave a field blank to clear it.
-          </p>
-          <LevelInput label="Stop Loss (SL)" value={sl} onChange={setSl} step={step} pips={null} tone="loss" />
-          <LevelInput label="Take Profit (TP)" value={tp} onChange={setTp} step={step} pips={null} tone="gain" />
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={!valid} onClick={() => onApply(slNum, tpNum)}>Apply to all {count}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
+// ---------- editors (bottom sheet / drawer) -------------------------------
 
-function ClosedList({ rows }: { rows: ClosedTradeRow[] }) {
-  if (rows.length === 0) return <EmptyBlock title="Nothing closed today" note="Trades you close today will be listed here." />
-  return (
-    <div className="divide-y">
-      {rows.map((r) => (
-        <div key={r.id} className="flex items-center gap-3 px-4 py-3">
-          <SymbolCell symbol={r.symbol} />
-          <TypePill side={r.side} />
-          <span className="ms-auto text-xs text-muted-foreground">{r.accountName}</span>
-          <span className={cn("w-24 text-right font-medium tabular-nums", r.pnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>{signed(r.pnl)}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function EmptyBlock({ title, note }: { title: string; note: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-      <span className="mb-3 flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Activity className="size-6" />
-      </span>
-      <p className="font-medium">{title}</p>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{note}</p>
-    </div>
-  )
-}
-
-// ---------- management panel ---------------------------------------------
-
-function openLabel(t: OpenTradeView): string {
-  return new Date(t.entryTime).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-}
-
-function ManagementPanel({
-  trade,
-  execution,
-  tradable,
-  onEnableExecution,
-  onOrder,
-  panelTab,
-  onPanelTab,
-  history,
-  onClose,
-  onModifyLevels,
-  onMoveBE,
-  onTrailing,
-  onPartial,
-  onClosed,
-}: {
-  trade: UITrade
-  execution: AccountExecution
-  tradable: boolean
-  onEnableExecution: () => void
-  onOrder: (input: Omit<OrderCommandInput, "accountId" | "broker">) => Promise<boolean>
-  panelTab: "manage" | "info" | "history"
-  onPanelTab: (t: "manage" | "info" | "history") => void
-  history: HistEvent[]
-  onClose: () => void
-  onModifyLevels: (sl: number | null, tp: number | null) => void
-  onMoveBE: (buffer: number) => void
-  onTrailing: (cfg: { distance: number; step: number; active: boolean }) => void
-  onPartial: (lots: number) => void
-  onClosed: () => void
-}) {
-  const meta = instrument(trade.symbol)
-  const pct = pnlPercent(trade)
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-3 border-b p-4">
-        <div className="flex items-center gap-3">
-          <span className={cn("flex size-10 items-center justify-center rounded-full text-[10px] font-bold", meta.tone)}>{trade.symbol.replace(/m$/, "").slice(0, 3)}</span>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold">{trade.symbol}</span>
-              <TypePill side={trade.side} />
-              <span className="text-xs text-muted-foreground">{trade.quantity} lots</span>
-            </div>
-            <p className="text-xs text-muted-foreground">{meta.name} · {trade.accountName}</p>
-          </div>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close panel" className="rounded-md p-1 text-muted-foreground hover:bg-muted">
-          <X className="size-5" />
-        </button>
-      </div>
-
-      <div className="flex items-end justify-between gap-3 border-b px-4 py-3">
-        <div>
-          <div className="text-2xl font-bold tabular-nums">{fmtPrice(trade.currentPrice)}</div>
-          <div className="text-xs text-muted-foreground">Entry {fmtPrice(trade.entryPrice)}</div>
-        </div>
-        <div className="text-right">
-          {trade.unrealizedPnl != null ? (
-            <div className={cn("text-lg font-bold tabular-nums", trade.unrealizedPnl >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
-              {signed(trade.unrealizedPnl)}
-              {pct != null && <span className="ms-1 text-xs font-normal">({pct >= 0 ? "+" : ""}{pct}%)</span>}
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">No live P&L</div>
-          )}
-          <Sparkline up={(trade.unrealizedPnl ?? 0) >= 0} />
-        </div>
-      </div>
-
-      <div className="flex gap-1 border-b px-4">
-        {(["manage", "info", "history"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => onPanelTab(t)}
-            className={cn("border-b-2 px-2 py-2.5 text-sm font-medium capitalize transition-colors", panelTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
-          >
-            {t === "manage" ? "Manage Trade" : t}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4">
-        {panelTab === "manage" && (
-          <ManageTab
-            trade={trade}
-            execution={execution}
-            tradable={tradable}
-            onEnableExecution={onEnableExecution}
-            onOrder={onOrder}
-            onModifyLevels={onModifyLevels}
-            onMoveBE={onMoveBE}
-            onTrailing={onTrailing}
-            onPartial={onPartial}
-            onClosed={onClosed}
-          />
-        )}
-        {panelTab === "info" && <InfoTab trade={trade} />}
-        {panelTab === "history" && <HistoryTab events={history} />}
-      </div>
-    </div>
-  )
-}
-
-function ManageTab({
-  trade,
-  execution,
-  tradable,
-  onEnableExecution,
-  onOrder,
-  onModifyLevels,
-  onMoveBE,
-  onTrailing,
-  onPartial,
-  onClosed,
-}: {
-  trade: UITrade
-  execution: AccountExecution
-  tradable: boolean
-  onEnableExecution: () => void
-  onOrder: (input: Omit<OrderCommandInput, "accountId" | "broker">) => Promise<boolean>
-  onModifyLevels: (sl: number | null, tp: number | null) => void
-  onMoveBE: (buffer: number) => void
-  onTrailing: (cfg: { distance: number; step: number; active: boolean }) => void
-  onPartial: (lots: number) => void
-  onClosed: () => void
-}) {
-  const [sl, setSl] = useState(trade.stopLoss != null ? String(trade.stopLoss) : "")
-  const [tp, setTp] = useState(trade.takeProfit != null ? String(trade.takeProfit) : "")
-  const [partialOpen, setPartialOpen] = useState(false)
-  const [closeOpen, setCloseOpen] = useState(false)
-
-  const slNum = sl.trim() === "" ? null : Number(sl)
-  const tpNum = tp.trim() === "" ? null : Number(tp)
-  const ref = trade.currentPrice ?? trade.entryPrice
-  const slPips = slNum != null ? pips(slNum, ref, trade.symbol) : null
-  const tpPips = tpNum != null ? pips(tpNum, ref, trade.symbol) : null
-  const step = pipSize(trade.symbol)
-  const dirty = slNum !== trade.stopLoss || tpNum !== trade.takeProfit
-  // A live broker position whose account supports execution but hasn't turned it on.
-  const needsEnable = trade.origin === "provider" && execution.supported && !execution.enabled
-
-  return (
-    <div className="space-y-6">
-      {/* Execution status */}
-      {trade.origin === "provider" && (
-        <div className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-xs", tradable ? "border-[var(--gain)]/30 bg-[var(--gain)]/5 text-[var(--gain)]" : "text-muted-foreground")}>
-          <span className={cn("size-1.5 rounded-full", tradable ? "bg-[var(--gain)]" : "bg-amber-500")} />
-          {tradable ? (
-            <span>Live order execution is on — actions are sent to your broker.</span>
-          ) : needsEnable ? (
-            <span className="flex-1">
-              Order execution is off for this account.{" "}
-              <button type="button" onClick={onEnableExecution} className="font-medium text-primary underline">
-                Enable it
-              </button>
-            </span>
-          ) : execution.broker === "tradovate" ? (
-            <span>Tradovate execution is dormant until its API is connected.</span>
-          ) : (
-            <span>Actions update your TradeLoop view; broker execution isn&apos;t available for this account.</span>
-          )}
-        </div>
-      )}
-
-      {/* Quick actions */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick Actions</p>
-        <div className="grid grid-cols-4 gap-2">
-          <QuickBtn label="Close" icon={X} tone="loss" onClick={() => setCloseOpen(true)} />
-          <QuickBtn label="Partial" icon={Scissors} onClick={() => setPartialOpen(true)} />
-          <QuickBtn label="SL to BE" icon={ShieldCheck} tone="primary" onClick={() => onMoveBE(0)} />
-          <MoreMenu trade={trade} onTrailing={onTrailing} />
-        </div>
-      </div>
-
-      {/* Modify levels */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Modify Levels</p>
-        <LevelInput label="Stop Loss (SL)" value={sl} onChange={setSl} step={step} pips={slPips} tone="loss" />
-        <div className="h-3" />
-        <LevelInput label="Take Profit (TP)" value={tp} onChange={setTp} step={step} pips={tpPips} tone="gain" />
-        <Button className="mt-3 w-full" disabled={!dirty} onClick={() => onModifyLevels(slNum, tpNum)}>
-          Update levels
-        </Button>
-      </div>
-
-      {/* Partial close inline summary */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Partial Close</p>
-        <Button variant="outline" className="w-full" onClick={() => setPartialOpen(true)}>
-          <Scissors className="size-4" /> Close part of {trade.quantity} lots
-        </Button>
-      </div>
-
-      {/* Break even */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Move SL to Break Even</p>
-        <div className="rounded-lg border p-3 text-xs text-muted-foreground">
-          Break-even price <span className="font-medium text-foreground">{fmtPrice(trade.entryPrice)}</span> · locks in about $0.00
-        </div>
-        <Button variant="outline" className="mt-2 w-full" onClick={() => onMoveBE(0)}>
-          <ShieldCheck className="size-4" /> Move SL to break-even
-        </Button>
-      </div>
-
-      {/* Close */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Close Trade</p>
-        <Button variant="destructive" className="w-full" onClick={() => setCloseOpen(true)}>
-          <X className="size-4" /> Close position
-        </Button>
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <InfoIcon className="size-3.5" />
-          {trade.origin === "trade" ? "Records the close in your TradeLoop journal." : "Live position — wired for broker integration; manage it in your platform for now."}
-        </p>
-      </div>
-
-      <PartialCloseModal open={partialOpen} onOpenChange={setPartialOpen} trade={trade} onExecute={(lots) => { onPartial(lots); setPartialOpen(false) }} />
-      <CloseModal open={closeOpen} onOpenChange={setCloseOpen} trade={trade} tradable={tradable} onOrder={onOrder} onDone={() => { onClosed(); setCloseOpen(false) }} />
-    </div>
-  )
-}
-
-function QuickBtn({ label, icon: Icon, tone, onClick }: { label: string; icon: typeof X; tone?: "loss" | "primary"; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center gap-1 rounded-xl border p-2.5 text-xs font-medium transition-colors hover:bg-muted",
-        tone === "loss" && "border-[var(--loss)]/30 text-[var(--loss)] hover:bg-[var(--loss)]/5",
-        tone === "primary" && "border-primary/30 text-primary hover:bg-primary/5",
-      )}
-    >
-      <Icon className="size-4" />
-      {label}
-    </button>
-  )
-}
-
-function MoreMenu({ trade, onTrailing }: { trade: UITrade; onTrailing: (cfg: { distance: number; step: number; active: boolean }) => void }) {
-  const [trailOpen, setTrailOpen] = useState(false)
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button type="button" className="flex flex-col items-center gap-1 rounded-xl border p-2.5 text-xs font-medium transition-colors hover:bg-muted">
-              <MoreHorizontal className="size-4" />
-              More
-            </button>
-          }
-        />
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onClick={() => setTrailOpen(true)}>Set trailing stop</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => toast("Modify order — coming with broker integration")}>Modify order</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => toast.success("Note added")}>Add note</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => toast("Trade copied")}>Copy trade</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <TrailingModal open={trailOpen} onOpenChange={setTrailOpen} active={!!trade.trailing?.active} onApply={onTrailing} />
-    </>
-  )
-}
-
-function LevelInput({ label, value, onChange, step, pips, tone }: { label: string; value: string; onChange: (v: string) => void; step: number; pips: number | null; tone: "loss" | "gain" }) {
+function Stepper({ value, onChange, step }: { value: string; onChange: (v: string) => void; step: number }) {
   const bump = (dir: number) => {
     const n = value.trim() === "" ? 0 : Number(value)
     onChange(String(Math.round((n + dir * step) / step) * step))
   }
   return (
-    <div>
-      <div className="mb-1 flex items-center justify-between">
-        <label className="text-xs text-muted-foreground">{label}</label>
-        {pips != null && <span className={cn("text-xs font-medium tabular-nums", tone === "gain" ? "text-[var(--gain)]" : "text-[var(--loss)]")}>{pips >= 0 ? "+" : ""}{pips} pips</span>}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <Button variant="outline" size="icon" className="size-9 shrink-0" onClick={() => bump(-1)} aria-label="Decrease">
-          <Minus className="size-4" />
-        </Button>
-        <Input value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="text-center tabular-nums" placeholder="—" />
-        <Button variant="outline" size="icon" className="size-9 shrink-0" onClick={() => bump(1)} aria-label="Increase">
-          <Plus className="size-4" />
-        </Button>
-      </div>
+    <div className="flex items-center gap-1.5">
+      <Button variant="outline" size="icon" className="size-11 shrink-0" onClick={() => bump(-1)} aria-label="Decrease"><Minus className="size-4" /></Button>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" className="h-11 text-center text-lg tabular-nums" placeholder="—" />
+      <Button variant="outline" size="icon" className="size-11 shrink-0" onClick={() => bump(1)} aria-label="Increase"><Plus className="size-4" /></Button>
     </div>
   )
 }
 
-// ---------- info / history tabs -------------------------------------------
-
-function InfoTab({ trade }: { trade: UITrade }) {
-  const rows: [string, string][] = [
-    ["Symbol", trade.symbol],
-    ["Direction", trade.side === "long" ? "BUY" : "SELL"],
-    ["Volume", `${trade.quantity} lots`],
-    ["Entry Price", fmtPrice(trade.entryPrice)],
-    ["Current Price", fmtPrice(trade.currentPrice)],
-    ["Stop Loss", fmtPrice(trade.stopLoss)],
-    ["Take Profit", fmtPrice(trade.takeProfit)],
-    ["Open Time", new Date(trade.entryTime).toLocaleString()],
-    ["Account", trade.accountName],
-    ["Platform", (trade.source ?? "—").toUpperCase()],
-    ["Ticket", trade.origin === "trade" ? `#${trade.id}` : "live"],
-  ]
+function Chip({ label, active, onClick }: { label: string; active?: boolean; onClick: () => void }) {
   return (
-    <div className="divide-y rounded-lg border">
-      {rows.map(([k, v]) => (
-        <div key={k} className="flex items-center justify-between px-3 py-2 text-sm">
-          <span className="text-muted-foreground">{k}</span>
-          <span className="font-medium tabular-nums">{v}</span>
-        </div>
-      ))}
-    </div>
+    <button type="button" onClick={onClick} className={cn("rounded-xl border py-2 text-sm font-medium transition-colors", active ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted")}>
+      {label}
+    </button>
   )
 }
 
-function HistoryTab({ events }: { events: HistEvent[] }) {
+function EditLevelSheet({ field, trade, onClose, onApply, onBE }: { field: "sl" | "tp"; trade: UITrade; onClose: () => void; onApply: (sl: number | null, tp: number | null) => void; onBE: () => void }) {
+  const isSL = field === "sl"
+  const current = isSL ? trade.stopLoss : trade.takeProfit
+  const [val, setVal] = useState(current != null ? String(current) : "")
+  const step = pipSize(trade.symbol)
+  const long = trade.side === "long"
+  const riskPrice = (x: number) => String(round4(trade.entryPrice + (long ? -1 : 1) * x * step))
+  const profitPrice = (x: number) => String(round4(trade.entryPrice + (long ? 1 : -1) * x * step))
+  const num = val.trim() === "" ? null : Number(val)
   return (
-    <ol className="relative space-y-4 ps-5">
-      <span className="absolute inset-y-1 start-1.5 w-px bg-border" aria-hidden />
-      {events.map((e, i) => (
-        <li key={i} className="relative">
-          <span className="absolute -start-[13px] top-1 size-2.5 rounded-full border-2 border-background bg-primary" aria-hidden />
-          <p className="text-xs text-muted-foreground">{e.time}</p>
-          <p className="text-sm font-medium">{e.label}</p>
-          {e.detail && <p className="text-xs text-muted-foreground">{e.detail}</p>}
-        </li>
-      ))}
-    </ol>
-  )
-}
-
-// ---------- modals --------------------------------------------------------
-
-function PartialCloseModal({ open, onOpenChange, trade, onExecute }: { open: boolean; onOpenChange: (v: boolean) => void; trade: UITrade; onExecute: (lots: number) => void }) {
-  const [pctSel, setPctSel] = useState(50)
-  const lots = round4((trade.quantity * pctSel) / 100)
-  const remaining = round4(trade.quantity - lots)
-  const estPnl = trade.unrealizedPnl != null ? (trade.unrealizedPnl * pctSel) / 100 : null
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Partial close · {trade.symbol}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-lg border p-3 text-sm">
-            <span className="text-muted-foreground">Current position</span>
-            <span className="font-medium tabular-nums">{trade.quantity} lots</span>
-          </div>
-          <div>
-            <div className="mb-1 flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Amount to close</span>
-              <span className="font-semibold tabular-nums">{lots} lots</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {[25, 50, 75, 100].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPctSel(p)}
-                  className={cn("rounded-lg border py-1.5 text-sm font-medium transition-colors", pctSel === p ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted")}
-                >
-                  {p}%
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">Remaining</p>
-              <p className="font-medium tabular-nums">{remaining} lots</p>
-            </div>
-            <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">Est. P&L</p>
-              <p className={cn("font-medium tabular-nums", (estPnl ?? 0) >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>{estPnl != null ? signed(estPnl) : "—"}</p>
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => onExecute(lots)}>Execute partial close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function CloseModal({ open, onOpenChange, trade, tradable, onOrder, onDone }: { open: boolean; onOpenChange: (v: boolean) => void; trade: UITrade; tradable: boolean; onOrder: (input: Omit<OrderCommandInput, "accountId" | "broker">) => Promise<boolean>; onDone: () => void }) {
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
-  const [exit, setExit] = useState(trade.currentPrice != null ? String(trade.currentPrice) : "")
-
-  function confirm() {
-    // A manual trade closes for real (records realized P&L); a live broker
-    // position with execution on sends a real close order; otherwise it's a
-    // view-only action.
-    if (trade.origin === "trade") {
-      const price = Number(exit)
-      if (!Number.isFinite(price) || exit.trim() === "") {
-        toast.error("Enter the exit price.")
-        return
+    <Sheet
+      open
+      onClose={onClose}
+      title={isSL ? "Edit Stop Loss" : "Edit Take Profit"}
+      subtitle={<span className="flex items-center gap-1.5">{trade.symbol} · <TypePill side={trade.side} size="xs" /></span>}
+      footer={
+        <>
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" disabled={val.trim() !== "" && !Number.isFinite(num)} onClick={() => (isSL ? onApply(num, trade.takeProfit) : onApply(trade.stopLoss, num))}>
+            {isSL ? "Update SL" : "Update TP"}
+          </Button>
+        </>
       }
-      startTransition(async () => {
-        try {
-          const { pnl } = await closeOpenTrade(trade.id, price)
-          toast.success(`Closed ${trade.symbol}`, { description: `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)} realized` })
-          onDone()
-          router.refresh()
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Couldn't close.")
-        }
-      })
-    } else if (tradable) {
-      startTransition(async () => {
-        const ok = await onOrder({ kind: "close", positionRef: trade.positionRef })
-        if (ok) onDone()
-      })
-    } else {
-      toast.success(`Close request queued · ${trade.symbol}`)
-      onDone()
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Close {trade.symbol} position?</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 text-sm">
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <TypePill side={trade.side} />
-            <span className="tabular-nums">{trade.quantity} lots · {trade.accountName}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">Current price</p>
-              <p className="font-medium tabular-nums">{fmtPrice(trade.currentPrice)}</p>
-            </div>
-            <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">Unrealized P&L</p>
-              <p className={cn("font-medium tabular-nums", (trade.unrealizedPnl ?? 0) >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")}>{trade.unrealizedPnl != null ? signed(trade.unrealizedPnl) : "—"}</p>
-            </div>
-          </div>
-          {trade.origin === "trade" && (
-            <div>
-              <label className="text-xs text-muted-foreground">Exit price</label>
-              <Input value={exit} onChange={(e) => setExit(e.target.value)} inputMode="decimal" placeholder="e.g. 2641.20" className="mt-1" />
-            </div>
-          )}
-          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <InfoIcon className="size-3.5" />
-            {trade.origin === "trade" ? "This records the close in your journal." : tradable ? "This sends a close order to your broker now." : "Broker execution isn't enabled — this updates your TradeLoop view only."}
-          </p>
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-xl border p-3 text-sm">
+          <span className="text-muted-foreground">Current {isSL ? "SL" : "TP"}</span>
+          <span className="font-semibold tabular-nums">{fmtPrice(current)}</span>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>Cancel</Button>
-          <Button variant="destructive" onClick={confirm} disabled={pending}>{pending ? "Closing…" : "Close position"}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div>
+          <p className="mb-1.5 text-sm font-medium">New {isSL ? "Stop Loss" : "Take Profit"}</p>
+          <Stepper value={val} onChange={setVal} step={step} />
+        </div>
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick options</p>
+          <div className="grid grid-cols-4 gap-2">
+            {isSL ? (
+              <>
+                <Chip label="Breakeven" onClick={onBE} />
+                <Chip label="10 pts" onClick={() => setVal(riskPrice(10))} />
+                <Chip label="20 pts" onClick={() => setVal(riskPrice(20))} />
+                <Chip label="50 pts" onClick={() => setVal(riskPrice(50))} />
+              </>
+            ) : (
+              <>
+                <Chip label="+10 pts" onClick={() => setVal(profitPrice(10))} />
+                <Chip label="+20 pts" onClick={() => setVal(profitPrice(20))} />
+                <Chip label="+50 pts" onClick={() => setVal(profitPrice(50))} />
+                <Chip label="+100 pts" onClick={() => setVal(profitPrice(100))} />
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </Sheet>
   )
 }
 
-function TrailingModal({ open, onOpenChange, active, onApply }: { open: boolean; onOpenChange: (v: boolean) => void; active: boolean; onApply: (cfg: { distance: number; step: number; active: boolean }) => void }) {
+function PartialSheet({ trade, onClose, onExecute }: { trade: UITrade; onClose: () => void; onExecute: (lots: number) => void }) {
+  const [pct, setPct] = useState(50)
+  const lots = round4((trade.quantity * pct) / 100)
+  const remaining = round4(trade.quantity - lots)
+  const estPnl = trade.unrealizedPnl != null ? (trade.unrealizedPnl * pct) / 100 : null
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title="Partial Close"
+      subtitle={<span className="flex items-center gap-1.5">{trade.symbol} · <TypePill side={trade.side} size="xs" /></span>}
+      footer={
+        <>
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" disabled={lots <= 0} onClick={() => onExecute(lots)}>Close {lots}</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-xl border p-3 text-sm">
+          <span className="text-muted-foreground">Current quantity</span>
+          <span className="font-semibold tabular-nums">{trade.quantity}</span>
+        </div>
+        <div>
+          <p className="mb-1.5 text-sm font-medium">Close</p>
+          <div className="grid grid-cols-4 gap-2">
+            {[25, 50, 75, 100].map((p) => (
+              <Chip key={p} label={`${p}%`} active={pct === p} onClick={() => setPct(p)} />
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-muted-foreground">Remaining</p>
+            <p className="font-semibold tabular-nums">{remaining}</p>
+          </div>
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-muted-foreground">Est. P&L</p>
+            <Pnl value={estPnl} className="font-semibold" />
+          </div>
+        </div>
+      </div>
+    </Sheet>
+  )
+}
+
+function CloseSheet({ trade, tradable, onClose, onConfirm }: { trade: UITrade; tradable: boolean; onClose: () => void; onConfirm: (exit?: number) => void }) {
+  const [pending, start] = useTransition()
+  const [exit, setExit] = useState(trade.currentPrice != null ? String(trade.currentPrice) : "")
+  const manual = trade.origin === "trade"
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title="Close Position?"
+      subtitle={<span className="flex items-center gap-1.5">{trade.symbol} · <TypePill side={trade.side} size="xs" /></span>}
+      footer={
+        <>
+          <Button variant="ghost" className="flex-1" onClick={onClose} disabled={pending}>Cancel</Button>
+          <Button variant="destructive" className="flex-1" disabled={pending} onClick={() => start(() => onConfirm(manual ? Number(exit) : undefined))}>{pending ? "Closing…" : "Close Position"}</Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-muted-foreground">Quantity</p>
+            <p className="font-semibold tabular-nums">{trade.quantity}</p>
+          </div>
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-muted-foreground">Current P&L</p>
+            <Pnl value={trade.unrealizedPnl} className="font-semibold" />
+          </div>
+        </div>
+        {manual && (
+          <div>
+            <label className="text-xs text-muted-foreground">Exit price</label>
+            <Input value={exit} onChange={(e) => setExit(e.target.value)} inputMode="decimal" placeholder="e.g. 30817.75" className="mt-1" />
+          </div>
+        )}
+        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+          {manual ? "This records the close in your journal." : tradable ? "This sends a close order to your broker now." : "Broker execution isn't enabled — this updates your TradeLoop view only."}
+        </p>
+      </div>
+    </Sheet>
+  )
+}
+
+function ReverseSheet({ trade, onClose, onConfirm }: { trade: UITrade; onClose: () => void; onConfirm: () => void }) {
+  const opp = trade.side === "long" ? "short" : "long"
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title="Reverse Position?"
+      subtitle={trade.symbol}
+      footer={
+        <>
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" onClick={onConfirm}><Repeat2 className="size-4" /> Reverse</Button>
+        </>
+      }
+    >
+      <div className="flex items-center justify-center gap-3 rounded-xl border p-5 text-center">
+        <div>
+          <TypePill side={trade.side} />
+          <p className="mt-1 text-sm text-muted-foreground">{trade.quantity} {trade.symbol}</p>
+        </div>
+        <Repeat2 className="size-5 text-muted-foreground" />
+        <div>
+          <TypePill side={opp} />
+          <p className="mt-1 text-sm text-muted-foreground">{trade.quantity} {trade.symbol}</p>
+        </div>
+      </div>
+      <p className="mt-3 text-center text-xs text-muted-foreground">Closes the current position and opens the opposite side.</p>
+    </Sheet>
+  )
+}
+
+function TrailingSheet({ active, onClose, onApply }: { active: boolean; onClose: () => void; onApply: (cfg: { distance: number; step: number; active: boolean }) => void }) {
   const [distance, setDistance] = useState("20")
   const [step, setStep] = useState("5")
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Trailing stop</DialogTitle>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground">Distance (pips)</label>
-            <Input value={distance} onChange={(e) => setDistance(e.target.value)} inputMode="numeric" className="mt-1" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground">Step (pips)</label>
-            <Input value={step} onChange={(e) => setStep(e.target.value)} inputMode="numeric" className="mt-1" />
-          </div>
+    <Sheet
+      open
+      onClose={onClose}
+      title="Trailing Stop"
+      footer={
+        <>
+          {active && <Button variant="ghost" className="flex-1" onClick={() => onApply({ distance: Number(distance), step: Number(step), active: false })}>Turn off</Button>}
+          <Button className="flex-1" onClick={() => onApply({ distance: Number(distance), step: Number(step), active: true })}>{active ? "Update" : "Activate"}</Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground">Distance (pts)</label>
+          <Input value={distance} onChange={(e) => setDistance(e.target.value)} inputMode="numeric" className="mt-1" />
         </div>
-        <DialogFooter>
-          {active && (
-            <Button variant="ghost" onClick={() => { onApply({ distance: Number(distance), step: Number(step), active: false }); onOpenChange(false) }}>
-              Turn off
-            </Button>
-          )}
-          <Button onClick={() => { onApply({ distance: Number(distance), step: Number(step), active: true }); onOpenChange(false) }}>
-            {active ? "Update" : "Activate"} trailing stop
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div>
+          <label className="text-xs text-muted-foreground">Step (pts)</label>
+          <Input value={step} onChange={(e) => setStep(e.target.value)} inputMode="numeric" className="mt-1" />
+        </div>
+      </div>
+    </Sheet>
   )
 }
 
-// ---------- bulk bar ------------------------------------------------------
+function BulkEditSheet({ trades, onClose, onApply }: { trades: UITrade[]; onClose: () => void; onApply: (sl: number | null, tp: number | null) => void }) {
+  const [sl, setSl] = useState("")
+  const [tp, setTp] = useState("")
+  const slNum = sl.trim() === "" ? null : Number(sl)
+  const tpNum = tp.trim() === "" ? null : Number(tp)
+  const valid = (sl.trim() === "" || Number.isFinite(slNum)) && (tp.trim() === "" || Number.isFinite(tpNum)) && (slNum != null || tpNum != null)
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title={`Edit ${trades.length} Position${trades.length === 1 ? "" : "s"}`}
+      subtitle="Applies the same levels to every selected position"
+      footer={
+        <>
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" disabled={!valid || trades.length === 0} onClick={() => onApply(slNum, tpNum)}>Apply Changes</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="text-sm font-medium">Stop Loss</label>
+          <Input value={sl} onChange={(e) => setSl(e.target.value)} inputMode="decimal" placeholder="Leave blank to keep" className="mt-1 tabular-nums" />
+        </div>
+        <div>
+          <label className="text-sm font-medium">Take Profit</label>
+          <Input value={tp} onChange={(e) => setTp(e.target.value)} inputMode="decimal" placeholder="Leave blank to keep" className="mt-1 tabular-nums" />
+        </div>
+        <div className="rounded-xl border p-3 text-xs text-muted-foreground">
+          {trades.length} position{trades.length === 1 ? "" : "s"} will be modified: {trades.map((t) => t.symbol).join(", ") || "—"}
+        </div>
+      </div>
+    </Sheet>
+  )
+}
+
+function ConfirmSheet({ title, body, confirmLabel, destructive, onCancel, onConfirm }: { title: string; body: ReactNode; confirmLabel: string; destructive?: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <Sheet
+      open
+      onClose={onCancel}
+      title={title}
+      footer={
+        <>
+          <Button variant="ghost" className="flex-1" onClick={onCancel}>Cancel</Button>
+          <Button variant={destructive ? "destructive" : "default"} className="flex-1" onClick={onConfirm}>{confirmLabel}</Button>
+        </>
+      }
+    >
+      {body}
+    </Sheet>
+  )
+}
+
+function BulkCloseBody({ trades }: { trades: UITrade[] }) {
+  const total = trades.map((t) => t.unrealizedPnl).filter((v): v is number => v != null).reduce((a, b) => a + b, 0)
+  return (
+    <div className="space-y-2">
+      <div className="divide-y rounded-xl border">
+        {trades.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+            <SymbolBadge symbol={t.symbol} className="size-7" />
+            <span className="font-medium">{t.symbol}</span>
+            <TypePill side={t.side} size="xs" />
+            <span className="ms-auto"><Pnl value={t.unrealizedPnl} className="font-medium" /></span>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between px-1 text-sm">
+        <span className="text-muted-foreground">Combined P&L</span>
+        <Pnl value={total} className="font-semibold" />
+      </div>
+    </div>
+  )
+}
 
 function EnableExecutionDialog({ accountId, accountName, onClose }: { accountId: number; accountName: string; onClose: () => void }) {
   const router = useRouter()
   const [password, setPassword] = useState("")
-  const [pending, startTransition] = useTransition()
+  const [pending, start] = useTransition()
   function save() {
     if (!password.trim()) {
       toast.error("Enter your master (trading) password.")
       return
     }
-    startTransition(async () => {
+    start(async () => {
       try {
         await setTradingPassword(accountId, password)
         toast.success("Order execution enabled", { description: accountName })
@@ -1392,17 +1510,12 @@ function EnableExecutionDialog({ accountId, accountName, onClose }: { accountId:
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            To send orders for <span className="font-medium text-foreground">{accountName}</span>, TradeLoop needs its <span className="font-medium text-foreground">master (trading)</span> password —
-            the investor password used for syncing can only read. It&apos;s stored encrypted and used only to place, modify and close orders you request.
+            To send orders for <span className="font-medium text-foreground">{accountName}</span>, TradeLoop needs its <span className="font-medium text-foreground">master (trading)</span> password. It&apos;s stored encrypted and used only for orders you request.
           </p>
           <div>
             <label className="text-xs text-muted-foreground">Master (trading) password</label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1" autoFocus />
           </div>
-          <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-            <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
-            On a funded account, orders are still checked against your Propfirm Tracker rules first — a rule-breaking order is blocked before it reaches the broker.
-          </p>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={pending}>Cancel</Button>
@@ -1413,17 +1526,26 @@ function EnableExecutionDialog({ accountId, accountName, onClose }: { accountId:
   )
 }
 
-function BulkBar({ count, onClear, onCloseAll }: { count: number; onClear: () => void; onCloseAll: () => void }) {
+function BottomNav({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
+  const items: { key: TabKey; label: string; icon: typeof CandlestickChart }[] = [
+    { key: "open", label: "Trades", icon: CandlestickChart },
+    { key: "pending", label: "Orders", icon: FileText },
+    { key: "closed", label: "History", icon: Clock },
+    { key: "all", label: "More", icon: LayoutGrid },
+  ]
   return (
-    <div className="fixed inset-x-0 bottom-4 z-40 mx-auto flex w-fit items-center gap-3 rounded-full border bg-card px-4 py-2 shadow-lg">
-      <span className="text-sm font-medium">{count} selected</span>
-      <span className="h-4 w-px bg-border" />
-      <Button variant="ghost" size="sm" onClick={() => toast("Move SL to BE for selected")}>Move SL to BE</Button>
-      <Button variant="ghost" size="sm" onClick={() => toast("Modify SL/TP for selected")}>Modify</Button>
-      <Button variant="destructive" size="sm" onClick={onCloseAll}>Close selected</Button>
-      <button type="button" onClick={onClear} aria-label="Clear selection" className="rounded-md p-1 text-muted-foreground hover:bg-muted">
-        <X className="size-4" />
-      </button>
-    </div>
+    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-card pb-[env(safe-area-inset-bottom)] lg:hidden">
+      {items.map((it) => {
+        const active = tab === it.key
+        return (
+          <button key={it.key} type="button" onClick={() => onTab(it.key)} className={cn("flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors", active ? "text-primary" : "text-muted-foreground")}>
+            <it.icon className="size-5" />
+            {it.label}
+            <span className={cn("mt-0.5 h-0.5 w-6 rounded-full", active ? "bg-primary" : "bg-transparent")} />
+          </button>
+        )
+      })}
+    </nav>
   )
 }
+
