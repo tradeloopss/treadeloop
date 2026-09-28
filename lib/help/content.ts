@@ -4,6 +4,7 @@
 // adding to HELP. Icons are lucide names resolved in components/help/icon.ts.
 
 import { appHref } from "@/lib/urls"
+import type { FigureKey } from "@/components/help/help-figures"
 
 export type Block =
   | { t: "p"; text: string }
@@ -15,6 +16,9 @@ export type Block =
   | { t: "warn"; text: string }
   | { t: "video"; url: string; title?: string }
   | { t: "link"; label: string; href: string; prefix?: string }
+  // A guide "screenshot" of the real flow, drawn as a theme-aware mockup
+  // (components/help/help-figures). `art` picks which step it shows.
+  | { t: "figure"; art: FigureKey; caption?: string }
 
 // The onboarding video — the Vimeo walkthrough, auto-embedded. Override with
 // another YouTube/Vimeo link or the local /TradeLoop.mp4 via
@@ -123,12 +127,15 @@ export const HELP: Category[] = [
         summary: "Link an MT4/MT5 account with your investor (read-only) password.",
         body: [
           { t: "warn", text: "Use only the investor (read-only) password. Ask your prop firm before linking any account — some restrict third-party connections. TradeLoop is never responsible for a prop-firm issue caused by connecting your real (master/trading) password. Never enter your master password to connect." },
+          { t: "p", text: "From Accounts → Add account, choose your platform. MetaTrader 5 and MetaTrader 4 each have their own tile." },
+          { t: "figure", art: "platform-picker", caption: "Accounts → Add account → choose MetaTrader 5 (or MT4), then Continue." },
           { t: "steps", items: [
             "In MetaTrader, open File → Login to Trade Account to see your exact server name (e.g. Exness-Real6, FTMO-Server3, JustMarkets-Live).",
             "In TradeLoop: Accounts → Add account → MetaTrader 5 (or MT4).",
             "Enter the server name exactly as shown, your account number, and your investor password.",
             "Choose how much history to import, then Connect. The first login can take up to a minute.",
           ] },
+          { t: "figure", art: "metatrader-form", caption: "Server name, account number and the investor (read-only) password — then Connect." },
           { t: "note", text: "If your broker's server isn't recognised, double-check the spelling. If it's right, we've been notified and will add it — most brokers are added within a day." },
           { t: "p", text: "The investor password can see your trades but can never place or close one. It's stored encrypted and used only by our sync server." },
         ],
@@ -143,6 +150,7 @@ export const HELP: Category[] = [
             "Pick your Rithmic system (your prop firm's gateway) and enter your Rithmic username and password.",
             "Connect. TradeLoop discovers your accounts and imports your fills.",
           ] },
+          { t: "figure", art: "rithmic-form", caption: "Pick your prop firm's Rithmic system, enter your Rithmic login, then Connect." },
           { t: "note", text: "Rithmic limits how often an account can sign in. TradeLoop syncs on a sensible schedule and pauses automatically after repeated login failures so your prop firm doesn't flag the account — a manual “Sync now” always works and clears the pause." },
         ],
       },
@@ -156,6 +164,7 @@ export const HELP: Category[] = [
             "Upload your broker's export.",
             "Map the columns (symbol, side, quantity, entry/exit price and time) — save the layout as a CSV Schema in Settings so next time is one click.",
           ] },
+          { t: "figure", art: "csv-map", caption: "Drop your export, then map each column to the right field before importing." },
           { t: "p", text: "Duplicate trades already in your journal are never imported twice." },
         ],
       },

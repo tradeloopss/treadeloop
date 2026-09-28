@@ -1,6 +1,7 @@
 import { Rocket, Plug, NotebookPen, Activity, ShieldCheck, CreditCard, HelpCircle, Info, TriangleAlert, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Block } from "@/lib/help/content"
+import { HelpFigure } from "@/components/help/help-figures"
 
 const ICONS: Record<string, LucideIcon> = {
   rocket: Rocket,
@@ -118,6 +119,8 @@ export function ArticleBody({ blocks }: { blocks: Block[] }) {
             )
           case "video":
             return <HelpVideo key={i} url={b.url} title={b.title} />
+          case "figure":
+            return <HelpFigure key={i} art={b.art} caption={b.caption} />
           case "note":
           case "warn": {
             const warn = b.t === "warn"
