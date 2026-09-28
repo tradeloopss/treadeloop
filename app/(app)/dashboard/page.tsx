@@ -9,6 +9,7 @@ import { isPro } from "@/lib/subscription"
 import { analyze, formatCurrency, type TradeStat } from "@/lib/calc"
 import { computeDayPnl } from "@/lib/day-pnl"
 import { computeDailyAccountPnl, computeAccountPnlInRange } from "@/lib/daily-account-pnl"
+import { resolveTimeZone, localDay } from "@/lib/timezone"
 import { resolvePnlPeriod } from "@/lib/pnl-period"
 import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
 import { DashboardHeaderActions } from "@/components/dashboard-header-actions"
@@ -40,7 +41,9 @@ export default async function DashboardPage() {
   // The recent-trades loop names each trade `t`; the translator is `tr` there.
   const tr = t
   const dateLocale = intlLocale(await getLocale())
-  const session = await auth.api.getSession({ headers: await headers() })
+  const h = await headers()
+  const tz = resolveTimeZone(h)
+  const session = await auth.api.getSession({ headers: h })
   const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template] = await Promise.all([
     getTrades(),
     getAccounts(),
@@ -51,10 +54,10 @@ export default async function DashboardPage() {
     getTemplates(),
     getActiveTemplate(),
   ])
-  const dayPnlByDay = computeDayPnl(rows, journalEntries)
+  const dayPnlByDay = computeDayPnl(rows, journalEntries, tz)
 
-  const today = new Date().toISOString().slice(0, 10)
-  const dailyByAccount = computeDailyAccountPnl(rows, today)
+  const today = localDay(new Date(), tz)
+  const dailyByAccount = computeDailyAccountPnl(rows, today, tz)
   const dailyAccountRows = accounts.map((acc) => {
     const day = dailyByAccount.get(acc.id)
     return {
@@ -86,7 +89,7 @@ export default async function DashboardPage() {
   // Same shapes over the current Monday–Sunday week, so the certificate's
   // "Weekly" option has real numbers rather than reusing today's.
   const week = resolvePnlPeriod("weekly", today)
-  const weeklyByAccount = computeAccountPnlInRange(rows, week.start, week.end)
+  const weeklyByAccount = computeAccountPnlInRange(rows, week.start, week.end, tz)
   const weeklyAccountRows = accounts.map((acc) => {
     const period = weeklyByAccount.get(acc.id)
     return {
@@ -157,7 +160,7 @@ export default async function DashboardPage() {
   // P&L" sidebar chart (distinct from the trade-by-trade Equity Curve).
   const pnlByDay = new Map<string, number>()
   for (const t of closed) {
-    const day = new Date(t.exitTime ?? t.entryTime).toISOString().slice(0, 10)
+    const day = localDay(t.exitTime ?? t.entryTime, tz)
     pnlByDay.set(day, (pnlByDay.get(day) ?? 0) + Number(t.pnl))
   }
   let dailyRunning = 0

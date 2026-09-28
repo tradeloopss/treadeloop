@@ -5,7 +5,9 @@ import { getAccount } from "@/app/actions/accounts"
 import { getAccountTrades } from "@/app/actions/trades"
 import { getPropFirmAccounts } from "@/app/actions/propfirm"
 import { analyze, formatCurrency, type TradeStat } from "@/lib/calc"
+import { headers } from "next/headers"
 import { computeDayPnl } from "@/lib/day-pnl"
+import { resolveTimeZone, localDay } from "@/lib/timezone"
 import { computeTradingScore } from "@/lib/trading-score"
 import { computePerformanceSummary } from "@/lib/performance-summary"
 import type { ReportTrade } from "@/components/period-insights"
@@ -42,6 +44,7 @@ export default async function AccountDashboardPage({
   // The recent-trades loop names each trade `t`; the translator is `tr` there.
   const tr = t
   const dateLocale = intlLocale(await getLocale())
+  const tz = resolveTimeZone(await headers())
 
   const [account, rows, propFirmAccounts] = await Promise.all([
     getAccount(id),
@@ -73,7 +76,7 @@ export default async function AccountDashboardPage({
     status: t.status,
   }))
   const a = analyze(stats)
-  const dayPnlByDay = computeDayPnl(rows)
+  const dayPnlByDay = computeDayPnl(rows, [], tz)
   const tradingScore = computeTradingScore(stats)
   const performanceSummary = computePerformanceSummary(stats)
 
@@ -92,7 +95,7 @@ export default async function AccountDashboardPage({
 
   const pnlByDay = new Map<string, number>()
   for (const t of closed) {
-    const day = new Date(t.exitTime ?? t.entryTime).toISOString().slice(0, 10)
+    const day = localDay(t.exitTime ?? t.entryTime, tz)
     pnlByDay.set(day, (pnlByDay.get(day) ?? 0) + Number(t.pnl))
   }
   let dailyRunning = 0

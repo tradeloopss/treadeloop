@@ -2,7 +2,9 @@ import { getTrades } from "@/app/actions/trades"
 import { getAccounts, getActiveAccountIds } from "@/app/actions/accounts"
 import { getJournalEntries } from "@/app/actions/journal"
 import { getPlaybooks } from "@/app/actions/playbooks"
+import { headers } from "next/headers"
 import { tradeDate } from "@/lib/day-pnl"
+import { resolveTimeZone } from "@/lib/timezone"
 import { tradingSession } from "@/lib/calc"
 import { PageHeader } from "@/components/page-header"
 import { AccountCustomizer } from "@/components/account-customizer"
@@ -13,6 +15,7 @@ import { getT } from "@/lib/i18n/server"
 export default async function CalendarPage() {
   const startedAt = Date.now()
   const t = await getT()
+  const tz = resolveTimeZone(await headers())
   const [rows, entries, accounts, activeAccountIds, playbooks] = await Promise.all([
     getTrades(),
     getJournalEntries(),
@@ -25,7 +28,7 @@ export default async function CalendarPage() {
   const trades: CalendarTrade[] = rows
     .filter((r) => r.status === "closed")
     .map((r) => ({
-      date: tradeDate(r),
+      date: tradeDate(r, tz),
       pnl: Number(r.pnl),
       r: r.rMultiple == null ? null : Number(r.rMultiple),
       rating: r.rating,

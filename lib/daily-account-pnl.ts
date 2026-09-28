@@ -1,5 +1,6 @@
 // Pure aggregation of closed trades into per-account daily P&L — kept
 // separate from the server actions so the grouping logic is unit-testable.
+import { DEFAULT_TIME_ZONE, localDay } from "@/lib/timezone"
 
 export interface DailyAccountPnlTrade {
   accountId: number | null
@@ -18,8 +19,8 @@ export interface DailyAccountPnl {
   losses: number
 }
 
-export function computeDailyAccountPnl(rows: DailyAccountPnlTrade[], date: string): Map<number, DailyAccountPnl> {
-  return computeAccountPnlInRange(rows, date, date)
+export function computeDailyAccountPnl(rows: DailyAccountPnlTrade[], date: string, timeZone: string = DEFAULT_TIME_ZONE): Map<number, DailyAccountPnl> {
+  return computeAccountPnlInRange(rows, date, date, timeZone)
 }
 
 // Same grouping over an inclusive YYYY-MM-DD range, so a weekly certificate
@@ -29,12 +30,13 @@ export function computeAccountPnlInRange(
   rows: DailyAccountPnlTrade[],
   startDate: string,
   endDate: string,
+  timeZone: string = DEFAULT_TIME_ZONE,
 ): Map<number, DailyAccountPnl> {
   const date = startDate
   const byAccount = new Map<number, DailyAccountPnl>()
   for (const t of rows) {
     if (t.status !== "closed" || t.accountId == null) continue
-    const day = new Date(t.exitTime ?? t.entryTime).toISOString().slice(0, 10)
+    const day = localDay(t.exitTime ?? t.entryTime, timeZone)
     if (day < startDate || day > endDate) continue
     const pnl = Number(t.pnl)
     const existing = byAccount.get(t.accountId) ?? { accountId: t.accountId, date, pnl: 0, trades: 0, wins: 0, losses: 0 }
