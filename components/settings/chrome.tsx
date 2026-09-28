@@ -111,7 +111,9 @@ export function SettingsRow({
           />
         )}
       </button>
-      {expandable && open && <div className="border-t px-4 py-4">{children}</div>}
+      {expandable && open && (
+        <div className="animate-in fade-in slide-in-from-top-1 border-t px-4 py-4 duration-200 ease-out">{children}</div>
+      )}
     </div>
   )
 }

@@ -161,12 +161,37 @@
   --cal-neutral-line: #60a5fa;
 }
 
+/* The Settings section is styled to match its dark reference: near-black
+   surfaces, barely-there borders, dim blue-gray secondary text. Scoped to
+   .settings-scope in dark mode only, so light mode stays consistent with the
+   rest of the app. Nested cards/panels/inputs pick these up automatically
+   because they read the same tokens. */
+.dark .settings-scope {
+  --background: oklch(0.145 0.004 285);
+  --card: oklch(0.172 0.004 285);
+  --popover: oklch(0.172 0.004 285);
+  --muted: oklch(0.185 0.004 285);
+  --accent: oklch(0.225 0.008 285);
+  --accent-foreground: oklch(0.96 0.005 285);
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 10%);
+  --muted-foreground: oklch(0.63 0.012 285);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Respect a reduced-motion preference for the settings entrance/expand
+   animations (tw-animate-css utilities). */
+@media (prefers-reduced-motion: reduce) {
+  .settings-scope [class*="animate-in"] {
+    animation: none !important;
   }
 }
 

@@ -1,14 +1,29 @@
-import { redirect } from "next/navigation"
 import { headers } from "next/headers"
+import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
-import { getUserPlan } from "@/lib/subscription"
+import { getBillingOverview, type PlanOption } from "@/lib/billing"
+import { trialIpHashFrom } from "@/lib/trial-ip"
+import { PLAN_PRICING, renewalPriceFor, type Billing, type PlanTier } from "@/lib/whop"
 import { SubscriptionSettingsView } from "@/components/settings/pages/subscription-view"
 
 export const metadata = { title: "Subscription" }
 
+// Several Whop lookups per load (mirrors /billing).
+export const maxDuration = 30
+
 export default async function SubscriptionSettingsPage() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect("/sign-in")
-  const plan = await getUserPlan(session.user.id)
-  return <SubscriptionSettingsView plan={plan} />
+  const h = await headers()
+  const session = await auth.api.getSession({ headers: h })
+  if (!session?.user) redirect("/sign-in?next=/settings/subscription")
+  const overview = await getBillingOverview({ id: session.user.id, email: session.user.email, name: session.user.name }, trialIpHashFrom(h))
+
+  const planOptions: PlanOption[] = (["essential", "pro"] as PlanTier[]).flatMap((plan) =>
+    (["monthly", "annual"] as Billing[]).map((billing) => {
+      const { amount, billingPeriodDays } = renewalPriceFor(plan, billing, overview.trialEligible)
+      const list = billing === "annual" ? PLAN_PRICING[plan].annualPrice * 12 : PLAN_PRICING[plan].monthlyPrice
+      return { plan, billing, title: PLAN_PRICING[plan].title, amount, list, periodDays: billingPeriodDays }
+    }),
+  )
+
+  return <SubscriptionSettingsView overview={overview} planOptions={planOptions} />
 }
