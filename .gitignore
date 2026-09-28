@@ -18,3 +18,7 @@ node_modules
 
 # Build artifacts
 tsconfig.tsbuildinfo
+
+# Large broker/tutorial videos — host externally, not in git (GitHub 100MB limit)
+public/brokers/*.wmv
+public/**/*.wmv
