@@ -4,7 +4,8 @@ import { headers } from "next/headers"
 import { and, eq, gt, isNull, or } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { announcements } from "@/lib/db/schema"
+import { announcements, userSettings } from "@/lib/db/schema"
+import { ThemeColorApplier, type AppliedColors } from "@/components/settings/theme-color-applier"
 import { getUserPlan, hasUsedTrial, isOwnerEmail } from "@/lib/subscription"
 import { trialIpHashFrom } from "@/lib/trial-ip"
 import { isAdminRole } from "@/lib/admin/roles"
@@ -28,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // they're subscribing to. The blurred layer is inert — aria-hidden and
   // pointer-events-none — so nothing behind the paywall is clickable or
   // reachable by keyboard.
-  const [plan, , live] = await Promise.all([
+  const [plan, , live, settingsRow] = await Promise.all([
     getUserPlan(session.user.id),
     // Starter tags/playbooks on the first visit (no-op after that).
     session.session.impersonatedBy ? Promise.resolve() : seedStarterTemplates(session.user.id),
@@ -36,7 +37,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .select({ id: announcements.id, message: announcements.message, level: announcements.level })
       .from(announcements)
       .where(and(eq(announcements.active, true), or(isNull(announcements.endsAt), gt(announcements.endsAt, new Date())))),
+    // The user's saved theme colors, applied app-wide (Settings → Theme).
+    // Never let this take the whole app down (e.g. before the migration runs) —
+    // fall back to no custom colors.
+    db
+      .select({ theme: userSettings.theme })
+      .from(userSettings)
+      .where(eq(userSettings.userId, session.user.id))
+      .limit(1)
+      .catch(() => [] as { theme: unknown }[]),
   ])
+  const savedTheme = (settingsRow[0]?.theme ?? null) as { color?: string; win?: string; loss?: string; breakeven?: string } | null
+  const themeColors: AppliedColors = savedTheme
+    ? { color: savedTheme.color, win: savedTheme.win, loss: savedTheme.loss, breakeven: savedTheme.breakeven }
+    : null
   const locked = plan === null
   // Only matters for the paywall: whether to offer the free trial or (once
   // they've had it — by account, email, or IP) a plan that starts today.
@@ -66,6 +80,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {locked && <SubscriptionPaywall userName={session.user.name || session.user.email} trialEligible={trialEligible} />}
       </div>
       {!impersonating && <CrispChat email={session.user.email} name={session.user.name} />}
+      <ThemeColorApplier initial={themeColors} />
     </div>
   )
 }

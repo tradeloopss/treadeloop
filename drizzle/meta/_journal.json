@@ -169,6 +169,13 @@
       "when": 1790680000000,
       "tag": "0023_rithmic_sync_pause",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790760000000,
+      "tag": "0024_settings",
+      "breakpoints": true
     }
   ]
 }

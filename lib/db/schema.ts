@@ -1280,3 +1280,78 @@ export const orderCommands = pgTable(
     index("order_commands_account").on(t.accountId),
   ],
 )
+
+// One row per user holding everything the Settings section owns that isn't
+// already a first-class table: the public profile (handle, bio, socials),
+// privacy choices, theme preset/colors, and the JSON-shaped preference groups
+// (calculations, order grouping, notifications, general preferences). Kept in
+// one 1:1 table so a page reads/writes a single row; the auth `user` table is
+// left to Better Auth. Every column is nullable/defaulted so a user with no
+// row yet just gets defaults (see lib/settings/defaults.ts).
+export const userSettings = pgTable("user_settings", {
+  userId: text("userId")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  // Public @handle shown on the Security page ("Change Username"); distinct
+  // from user.name, which is the display name edited on Profile.
+  username: text("username"),
+  bio: text("bio"),
+  tradingStrategy: text("tradingStrategy"),
+  yearsTrading: integer("yearsTrading"),
+  // { x, tradingview, discord, website }
+  social: jsonb("social").$type<Record<string, string>>(),
+  // { profileVisibility, activityVisibility, dataSharing, cookieAnalytics,
+  //   cookieMarketing, retention: { loginHistoryDays, oldSessionsDays, activityLogsDays } }
+  privacy: jsonb("privacy").$type<Record<string, unknown>>(),
+  // { preset, color, win, loss, breakeven }
+  theme: jsonb("theme").$type<Record<string, unknown>>(),
+  // { defaultRiskPercent, accountSizeBasis, commissionInPnl, rMultipleBasis, ... }
+  calculations: jsonb("calculations").$type<Record<string, unknown>>(),
+  // { groupBy, netVsGross, mergeScaleIns, ... }
+  orderGrouping: jsonb("orderGrouping").$type<Record<string, unknown>>(),
+  // { emailTradeImports, emailWeeklyReview, emailSecurity, emailProduct, inAppEnabled }
+  notifications: jsonb("notifications").$type<Record<string, unknown>>(),
+  // { timeZone, dateFormat, weekStart, numberFormat, defaultAccountId }
+  preferences: jsonb("preferences").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
+// Saved CSV column mappings for the trade importer — one row per named schema
+// so a user can keep a layout per broker/platform and reuse it on import.
+export const csvSchemas = pgTable(
+  "csv_schemas",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    name: text("name").notNull(),
+    broker: text("broker"),
+    // { targetField: sourceColumn } plus parsing hints under reserved keys.
+    mapping: jsonb("mapping").$type<Record<string, string>>().notNull(),
+    delimiter: text("delimiter").notNull().default(","),
+    dateFormat: text("dateFormat"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("csv_schemas_user").on(t.userId)]
+)
+
+// Reusable prefilled trade entries ("Trade Templates") the Add Trade form can
+// load — a saved instrument/side/size plus optional SL/TP, tags and notes.
+export const tradeTemplates = pgTable(
+  "trade_templates",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    name: text("name").notNull(),
+    symbol: text("symbol"),
+    side: text("side"), // long | short | null
+    quantity: numeric("quantity"),
+    // { stopLoss, takeProfit, tagOptionIds:[], playbookId, notes, riskPercent }
+    fields: jsonb("fields").$type<Record<string, unknown>>(),
+    sortOrder: integer("sortOrder").notNull().default(0),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("trade_templates_user").on(t.userId)]
+)
