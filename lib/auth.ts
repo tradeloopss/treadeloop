@@ -95,23 +95,26 @@ If it wasn't you, ignore this email — your password stays the same.`,
             : []),
         ]
       : []),
+    // Extra origins allowed to POST to auth — set AUTH_TRUSTED_ORIGINS to a
+    // comma-separated list (e.g. https://app.tradeloop.pro,https://tradeloop.pro)
+    // when the app moves to its own subdomain.
+    ...(process.env.AUTH_TRUSTED_ORIGINS ? process.env.AUTH_TRUSTED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean) : []),
   ],
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
     updateAge: 60 * 60 * 24, // 1 day
   },
-  ...(process.env.NODE_ENV === "development"
-    ? {
-        advanced: {
-          // Required by the cross-site v0 preview iframe. Without these
-          // attributes, login succeeds but the next request appears signed out.
-          defaultCookieAttributes: {
-            sameSite: "none" as const,
-            secure: true,
-          },
-        },
-      }
-    : {}),
+  // Cookie behaviour: cross-site attributes for the dev preview iframe, and —
+  // when AUTH_COOKIE_DOMAIN is set (e.g. ".tradeloop.pro") — a shared cookie
+  // domain so a session on app.tradeloop.pro is recognised across subdomains.
+  // Neither is applied unless its env/condition is present, so the current
+  // single-domain setup is unchanged.
+  ...(() => {
+    const advanced: Record<string, unknown> = {}
+    if (process.env.NODE_ENV === "development") advanced.defaultCookieAttributes = { sameSite: "none" as const, secure: true }
+    if (process.env.AUTH_COOKIE_DOMAIN) advanced.crossSubDomainCookies = { enabled: true, domain: process.env.AUTH_COOKIE_DOMAIN }
+    return Object.keys(advanced).length ? { advanced } : {}
+  })(),
   plugins: [
     admin({
       ac,
