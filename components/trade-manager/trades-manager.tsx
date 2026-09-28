@@ -480,12 +480,12 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
       setExpandedId(null)
     })
   }
-  function bulkBreakeven() {
-    if (guardEnable(checkedTrades)) return
+  function bulkBreakeven(group: UITrade[]) {
+    if (group.length === 0 || guardEnable(group)) return
     void runGroup(
-      checkedTrades,
+      group,
       "Moving",
-      `selected position${checkedTrades.length === 1 ? "" : "s"} to break-even`,
+      `${group.length} position${group.length === 1 ? "" : "s"} to break-even`,
       (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit }),
       (t) => updateTrade(t.id, { stopLoss: t.entryPrice }),
     ).then(() => setChecked(new Set()))
@@ -541,7 +541,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
                 if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id)))
                 setBulkCloseOpen(true)
               }}
-              onBreakeven={bulkBreakeven}
+              onBreakeven={() => bulkBreakeven(checked.size ? checkedTrades : filtered)}
             />
             {filtered.length === 0 ? (
               <EmptyBlock title="No open trades" note="You currently have no live positions." className="mt-3" />
@@ -649,7 +649,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
               onEditSL={() => { if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id))); setEditor({ kind: "bulk" }) }}
               onEditTP={() => { if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id))); setEditor({ kind: "bulk" }) }}
               onClose={() => { if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id))); setBulkCloseOpen(true) }}
-              onBreakeven={bulkBreakeven}
+              onBreakeven={() => bulkBreakeven(checked.size ? checkedTrades : filtered)}
             />
             {filtered.length === 0 ? (
               <EmptyBlock title="No open trades" note="You currently have no live positions on this account." />
@@ -873,12 +873,9 @@ function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEdit
           <X className="size-3.5" /> Close {count || total}
         </button>
         {onBreakeven && (
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<button type="button" aria-label="More bulk actions" className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"><MoreHorizontal className="size-4" /></button>} />
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onClick={onBreakeven}>Move selected to break-even</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <button type="button" onClick={onBreakeven} className="inline-flex items-center gap-1 rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/10">
+            <Shield className="size-3.5" /> Break-even
+          </button>
         )}
       </div>
     </div>
