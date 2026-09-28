@@ -26,7 +26,6 @@ import {
   FileText,
   Clock,
   LayoutGrid,
-  RefreshCw,
   Check,
   CircleCheck,
   List,
@@ -40,6 +39,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { formatCurrency } from "@/lib/calc"
 import { closeOpenTrade } from "@/app/actions/trade-manager"
 import { submitOrder, setTradingPassword, getOrderStatus, getOrderStatuses } from "@/app/actions/orders"
+import { computeStats } from "@/lib/trade-manager"
 import type { OpenTradeView, ClosedTradeRow, TradesManagerData, AccountExecution } from "@/lib/trade-manager"
 import type { OrderCommandInput, OrderStatus } from "@/lib/order-execution/types"
 
@@ -188,8 +188,15 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
   const [enableFor, setEnableFor] = useState<UITrade | null>(null)
 
   const openTrades = trades.filter((t) => !t.closed)
-  const stats = data.stats
-  const totalCount = stats.openCount + data.closedToday.length
+  // Everything is scoped to the chosen account: open positions, KPIs, and the
+  // Closed-Today history all reflect just that account (or all accounts).
+  const openAcct = account === "all" ? openTrades : openTrades.filter((t) => String(t.accountId) === account)
+  const closedAcct = useMemo(
+    () => (account === "all" ? data.closedToday : data.closedToday.filter((t) => String(t.accountId) === account)),
+    [account, data.closedToday],
+  )
+  const stats = useMemo(() => computeStats(openAcct, closedAcct), [openAcct, closedAcct])
+  const totalCount = stats.openCount + closedAcct.length
   const live = data.openTrades.some((t) => t.origin === "provider")
 
   const filtered = useMemo(() => {
@@ -473,23 +480,15 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
       setExpandedId(null)
     })
   }
-
-  // --- instrument bulk (preserved, via runGroup) ---------------------------
-  function instrumentGroup(symbol: string): UITrade[] {
-    return filtered.filter((t) => t.symbol === symbol && !t.closed)
-  }
-  function onInstrument(symbol: string, action: "closeAll" | "beAll" | "levelsAll") {
-    const group = instrumentGroup(symbol)
-    if (action !== "levelsAll" && guardEnable(group)) return
-    if (action === "closeAll") {
-      void runGroup(group, "Closing", `${symbol} position${group.length === 1 ? "" : "s"}`, (t) => ({ kind: "close", positionRef: t.positionRef }), (t) => updateTrade(t.id, { closed: true }))
-    } else if (action === "beAll") {
-      void runGroup(group, "Moving", `${symbol} to break-even`, (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit }), (t) => updateTrade(t.id, { stopLoss: t.entryPrice }))
-    } else {
-      // reuse the selection: check the group and open the bulk sheet
-      setChecked(new Set(group.map((t) => t.id)))
-      setEditor({ kind: "bulk" })
-    }
+  function bulkBreakeven() {
+    if (guardEnable(checkedTrades)) return
+    void runGroup(
+      checkedTrades,
+      "Moving",
+      `selected position${checkedTrades.length === 1 ? "" : "s"} to break-even`,
+      (t) => ({ kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit }),
+      (t) => updateTrade(t.id, { stopLoss: t.entryPrice }),
+    ).then(() => setChecked(new Set()))
   }
 
   function onTrailing(t: UITrade, cfg: { distance: number; step: number; active: boolean }) {
@@ -498,7 +497,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
   }
 
   const tabs = (
-    <TabBar tab={tab} onTab={setTab} counts={{ open: openTrades.length, pending: 0, closed: data.closedToday.length }} />
+    <TabBar tab={tab} onTab={setTab} counts={{ open: openAcct.length, pending: 0, closed: closedAcct.length }} />
   )
 
   return (
@@ -542,6 +541,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
                 if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id)))
                 setBulkCloseOpen(true)
               }}
+              onBreakeven={bulkBreakeven}
             />
             {filtered.length === 0 ? (
               <EmptyBlock title="No open trades" note="You currently have no live positions." className="mt-3" />
@@ -573,93 +573,129 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
           <EmptyBlock title="No Pending Orders" note="No orders are currently waiting. Pending orders you place will appear here." className="mt-3" />
         ) : (
           <div className="mt-3 rounded-2xl border bg-card">
-            <ClosedList rows={data.closedToday} />
+            <ClosedList rows={closedAcct} />
           </div>
         )}
       </div>
 
       {/* ============================ DESKTOP =========================== */}
-      <div className="mx-auto hidden w-full max-w-[1500px] px-6 py-6 lg:block">
-        <div className="mb-6 flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Activity className="size-5" />
-          </span>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">Trades Manager</h1>
-            <p className="text-sm text-muted-foreground">Manage live positions, edit SL/TP, and close trades.</p>
+      <div className="mx-auto hidden w-full max-w-[1180px] px-6 py-6 lg:block">
+        {/* Top bar: search + account (scopes everything) + live status */}
+        <div className="mb-6 flex items-center gap-4">
+          <div className="relative w-full max-w-sm">
+            <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search symbol, account or order…" className="h-10 w-full rounded-xl ps-9" />
           </div>
-          <div className="ms-auto flex items-center gap-3">
-            <ConnectionStatus live={live} />
+          <div className="ms-auto flex items-center gap-4">
             <AccountSelectorInline label={accountLabel} accounts={data.accounts} onPick={setAccount} />
-            <Button variant="outline" size="icon" className="size-9" aria-label="Refresh" onClick={() => router.refresh()}>
-              <RefreshCw className="size-4" />
-            </Button>
+            <ConnectionStatus live={live} />
           </div>
         </div>
 
-        <div className="mb-6 grid grid-cols-4 gap-3">
+        {/* Title + live banner */}
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Activity className="size-5" />
+            </span>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Trades Manager</h1>
+              <p className="text-sm text-muted-foreground">Manage live positions, edit SL/TP, and close trades.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 rounded-2xl bg-primary px-5 py-3 text-primary-foreground">
+            <Zap className="size-5 shrink-0" />
+            <span className="text-sm font-semibold leading-tight">Live prices &amp; P&amp;L<br />update in real-time</span>
+            <span className="ms-2 flex items-center gap-1.5 text-xs font-semibold">
+              <span className={cn("size-1.5 rounded-full", live ? "bg-white" : "bg-white/50")} /> {live ? "LIVE" : "OFF"}
+            </span>
+          </div>
+        </div>
+
+        {/* KPIs */}
+        <div className="mb-5 grid grid-cols-4 gap-4">
           <KpiCard label="Open Trades" value={String(stats.openCount)} foot={`of ${totalCount} total`} icon={Layers} />
           <KpiCard label="Today's P&L" value={signed(stats.todayRealized)} foot="realized, closed today" tone={stats.todayRealized >= 0 ? "gain" : "loss"} />
           <KpiCard label="Win Rate" value={stats.winRate != null ? `${stats.winRate}%` : "—"} foot={stats.winRate != null ? `${stats.wins}/${stats.wins + stats.losses}` : "nothing closed today"} icon={Target} />
           <KpiCard label="Total P&L" value={stats.totalUnrealized != null ? signed(stats.totalUnrealized) : signed(stats.todayRealized)} foot="across live positions" tone={(stats.totalUnrealized ?? stats.todayRealized) >= 0 ? "gain" : "loss"} icon={TrendingUp} />
         </div>
 
-        <div className="rounded-2xl border bg-card">
-          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-            {tabs}
-            <div className="ms-auto flex items-center gap-2">
-              <div className="relative hidden sm:block">
-                <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search trades…" className="h-9 w-48 ps-8" />
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-9 gap-1.5"><SlidersHorizontal className="size-4" /> {side === "all" ? "Filter" : side === "long" ? "Buys" : "Sells"}</Button>} />
-                <DropdownMenuContent align="end" className="w-40">
-                  <DropdownMenuItem onClick={() => setSide("all")}>All sides</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSide("long")}>Buy only</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSide("short")}>Sell only</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button variant="outline" size="icon" className="size-9" aria-label="Sort by P&L" onClick={() => setSortDesc((s) => !s)}>
-                <ArrowDownUp className="size-4" />
-              </Button>
-            </div>
+        {/* Tabs + filter/sort */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          {tabs}
+          <div className="ms-auto flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl"><SlidersHorizontal className="size-4" /> {side === "all" ? "Filter" : side === "long" ? "Buys" : "Sells"}</Button>} />
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={() => setSide("all")}>All sides</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSide("long")}>Buy only</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSide("short")}>Sell only</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl" onClick={() => setSortDesc((s) => !s)}>
+              <ArrowDownUp className="size-4" /> Sort
+            </Button>
           </div>
-
-          {(tab === "open" || tab === "all") && checked.size > 0 && (
-            <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-primary/5 px-4 py-2.5">
-              <span className="text-sm font-semibold text-primary">{checked.size} selected</span>
-              <div className="ms-auto flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditor({ kind: "bulk" })}><Shield className="size-4" /> Edit SL</Button>
-                <Button variant="outline" size="sm" onClick={() => setEditor({ kind: "bulk" })}><Target className="size-4" /> Edit TP</Button>
-                <Button variant="destructive" size="sm" onClick={() => setBulkCloseOpen(true)}><X className="size-4" /> Close {checked.size}</Button>
-                <button type="button" onClick={() => setChecked(new Set())} aria-label="Clear" className="rounded-md p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button>
-              </div>
-            </div>
-          )}
-
-          {tab === "closed" ? (
-            <ClosedList rows={data.closedToday} />
-          ) : tab === "pending" ? (
-            <EmptyBlock title="No Pending Orders" note="Pending orders you place with your broker will appear here." />
-          ) : (
-            <DesktopTable
-              trades={filtered}
-              expandedId={expandedId}
-              checked={checked}
-              onToggleExpand={(id) => setExpandedId((cur) => (cur === id ? null : id))}
-              onCheck={toggleCheck}
-              onEditSL={(id) => setEditor({ kind: "sl", tradeId: id })}
-              onEditTP={(id) => setEditor({ kind: "tp", tradeId: id })}
-              onClose={(id) => setEditor({ kind: "close", tradeId: id })}
-              onPartial={(id) => setEditor({ kind: "partial", tradeId: id })}
-              onReverse={(id) => setEditor({ kind: "reverse", tradeId: id })}
-              onBE={(id) => { const t = trades.find((x) => x.id === id); if (t) moveBE(t) }}
-              onInstrument={onInstrument}
-            />
-          )}
         </div>
-        <LiveBanner live={live} className="mt-4" />
+
+        {/* Content */}
+        {tab === "open" || tab === "all" ? (
+          <div className="space-y-4">
+            <BulkActionBar
+              total={filtered.length}
+              count={checked.size}
+              allChecked={filtered.length > 0 && checked.size === filtered.length}
+              onToggleAll={toggleAll}
+              onEditSL={() => { if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id))); setEditor({ kind: "bulk" }) }}
+              onEditTP={() => { if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id))); setEditor({ kind: "bulk" }) }}
+              onClose={() => { if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id))); setBulkCloseOpen(true) }}
+              onBreakeven={bulkBreakeven}
+            />
+            {filtered.length === 0 ? (
+              <EmptyBlock title="No open trades" note="You currently have no live positions on this account." />
+            ) : (
+              filtered.map((t) => (
+                <TradeCard
+                  key={t.id}
+                  trade={t}
+                  expanded={expandedId === t.id}
+                  checked={checked.has(t.id)}
+                  onToggleExpand={() => setExpandedId((id) => (id === t.id ? null : t.id))}
+                  onCheck={() => toggleCheck(t.id)}
+                  onEditSL={() => setEditor({ kind: "sl", tradeId: t.id })}
+                  onEditTP={() => setEditor({ kind: "tp", tradeId: t.id })}
+                  onClose={() => setEditor({ kind: "close", tradeId: t.id })}
+                  onPartial={() => setEditor({ kind: "partial", tradeId: t.id })}
+                  onReverse={() => setEditor({ kind: "reverse", tradeId: t.id })}
+                  onBE={() => moveBE(t)}
+                  onTrailing={() => setEditor({ kind: "trailing", tradeId: t.id })}
+                  onEnable={accountNeedsEnable(t) ? () => setEnableFor(t) : undefined}
+                />
+              ))
+            )}
+          </div>
+        ) : tab === "pending" ? (
+          <EmptyBlock title="No Pending Orders" note="No orders are currently waiting. Pending orders you place will appear here." />
+        ) : (
+          <div className="rounded-2xl border bg-card">
+            <ClosedList rows={closedAcct} />
+          </div>
+        )}
+
+        {/* Bottom summary cards */}
+        <div className="mt-6 grid grid-cols-3 gap-4">
+          <SummaryTile icon={Layers} tone="gain" label="Closed Today" value={String(closedAcct.length)} sub="trades" onClick={() => setTab("closed")} />
+          <SummaryTile icon={FileText} label="Pending Orders" value="0" sub="orders" onClick={() => setTab("pending")} />
+          <div className="rounded-2xl border bg-card p-4">
+            <p className="mb-2 text-sm font-semibold">Quick Actions</p>
+            <button type="button" onClick={() => setTab("all")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <List className="size-4" /> View All Trades
+            </button>
+            <button type="button" onClick={() => setTab("closed")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <Clock className="size-4" /> View History
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ============================ SHARED ============================ */}
@@ -818,7 +854,7 @@ function TabBar({ tab, onTab, counts }: { tab: TabKey; onTab: (t: TabKey) => voi
   )
 }
 
-function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEditTP, onClose }: { total: number; count: number; allChecked: boolean; onToggleAll: () => void; onEditSL: () => void; onEditTP: () => void; onClose: () => void }) {
+function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEditTP, onClose, onBreakeven }: { total: number; count: number; allChecked: boolean; onToggleAll: () => void; onEditSL: () => void; onEditTP: () => void; onClose: () => void; onBreakeven?: () => void }) {
   const has = count > 0
   return (
     <div className="flex items-center gap-2 rounded-2xl border bg-card p-2.5">
@@ -827,15 +863,23 @@ function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEdit
         {has ? `${count} selected` : "Select all"}
       </button>
       <div className="ms-auto flex items-center gap-1">
-        <button type="button" onClick={onEditSL} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
+        <button type="button" onClick={onEditSL} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
           <Pencil className="size-3.5" /> Edit SL
         </button>
-        <button type="button" onClick={onEditTP} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
+        <button type="button" onClick={onEditTP} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
           <Target className="size-3.5" /> Edit TP
         </button>
         <button type="button" onClick={onClose} className="inline-flex items-center gap-1 rounded-lg bg-[var(--loss)] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90">
           <X className="size-3.5" /> Close {count || total}
         </button>
+        {onBreakeven && (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<button type="button" aria-label="More bulk actions" className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"><MoreHorizontal className="size-4" /></button>} />
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={onBreakeven}>Move selected to break-even</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </div>
   )
@@ -896,6 +940,21 @@ function KpiCard({ label, value, foot, icon: Icon, tone }: { label: string; valu
       <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone === "gain" && "text-[var(--gain)]", tone === "loss" && "text-[var(--loss)]")}>{value}</p>
       <p className="mt-0.5 text-xs text-muted-foreground">{foot}</p>
     </div>
+  )
+}
+
+// A bottom summary tile (Closed Today / Pending Orders) — clickable to its tab.
+function SummaryTile({ icon: Icon, label, value, sub, tone, onClick }: { icon: typeof Layers; label: string; value: string; sub: string; tone?: "gain"; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex items-center gap-3 rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-muted/40">
+      <span className={cn("flex size-10 items-center justify-center rounded-xl", tone === "gain" ? "bg-[var(--gain)]/10 text-[var(--gain)]" : "bg-primary/10 text-primary")}>
+        <Icon className="size-5" />
+      </span>
+      <div>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="text-xl font-bold tabular-nums leading-tight">{value} <span className="text-xs font-normal text-muted-foreground">{sub}</span></p>
+      </div>
+    </button>
   )
 }
 
@@ -1029,189 +1088,6 @@ function ActionBtn({ primary, icon: Icon, title, sub, onClick }: { primary?: boo
   )
 }
 
-// ---------- desktop table -------------------------------------------------
-
-function DesktopTable({
-  trades,
-  expandedId,
-  checked,
-  onToggleExpand,
-  onCheck,
-  onEditSL,
-  onEditTP,
-  onClose,
-  onPartial,
-  onReverse,
-  onBE,
-  onInstrument,
-}: {
-  trades: UITrade[]
-  expandedId: number | null
-  checked: Set<number>
-  onToggleExpand: (id: number) => void
-  onCheck: (id: number) => void
-  onEditSL: (id: number) => void
-  onEditTP: (id: number) => void
-  onClose: (id: number) => void
-  onPartial: (id: number) => void
-  onReverse: (id: number) => void
-  onBE: (id: number) => void
-  onInstrument: (symbol: string, action: "closeAll" | "beAll" | "levelsAll") => void
-}) {
-  if (trades.length === 0) return <EmptyBlock title="No open positions" note="When you have a running trade it'll show here with its live risk and P&L." className="m-4" />
-  const groups: { symbol: string; rows: UITrade[] }[] = []
-  const idx = new Map<string, number>()
-  for (const t of trades) {
-    let i = idx.get(t.symbol)
-    if (i === undefined) {
-      i = groups.length
-      idx.set(t.symbol, i)
-      groups.push({ symbol: t.symbol, rows: [] })
-    }
-    groups[i].rows.push(t)
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-xs text-muted-foreground">
-            <th className="w-10 px-4 py-3" />
-            <th className="px-2 py-3 font-medium">Symbol</th>
-            <th className="px-2 py-3 font-medium">Side</th>
-            <th className="px-2 py-3 font-medium">Qty</th>
-            <th className="px-2 py-3 font-medium">Entry</th>
-            <th className="px-2 py-3 font-medium">Current</th>
-            <th className="px-2 py-3 font-medium">P&L</th>
-            <th className="px-2 py-3 font-medium">Stop Loss</th>
-            <th className="px-2 py-3 font-medium">Take Profit</th>
-            <th className="px-2 py-3 text-right font-medium">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((g) => (
-            <Fragment key={g.symbol}>
-              {g.rows.length > 1 && <InstrumentHeader symbol={g.symbol} rows={g.rows} onInstrument={onInstrument} />}
-              {g.rows.map((t) => {
-                const open = expandedId === t.id
-                return (
-                  <Fragment key={t.id}>
-                    <tr className={cn("border-b transition-colors hover:bg-muted/40", open && "bg-primary/5")}>
-                      <td className="px-4 py-3">
-                        <input type="checkbox" checked={checked.has(t.id)} onChange={() => onCheck(t.id)} className="size-4 rounded border-border accent-[var(--primary)]" aria-label="Select" />
-                      </td>
-                      <td className="cursor-pointer px-2 py-3" onClick={() => onToggleExpand(t.id)}>
-                        <div className="flex items-center gap-2.5">
-                          <SymbolBadge symbol={t.symbol} className="size-8" />
-                          <div className="min-w-0">
-                            <p className="font-semibold leading-tight">{t.symbol}</p>
-                            <p className="truncate text-xs text-muted-foreground">{instrument(t.symbol).name}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2 py-3"><TypePill side={t.side} /></td>
-                      <td className="px-2 py-3 tabular-nums">{t.quantity}</td>
-                      <td className="px-2 py-3 tabular-nums">{fmtPrice(t.entryPrice)}</td>
-                      <td className="px-2 py-3 tabular-nums">{fmtPrice(t.currentPrice)}</td>
-                      <td className="px-2 py-3"><Pnl value={t.unrealizedPnl} className="font-semibold" /></td>
-                      <td className="px-2 py-3">
-                        <InlineLevel value={t.stopLoss} tone="loss" onEdit={() => onEditSL(t.id)} />
-                      </td>
-                      <td className="px-2 py-3">
-                        <InlineLevel value={t.takeProfit} tone="gain" onEdit={() => onEditTP(t.id)} />
-                      </td>
-                      <td className="px-2 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="destructive" size="xs" onClick={() => onClose(t.id)}>Close</Button>
-                          <Button variant="outline" size="xs" onClick={() => onPartial(t.id)}>Partial</Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label="More"><MoreHorizontal className="size-4" /></Button>} />
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem onClick={() => onReverse(t.id)}>Reverse position</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => onBE(t.id)}>Move SL to break-even</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => onToggleExpand(t.id)}>{open ? "Hide details" : "View details"}</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr className="border-b bg-primary/5">
-                        <td />
-                        <td colSpan={9} className="px-2 pb-4">
-                          <div className="grid grid-cols-2 gap-x-8 gap-y-2 rounded-xl border bg-card p-4 text-sm sm:grid-cols-4">
-                            <Detail k="Account" v={t.accountName} />
-                            <Detail k="Platform" v={(t.source ?? "—").toUpperCase()} />
-                            <Detail k="Opened" v={new Date(t.entryTime).toLocaleString()} />
-                            <Detail k="Ticket" v={t.origin === "trade" ? `#${t.id}` : "live"} />
-                            <Detail k="P&L %" v={pnlPercent(t) != null ? `${pnlPercent(t)! >= 0 ? "+" : ""}${pnlPercent(t)}%` : "—"} />
-                            <Detail k="Points" v={favPoints(t) != null ? `${favPoints(t)! >= 0 ? "+" : ""}${favPoints(t)}` : "—"} />
-                            <Detail k="Stop Loss" v={fmtPrice(t.stopLoss)} />
-                            <Detail k="Take Profit" v={fmtPrice(t.takeProfit)} />
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                )
-              })}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function Detail({ k, v }: { k: string; v: string }) {
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground">{k}</p>
-      <p className="font-medium tabular-nums">{v}</p>
-    </div>
-  )
-}
-
-function InlineLevel({ value, tone, onEdit }: { value: number | null; tone: "gain" | "loss"; onEdit: () => void }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="tabular-nums">{fmtPrice(value)}</span>
-      <button type="button" onClick={onEdit} className={cn("inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-medium opacity-70 hover:opacity-100", tone === "gain" ? "text-[var(--gain)]" : "text-[var(--loss)]")}>
-        <Pencil className="size-3" /> Edit
-      </button>
-    </div>
-  )
-}
-
-function InstrumentHeader({ symbol, rows, onInstrument }: { symbol: string; rows: UITrade[]; onInstrument: (symbol: string, action: "closeAll" | "beAll" | "levelsAll") => void }) {
-  const netLots = round4(rows.reduce((s, t) => s + (t.side === "long" ? t.quantity : -t.quantity), 0))
-  const pnls = rows.map((t) => t.unrealizedPnl).filter((v): v is number => v != null)
-  const totalPnl = pnls.length ? pnls.reduce((a, b) => a + b, 0) : null
-  return (
-    <tr className="border-b bg-muted/40">
-      <td colSpan={10} className="px-3 py-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="flex items-center gap-2">
-            <SymbolBadge symbol={symbol} className="size-6" />
-            <span className="text-sm font-semibold">{symbol}</span>
-          </span>
-          <span className="text-xs text-muted-foreground">{rows.length} positions · net {netLots > 0 ? "+" : ""}{netLots}</span>
-          {totalPnl != null && <Pnl value={totalPnl} className="text-xs font-semibold" />}
-          <div className="ms-auto">
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs"><Layers className="size-3.5" /> Manage all {rows.length}</Button>} />
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => onInstrument(symbol, "levelsAll")}>Set SL/TP for all {rows.length}</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onInstrument(symbol, "beAll")}>Move all to break-even</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onClick={() => onInstrument(symbol, "closeAll")}>Close all {rows.length}</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </td>
-    </tr>
-  )
-}
 
 // ---------- editors (bottom sheet / drawer) -------------------------------
 
