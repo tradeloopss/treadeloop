@@ -234,6 +234,23 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     if (e.broker === "rithmic") return t.origin === "provider" && e.enabled
     return false
   }
+  // A live broker position whose account CAN execute but hasn't had its
+  // master/trading password stored yet — orders can't be sent until it's on.
+  function accountNeedsEnable(t: UITrade): boolean {
+    const e = execFor(t)
+    return t.origin === "provider" && e.supported && !e.enabled
+  }
+  // Prompt to enable execution when acting on a not-yet-enabled account. Returns
+  // true when it prompted (so the caller stops — nothing was sent).
+  function guardEnable(list: UITrade[]): boolean {
+    const t = list.find(accountNeedsEnable)
+    if (t) {
+      setEditor(null)
+      setEnableFor(t)
+      return true
+    }
+    return false
+  }
 
   // --- order plumbing (preserved) -----------------------------------------
   async function queueOrder(t: UITrade, input: Omit<OrderCommandInput, "accountId" | "broker">): Promise<{ id: number | null; status: OrderStatus; message: string; reasons: string[] } | null> {
@@ -256,7 +273,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     }
   }
 
-  async function confirmOrder(id: number, timeoutMs = 18_000): Promise<{ status: OrderStatus; message: string | null }> {
+  async function confirmOrder(id: number, timeoutMs = 8_000): Promise<{ status: OrderStatus; message: string | null }> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 700))
@@ -266,7 +283,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     return { status: "pending", message: null }
   }
 
-  async function confirmOrders(ids: number[], timeoutMs = 20_000): Promise<Record<number, OrderStatus>> {
+  async function confirmOrders(ids: number[], timeoutMs = 8_000): Promise<Record<number, OrderStatus>> {
     const out: Record<number, OrderStatus> = {}
     const deadline = Date.now() + timeoutMs
     let remaining = [...ids]
@@ -360,6 +377,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
 
   // --- per-trade actions ---------------------------------------------------
   function applyLevels(t: UITrade, sl: number | null, tp: number | null) {
+    if (guardEnable([t])) return
     updateTrade(t.id, { stopLoss: sl, takeProfit: tp })
     if (sl !== t.stopLoss) pushHistory(t.id, { time: nowLabel(), label: "Stop Loss modified", detail: fmtPrice(sl) })
     if (tp !== t.takeProfit) pushHistory(t.id, { time: nowLabel(), label: "Take Profit modified", detail: fmtPrice(tp) })
@@ -367,12 +385,14 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     else toast.success("Levels updated", { description: `${t.symbol} · SL ${fmtPrice(sl)} · TP ${fmtPrice(tp)}` })
   }
   function moveBE(t: UITrade) {
+    if (guardEnable([t])) return
     updateTrade(t.id, { stopLoss: t.entryPrice })
     pushHistory(t.id, { time: nowLabel(), label: "Moved SL to break-even", detail: fmtPrice(t.entryPrice) })
     if (tradable(t)) void runOrder(t, { kind: "modify", positionRef: t.positionRef, stopLoss: t.entryPrice, takeProfit: t.takeProfit })
     else toast.success("Stop moved to break-even", { description: `${t.symbol} · SL ${fmtPrice(t.entryPrice)}` })
   }
   function doPartial(t: UITrade, lots: number) {
+    if (guardEnable([t])) return
     const remaining = Math.max(0, round4(t.quantity - lots))
     pushHistory(t.id, { time: nowLabel(), label: "Partial close", detail: `${lots} lots` })
     if (tradable(t)) void runOrder(t, { kind: "partial_close", positionRef: t.positionRef, volume: lots })
@@ -383,6 +403,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     } else updateTrade(t.id, { quantity: remaining })
   }
   async function doClose(t: UITrade, exitPrice?: number): Promise<boolean> {
+    if (guardEnable([t])) return false
     if (t.origin === "trade") {
       const price = exitPrice ?? t.currentPrice
       if (price == null || !Number.isFinite(price)) {
@@ -409,6 +430,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     return true
   }
   async function reverseTrade(t: UITrade) {
+    if (guardEnable([t])) return
     const opp = t.side === "long" ? "short" : "long"
     if (tradable(t)) {
       const closed = await runOrder(t, { kind: "close", positionRef: t.positionRef })
@@ -423,6 +445,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
 
   // --- bulk across the selection ------------------------------------------
   function bulkModify(sl: number | null, tp: number | null) {
+    if (guardEnable(checkedTrades)) return
     setEditor(null)
     void runGroup(
       checkedTrades,
@@ -433,6 +456,10 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
     ).then(() => setChecked(new Set()))
   }
   function bulkClose() {
+    if (guardEnable(checkedTrades)) {
+      setBulkCloseOpen(false)
+      return
+    }
     setBulkCloseOpen(false)
     const group = checkedTrades
     void runGroup(
@@ -453,6 +480,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
   }
   function onInstrument(symbol: string, action: "closeAll" | "beAll" | "levelsAll") {
     const group = instrumentGroup(symbol)
+    if (action !== "levelsAll" && guardEnable(group)) return
     if (action === "closeAll") {
       void runGroup(group, "Closing", `${symbol} position${group.length === 1 ? "" : "s"}`, (t) => ({ kind: "close", positionRef: t.positionRef }), (t) => updateTrade(t.id, { closed: true }))
     } else if (action === "beAll") {
@@ -502,8 +530,14 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
               count={checked.size}
               allChecked={filtered.length > 0 && checked.size === filtered.length}
               onToggleAll={toggleAll}
-              onEditSL={() => setEditor({ kind: "bulk" })}
-              onEditTP={() => setEditor({ kind: "bulk" })}
+              onEditSL={() => {
+                if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id)))
+                setEditor({ kind: "bulk" })
+              }}
+              onEditTP={() => {
+                if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id)))
+                setEditor({ kind: "bulk" })
+              }}
               onClose={() => {
                 if (checked.size === 0) setChecked(new Set(filtered.map((t) => t.id)))
                 setBulkCloseOpen(true)
@@ -528,6 +562,7 @@ export function TradesManager({ data }: { data: TradesManagerData }) {
                     onReverse={() => setEditor({ kind: "reverse", tradeId: t.id })}
                     onBE={() => moveBE(t)}
                     onTrailing={() => setEditor({ kind: "trailing", tradeId: t.id })}
+                    onEnable={accountNeedsEnable(t) ? () => setEnableFor(t) : undefined}
                   />
                 ))}
               </div>
@@ -792,10 +827,10 @@ function BulkActionBar({ total, count, allChecked, onToggleAll, onEditSL, onEdit
         {has ? `${count} selected` : "Select all"}
       </button>
       <div className="ms-auto flex items-center gap-1">
-        <button type="button" disabled={!has} onClick={onEditSL} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors", has ? "text-foreground hover:bg-muted" : "cursor-not-allowed text-muted-foreground/40")}>
+        <button type="button" onClick={onEditSL} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
           <Pencil className="size-3.5" /> Edit SL
         </button>
-        <button type="button" disabled={!has} onClick={onEditTP} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors", has ? "text-foreground hover:bg-muted" : "cursor-not-allowed text-muted-foreground/40")}>
+        <button type="button" onClick={onEditTP} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
           <Target className="size-3.5" /> Edit TP
         </button>
         <button type="button" onClick={onClose} className="inline-flex items-center gap-1 rounded-lg bg-[var(--loss)] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90">
@@ -879,6 +914,7 @@ function TradeCard({
   onReverse,
   onBE,
   onTrailing,
+  onEnable,
 }: {
   trade: UITrade
   expanded: boolean
@@ -892,6 +928,7 @@ function TradeCard({
   onReverse: () => void
   onBE: () => void
   onTrailing: () => void
+  onEnable?: () => void
 }) {
   const pts = favPoints(trade)
   return (
@@ -917,6 +954,7 @@ function TradeCard({
           <DropdownMenu>
             <DropdownMenuTrigger render={<button type="button" aria-label="More" className="rounded-md p-1 text-muted-foreground hover:bg-muted"><MoreHorizontal className="size-5" /></button>} />
             <DropdownMenuContent align="end" className="w-48">
+              {onEnable && <DropdownMenuItem onClick={onEnable}>Enable live orders</DropdownMenuItem>}
               <DropdownMenuItem onClick={onBE}>Move SL to break-even</DropdownMenuItem>
               <DropdownMenuItem onClick={onTrailing}>Set trailing stop</DropdownMenuItem>
             </DropdownMenuContent>
