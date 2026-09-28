@@ -12,18 +12,19 @@ import { BrandMark } from "@/components/brand-mark"
 import { cn } from "@/lib/utils"
 import { useT } from "@/components/locale-provider"
 
-// Shared responsive palette: light + centered on mobile (matching the mock),
-// dark split-screen on desktop. Colors are hardcoded (not theme tokens) because
-// this branded auth screen looks the same regardless of the app theme.
+// Shared palette. The page follows the device's light/dark setting (dark: =
+// the app's `.dark` class from next-themes): light surfaces in light mode, dark
+// in dark mode. The desktop hero column is a branded dark panel in both themes
+// (see the aside) — the form side and the whole mobile view flip with the theme.
 const FIELD =
-  "h-12 w-full rounded-xl border bg-white px-4 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-400 border-neutral-300 focus:border-neutral-900 lg:border-white/15 lg:bg-white/[0.04] lg:text-white lg:placeholder:text-white/40 lg:focus:border-white/50"
-// Light/mobile: TradeLoop brand color. Desktop (dark side): white, per the mock.
+  "h-12 w-full rounded-xl border bg-white px-4 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-400 border-neutral-300 focus:border-neutral-900 dark:border-white/15 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-white/40 dark:focus:border-white/50"
+// Light: TradeLoop brand color. Dark: white, for contrast on the dark surface.
 const PRIMARY =
-  "flex h-12 w-full items-center justify-center rounded-xl text-base font-semibold transition-colors disabled:opacity-60 bg-[#6d4aff] text-white hover:bg-[#5c3ce6] lg:bg-white lg:text-neutral-900 lg:hover:bg-white/90"
+  "flex h-12 w-full items-center justify-center rounded-xl text-base font-semibold transition-colors disabled:opacity-60 bg-[#6d4aff] text-white hover:bg-[#5c3ce6] dark:bg-white dark:text-neutral-900 dark:hover:bg-white/90"
 const SOCIAL =
-  "flex h-12 w-full items-center justify-center gap-2.5 rounded-xl border text-base font-medium transition-colors border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50 lg:border-white/15 lg:bg-transparent lg:text-white lg:hover:bg-white/5"
-const MUTED = "text-neutral-500 lg:text-white/50"
-const ACCENT = "font-semibold text-neutral-900 hover:underline lg:text-white"
+  "flex h-12 w-full items-center justify-center gap-2.5 rounded-xl border text-base font-medium transition-colors border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50 dark:border-white/15 dark:bg-transparent dark:text-white dark:hover:bg-white/5"
+const MUTED = "text-neutral-500 dark:text-white/50"
+const ACCENT = "font-semibold text-neutral-900 hover:underline dark:text-white"
 
 function GoogleMark() {
   return (
@@ -63,7 +64,7 @@ function PasswordField({
   return (
     <div className="relative">
       <input id={id} type={show ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} minLength={8} required autoComplete={id === "password" ? "current-password" : "new-password"} className={cn(FIELD, "pe-11")} />
-      <button type="button" onClick={onToggle} aria-label={show ? t("Hide password") : t("Show password")} className="absolute end-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 lg:text-white/40 lg:hover:text-white/70">
+      <button type="button" onClick={onToggle} aria-label={show ? t("Hide password") : t("Show password")} className="absolute end-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:text-white/40 dark:hover:text-white/70">
         {show ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
       </button>
     </div>
@@ -79,7 +80,7 @@ function Box({ checked, onChange }: { checked: boolean; onChange: () => void }) 
       onClick={onChange}
       className={cn(
         "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-        checked ? "border-neutral-900 bg-neutral-900 text-white lg:border-white lg:bg-white lg:text-neutral-900" : "border-neutral-300 lg:border-white/25",
+        checked ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900" : "border-neutral-300 dark:border-white/25",
       )}
     >
       {checked && <Check className="size-3.5" strokeWidth={3} />}
@@ -208,7 +209,7 @@ export function AuthForm({
     step === "verify" ? t("Enter the 6-digit code we sent to {email}", { email }) : isSignUp ? t("Start journaling your trades") : t("Welcome back")
 
   return (
-    <div className="min-h-svh bg-white text-neutral-900 lg:bg-[oklch(0.17_0.015_285)] lg:text-white">
+    <div className="min-h-svh bg-white text-neutral-900 dark:bg-neutral-950 dark:text-white">
       <div className="lg:grid lg:min-h-svh lg:grid-cols-2">
         {/* Hero — desktop only */}
         <aside className="relative hidden overflow-hidden bg-[oklch(0.17_0.015_285)] px-10 py-12 lg:flex lg:flex-col lg:justify-center lg:border-e lg:border-white/10 xl:px-16">
@@ -321,9 +322,9 @@ export function AuthForm({
                 {(googleEnabled || githubEnabled) && (
                   <>
                     <div className="my-6 flex items-center gap-3">
-                      <span className="h-px flex-1 bg-neutral-200 lg:bg-white/10" />
-                      <span className="text-xs font-medium text-neutral-400 lg:text-white/40">{t("OR")}</span>
-                      <span className="h-px flex-1 bg-neutral-200 lg:bg-white/10" />
+                      <span className="h-px flex-1 bg-neutral-200 dark:bg-white/10" />
+                      <span className="text-xs font-medium text-neutral-400 dark:text-white/40">{t("OR")}</span>
+                      <span className="h-px flex-1 bg-neutral-200 dark:bg-white/10" />
                     </div>
                     <div className="space-y-3">
                       {googleEnabled && (
