@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth"
 import { nextCookies } from "better-auth/next-js"
-import { admin, twoFactor } from "better-auth/plugins"
+import { admin, twoFactor, emailOTP } from "better-auth/plugins"
 import { pool } from "@/lib/db"
 import { ac, roles, ADMIN_ROLES } from "@/lib/admin/access"
 import { sendEmail } from "@/lib/email"
@@ -125,6 +125,23 @@ If it wasn't you, ignore this email — your password stays the same.`,
     // Authenticator-app codes with backup codes. Google-only accounts have no
     // password to confirm with, so they can turn it on without one.
     twoFactor({ issuer: "TradeLoop", allowPasswordless: true }),
+    // Email verification by 6-digit code (sign-up flow asks for it right after
+    // creating the account). Uses the existing verification table — no new
+    // schema. sendEmail is the same transport password resets use.
+    emailOTP({
+      otpLength: 6,
+      expiresIn: 10 * 60,
+      sendVerificationOTP: async ({ email, otp, type }) => {
+        if (type !== "email-verification") return
+        await sendEmail({
+          to: email,
+          subject: "Your TradeLoop verification code",
+          text: `Your TradeLoop verification code is ${otp}
+
+It expires in 10 minutes. If you didn't create a TradeLoop account, you can ignore this email.`,
+        })
+      },
+    }),
     // After twoFactor on purpose — see lib/security.ts.
     securityEventsPlugin(),
     // Must stay last so it sees the cookies every other plugin sets.

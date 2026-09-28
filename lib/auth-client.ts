@@ -1,10 +1,11 @@
 "use client"
 
 import { createAuthClient } from "better-auth/react"
-import { twoFactorClient } from "better-auth/client/plugins"
+import { twoFactorClient, emailOTPClient } from "better-auth/client/plugins"
 
 export const authClient = createAuthClient({
   plugins: [
+    emailOTPClient(),
     twoFactorClient({
       // A password sign-in on an account with 2FA stops here and continues
       // on the code page, carrying along where the user was headed.
