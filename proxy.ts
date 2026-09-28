@@ -1,19 +1,42 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { DEFAULT_LOCALE, LOCALE_COOKIE, LOCALE_HEADER, isOffered, localeFromAcceptLanguage, localeFromCountry } from "@/lib/i18n"
 
+// The public marketing pages that stay on the apex/www domain. Everything else
+// on the apex (the app itself, and the auth pages) now lives on the app
+// subdomain, so it's redirected there — see below. Keep this list in sync when
+// a genuinely public page is added; anything not listed is treated as app-only.
+const MARKETING_PATHS = ["/", "/pricing", "/privacy", "/terms", "/brokers", "/p", "/help"]
+
+function isMarketingPath(pathname: string) {
+  return MARKETING_PATHS.some((p) => pathname === p || (p !== "/" && pathname.startsWith(`${p}/`)))
+}
+
+// The app's own origin (app.<domain>), for redirecting app routes off the apex.
+// Prefers NEXT_PUBLIC_APP_URL when set, otherwise derives app.<domain> from the
+// current host (so it works before that env var is configured).
+function appOrigin(hostname: string) {
+  const env = process.env.NEXT_PUBLIC_APP_URL
+  if (env) return env.replace(/\/+$/, "")
+  return `https://app.${hostname.replace(/^www\./, "")}`
+}
+
 // Runs on every page request. It does two things:
 //
-// 1. Subdomain host routing (a NO-OP on the apex domain, www, previews and
-//    localhost — only active once real `help.` / `app.` subdomains point here):
+// 1. Subdomain host routing (a NO-OP on previews and localhost — only active
+//    once real `help.` / `app.` subdomains point here):
 //      help.<domain>  → the /help center, with clean URLs (help.tradeloop.pro/faq)
 //      app.<domain>   → the app; the root sends you to the dashboard
+//      apex / www.    → the marketing site only; app + auth routes (e.g.
+//                       /dashboard, /sign-in) 307 to app.<domain> so the old
+//                       www URLs no longer serve the app.
 //
 // 2. Chooses the UI language: a visitor's cookie choice wins (if still offered),
 //    otherwise the request's country, then the browser's language. The result
 //    travels to the app as a header and is pinned in the cookie.
 export function proxy(request: NextRequest) {
   const host = (request.headers.get("host") || "").toLowerCase()
-  const sub = host.split(":")[0].split(".")[0]
+  const hostname = host.split(":")[0]
+  const sub = hostname.split(".")[0]
   const url = request.nextUrl
 
   // --- Subdomain host routing -------------------------------------------
@@ -22,6 +45,21 @@ export function proxy(request: NextRequest) {
     const to = url.clone()
     to.pathname = "/dashboard"
     return NextResponse.redirect(to)
+  }
+
+  // The apex and www serve the marketing site only. Any app or auth route that
+  // isn't a public marketing page is sent to the app subdomain, so links like
+  // www.tradeloop.pro/dashboard or /sign-in stop working there. Skipped on
+  // localhost, IPs and *.vercel.app previews (which have no app subdomain).
+  const labels = hostname.split(".")
+  const isLocalOrPreview =
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".vercel.app") ||
+    /^\d+\.\d+\.\d+\.\d+$/.test(hostname)
+  const isApexOrWww = !isLocalOrPreview && (sub === "www" || labels.length === 2)
+  if (isApexOrWww && !isMarketingPath(url.pathname)) {
+    return NextResponse.redirect(new URL(`${url.pathname}${url.search}`, appOrigin(hostname)))
   }
   // The help subdomain serves the /help routes under clean paths.
   const rewriteTo =

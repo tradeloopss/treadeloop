@@ -12,6 +12,18 @@ export const googleAuthEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process
 /** Whether GitHub OAuth credentials are configured on this deployment. */
 export const githubAuthEnabled = Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
 
+// The app now lives on its own subdomain (app.tradeloop.pro). OAuth must return
+// to that same origin — the one that set the state cookie — or Google refuses
+// it (redirect_uri_mismatch) / the callback can't verify the state. So the
+// Google callback is pinned to the app origin: GOOGLE_REDIRECT_URI wins if set,
+// otherwise it's derived from NEXT_PUBLIC_APP_URL (the app subdomain). Unset
+// (local dev), better-auth falls back to ${baseURL}/api/auth/callback/google.
+// The same URL must be listed under the OAuth client's Authorized redirect URIs
+// in the Google Cloud console.
+const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "")
+const googleRedirectURI =
+  process.env.GOOGLE_REDIRECT_URI ?? (appOrigin ? `${appOrigin}/api/auth/callback/google` : undefined)
+
 export const auth = betterAuth({
   appName: "TradeLoop",
   database: pool,
@@ -54,15 +66,9 @@ If it wasn't you, ignore this email — your password stays the same.`,
                 google: {
                   clientId: process.env.GOOGLE_CLIENT_ID!,
                   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-                  // Google only accepts callback URLs listed on the OAuth
-                  // client, and production's lists https://tradeloop.pro/...
-                  // while the site is served from www. — so the default
-                  // ${baseURL}/api/auth/callback/google is refused with
-                  // redirect_uri_mismatch. Pointing Google at the listed apex
-                  // URL works because Vercel 308s it to www with the query
-                  // intact, where the state cookie lives. Unset (local dev),
-                  // the default localhost callback is used.
-                  ...(process.env.GOOGLE_REDIRECT_URI ? { redirectURI: process.env.GOOGLE_REDIRECT_URI } : {}),
+                  // Pinned to the app subdomain (see googleRedirectURI above) so
+                  // Google returns to the origin that started the sign-in.
+                  ...(googleRedirectURI ? { redirectURI: googleRedirectURI } : {}),
                 },
               }
             : {}),
@@ -93,6 +99,8 @@ If it wasn't you, ignore this email — your password stays the same.`,
           ...(process.env.VERCEL_PROJECT_PRODUCTION_URL
             ? [`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`]
             : []),
+          // The app subdomain, so sign-in/OAuth POSTs from app.<domain> are trusted.
+          ...(appOrigin ? [appOrigin] : []),
         ]
       : []),
     // Extra origins allowed to POST to auth — set AUTH_TRUSTED_ORIGINS to a
