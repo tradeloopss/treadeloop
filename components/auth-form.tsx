@@ -141,16 +141,35 @@ export function AuthForm({
       if (isSignUp) {
         const handle = (username.trim() || email.split("@")[0]).toLowerCase()
         const { error } = await authClient.signUp.email({ email: email.trim(), password, name: username.trim() || handle })
-        if (error) throw new Error(error.message ?? t("Could not create account"))
-        // Save the chosen @handle (they're auto-signed-in); best-effort.
+        if (error) {
+          if (/exist/i.test(error.message ?? "")) throw new Error(t("An account with this email already exists — try signing in instead."))
+          throw new Error(error.message ?? t("Could not create account"))
+        }
+        // The account now exists and (autoSignIn) the user is signed in. Save
+        // the chosen @handle — best-effort.
         try {
           await updateUsername(handle)
         } catch {
           /* handle can be set later in Settings */
         }
-        const { error: otpErr } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim(), type: "email-verification" })
-        if (otpErr) throw new Error(otpErr.message ?? t("Could not send the verification code"))
-        setStep("verify")
+        // Email verification is best-effort: only gate on the code if we could
+        // actually send it. If email delivery isn't configured (or the send
+        // fails), don't strand the already-created, already-signed-in user on a
+        // code screen — send them straight to the dashboard. (Otherwise they'd
+        // hit "User already exists" if they retried the same email.)
+        let otpSent = false
+        try {
+          const { error: otpErr } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim(), type: "email-verification" })
+          otpSent = !otpErr
+        } catch {
+          otpSent = false
+        }
+        if (otpSent) {
+          setStep("verify")
+          return
+        }
+        router.push(redirectTo)
+        router.refresh()
         return
       }
       // Sign in — accept an email or a username.
