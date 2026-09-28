@@ -280,6 +280,11 @@ export function DashboardSidebar({
                 >
                   <Rewind className="size-4 shrink-0" />
                   <span className={cn(collapsed && "md:hidden")}>{t("Replay")}</span>
+                  {!isPro && (
+                    <span className={cn("ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground uppercase", collapsed && "md:hidden")}>
+                      {t("Soon")}
+                    </span>
+                  )}
                 </Link>
               }
             />
