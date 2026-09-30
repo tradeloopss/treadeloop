@@ -81,49 +81,62 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
           </span>
         </div>
 
-        {/* Hero */}
-        <section className="mt-4 flex flex-col items-center text-center sm:mt-6">
-          <CaseShowcase className="w-[min(82vw,420px)]" tone={claimed && claim?.reward ? claim.reward.tone : "brand"} />
+        {/* Hero — text left, case right on desktop; text first, case below on mobile */}
+        <section className="mt-6 grid items-center gap-8 sm:mt-8 lg:grid-cols-2">
+          <div className="text-center lg:text-left">
+            <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black/[0.04] px-3 py-1 text-xs font-semibold tracking-wider text-slate-600 uppercase dark:border-white/10 dark:bg-white/5 dark:text-white/70">
+              <Sparkles className="size-3.5 text-violet-500 dark:text-violet-300" /> {t("Limited drop")}
+            </div>
+            <h1 className="mt-4 text-4xl font-black leading-[0.95] tracking-tight sm:text-6xl">
+              {t("TRADELOOP")}{" "}
+              <span className="bg-gradient-to-r from-violet-500 via-fuchsia-500 to-sky-500 bg-clip-text text-transparent dark:from-violet-400 dark:via-fuchsia-400 dark:to-sky-400">{t("CASES DROP")}</span>
+            </h1>
+            <p className="mt-3 text-lg font-semibold text-slate-700 dark:text-white/80">{t("One case. Big rewards.")}</p>
+            <p className={cn("mt-1 text-sm", MUTED)}>{t("Claim your FREE case and discover your reward.")}</p>
 
-          <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-black/10 bg-black/[0.04] px-3 py-1 text-xs font-semibold tracking-wider text-slate-600 uppercase dark:border-white/10 dark:bg-white/5 dark:text-white/70">
-            <Sparkles className="size-3.5 text-violet-500 dark:text-violet-300" /> {t("Limited drop")}
+            {!claimed ? (
+              <button
+                type="button"
+                onClick={() => (soldOut ? null : setConfirmOpen(true))}
+                disabled={soldOut}
+                className={cn(
+                  "group mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-2xl px-8 text-base font-bold transition-transform",
+                  soldOut
+                    ? "cursor-not-allowed bg-black/5 text-slate-400 dark:bg-white/10 dark:text-white/40"
+                    : "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-[0_16px_40px_-12px_rgba(139,92,246,0.7)] hover:scale-[1.03]",
+                )}
+              >
+                {soldOut ? <><Lock className="size-4" /> {t("DROP SOLD OUT")}</> : <><Gift className="size-5" /> {t("GET YOUR FREE CASE")} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" /></>}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })}
+                className="mt-7 inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/10 bg-black/[0.03] px-6 text-base font-semibold text-slate-800 transition-colors hover:bg-black/5 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              >
+                <PartyPopper className="size-4 text-fuchsia-500 dark:text-fuchsia-300" /> {t("View your reward")}
+              </button>
+            )}
+            {error && <p className="mt-3 text-sm font-medium text-red-500 dark:text-red-400">{error}</p>}
+
+            <div className="mt-6 flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-600 lg:justify-start dark:text-white/60">
+              <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-4 text-violet-500 dark:text-violet-300" /> {t("100% FREE")}</span>
+              <span className="inline-flex items-center gap-1.5"><Users className="size-4 text-violet-500 dark:text-violet-300" /> {t("1 CASE PER PERSON")}</span>
+              <span className="inline-flex items-center gap-1.5"><Ticket className="size-4 text-violet-500 dark:text-violet-300" /> {t("ONLY {n} CASES", { n: drop.totalCases })}</span>
+            </div>
           </div>
-          <h1 className="mt-4 text-4xl font-black leading-[0.95] tracking-tight sm:text-6xl">
-            {t("TRADELOOP")}{" "}
-            <span className="bg-gradient-to-r from-violet-500 via-fuchsia-500 to-sky-500 bg-clip-text text-transparent dark:from-violet-400 dark:via-fuchsia-400 dark:to-sky-400">{t("CASES DROP")}</span>
-          </h1>
-          <p className="mt-3 text-lg font-semibold text-slate-700 dark:text-white/80">{t("One case. Big rewards.")}</p>
-          <p className={cn("mt-1 text-sm", MUTED)}>{t("Claim your FREE case and discover your reward.")}</p>
 
-          {!claimed ? (
+          {/* The case — hover lifts + intensifies on desktop */}
+          <div className="flex justify-center">
             <button
               type="button"
-              onClick={() => (soldOut ? null : setConfirmOpen(true))}
-              disabled={soldOut}
-              className={cn(
-                "group mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-2xl px-8 text-base font-bold transition-transform",
-                soldOut
-                  ? "cursor-not-allowed bg-black/5 text-slate-400 dark:bg-white/10 dark:text-white/40"
-                  : "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-[0_16px_40px_-12px_rgba(139,92,246,0.7)] hover:scale-[1.03]",
-              )}
+              onClick={() => (claimed ? document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" }) : soldOut ? null : setConfirmOpen(true))}
+              aria-label={claimed ? t("View your reward") : t("Open your free case")}
+              className="w-[min(90vw,560px)] cursor-pointer transition-transform duration-300 hover:scale-[1.02] disabled:cursor-default"
+              disabled={soldOut && !claimed}
             >
-              {soldOut ? <><Lock className="size-4" /> {t("DROP SOLD OUT")}</> : <><Gift className="size-5" /> {t("GET YOUR FREE CASE")} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" /></>}
+              <CaseShowcase className="w-full" tone={claimed && claim?.reward ? claim.reward.tone : "brand"} />
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })}
-              className="mt-7 inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/10 bg-black/[0.03] px-6 text-base font-semibold text-slate-800 transition-colors hover:bg-black/5 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-            >
-              <PartyPopper className="size-4 text-fuchsia-500 dark:text-fuchsia-300" /> {t("View your reward")}
-            </button>
-          )}
-          {error && <p className="mt-3 text-sm font-medium text-red-500 dark:text-red-400">{error}</p>}
-
-          <div className="mt-6 flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-600 dark:text-white/60">
-            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-4 text-violet-500 dark:text-violet-300" /> {t("100% FREE")}</span>
-            <span className="inline-flex items-center gap-1.5"><Users className="size-4 text-violet-500 dark:text-violet-300" /> {t("1 CASE PER PERSON")}</span>
-            <span className="inline-flex items-center gap-1.5"><Ticket className="size-4 text-violet-500 dark:text-violet-300" /> {t("ONLY {n} CASES", { n: drop.totalCases })}</span>
           </div>
         </section>
 
