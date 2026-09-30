@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react"
+import { Crown, Percent, TrendingUp, Gift, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // A stylised TradeLoop "case" drawn with CSS (no image) — a rugged, chamfered
@@ -81,6 +83,46 @@ export function CaseVisual({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// A glowing reward-icon tile that fans out above the case.
+function RewardTile({ icon: Icon, tint, style }: { icon: LucideIcon; tint: string; style?: CSSProperties }) {
+  return (
+    <span
+      className={cn("flex aspect-square w-[20%] items-center justify-center rounded-2xl border border-white/20 bg-gradient-to-br text-white shadow-[0_0_24px_-2px_rgba(150,110,255,0.7)] backdrop-blur", tint)}
+      style={style}
+    >
+      <Icon className="size-1/2" strokeWidth={2.2} />
+    </span>
+  )
+}
+
+// The hero composition from the promo art: four reward tiles bursting out of
+// the top of the case on a beam of light. Pure CSS — no image.
+export function CaseShowcase({
+  className,
+  tone = "brand",
+}: {
+  className?: string
+  tone?: "brand" | "legendary" | "epic" | "rare" | "common"
+}) {
+  return (
+    <div className={cn("relative mx-auto", className)}>
+      {/* Beam of light behind the burst */}
+      <div className="pointer-events-none absolute left-1/2 top-0 -z-10 h-[55%] w-[46%] -translate-x-1/2 bg-[radial-gradient(60%_60%_at_50%_100%,rgba(170,130,255,0.5),transparent_70%)] blur-xl tl-glow" />
+
+      {/* Reward tiles, fanned out of the top */}
+      <div className="relative z-10 flex items-end justify-center gap-[3%] px-[14%]">
+        <RewardTile icon={Crown} tint="from-amber-300 to-fuchsia-500" style={{ transform: "translateY(18%) rotate(-11deg)" }} />
+        <RewardTile icon={Percent} tint="from-violet-400 to-fuchsia-500" style={{ transform: "translateY(-6%) rotate(-4deg)" }} />
+        <RewardTile icon={TrendingUp} tint="from-sky-400 to-indigo-500" style={{ transform: "translateY(-6%) rotate(4deg)" }} />
+        <RewardTile icon={Gift} tint="from-sky-300 to-blue-500" style={{ transform: "translateY(18%) rotate(11deg)" }} />
+      </div>
+
+      {/* The case itself, sitting under the burst */}
+      <CaseVisual className="-mt-[6%] w-full" tone={tone} />
     </div>
   )
 }

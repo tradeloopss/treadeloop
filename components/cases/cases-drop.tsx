@@ -6,11 +6,16 @@ import { Gift, Users, Ticket, ShieldCheck, Sparkles, Zap, ArrowRight, Loader2, X
 import { cn } from "@/lib/utils"
 import { useT } from "@/components/locale-provider"
 import { BrandMark } from "@/components/brand-mark"
-import { CaseVisual } from "@/components/cases/case-visual"
+import { CaseVisual, CaseShowcase } from "@/components/cases/case-visual"
 import { OpeningOverlay } from "@/components/cases/opening-overlay"
 import { PrizeCode } from "@/components/cases/prize-code"
 import { TONE_ACCENT, TONE_RING, type CaseClaim, type CaseDrop, type CaseReward } from "@/components/cases/types"
 import { claimActiveCase } from "@/app/actions/cases"
+
+// Surface tokens so the whole promo follows the device light/dark theme while
+// keeping the neon accents on both.
+const PANEL = "border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none"
+const MUTED = "text-slate-500 dark:text-white/55"
 
 export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim: CaseClaim | null }) {
   const t = useT()
@@ -48,7 +53,6 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
     }
     setClaim(nextClaim)
     if (res.alreadyClaimed) {
-      // Already had a prize — just reveal it without re-animating.
       router.refresh()
       document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })
       return
@@ -58,12 +62,12 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
   }
 
   return (
-    <div className="relative min-h-full overflow-hidden bg-[#0a0a18] text-white">
+    <div className="relative min-h-full overflow-hidden bg-[#f6f5fc] text-slate-900 dark:bg-[#0a0a18] dark:text-white">
       {/* Ambient background */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -left-40 -top-40 size-[520px] rounded-full bg-[radial-gradient(circle,rgba(124,92,255,0.22),transparent_60%)]" />
-        <div className="absolute -right-40 top-40 size-[520px] rounded-full bg-[radial-gradient(circle,rgba(56,120,255,0.18),transparent_60%)]" />
-        <div className="absolute bottom-0 left-1/2 size-[560px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(240,78,155,0.10),transparent_60%)]" />
+        <div className="absolute -left-40 -top-40 size-[520px] rounded-full bg-[radial-gradient(circle,rgba(124,92,255,0.18),transparent_60%)] dark:bg-[radial-gradient(circle,rgba(124,92,255,0.22),transparent_60%)]" />
+        <div className="absolute -right-40 top-40 size-[520px] rounded-full bg-[radial-gradient(circle,rgba(56,120,255,0.14),transparent_60%)] dark:bg-[radial-gradient(circle,rgba(56,120,255,0.18),transparent_60%)]" />
+        <div className="absolute bottom-0 left-1/2 size-[560px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(240,78,155,0.08),transparent_60%)]" />
       </div>
 
       <div className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 sm:px-6 sm:pb-16">
@@ -71,26 +75,25 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
         <div className="flex items-center gap-2.5">
           <BrandMark className="size-7" alt="TradeLoop" />
           <span className="font-semibold tracking-tight">TradeLoop</span>
-          <span className="ms-1 rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold text-white/70">{t("Cases Drop")}</span>
-          <span className="ms-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-xs font-semibold text-emerald-300">
-            <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" /> {soldOut ? t("SOLD OUT") : t("LIVE")}
+          <span className="ms-1 rounded-md bg-black/[0.06] px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-white/10 dark:text-white/70">{t("Cases Drop")}</span>
+          <span className="ms-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:border-emerald-400/30 dark:text-emerald-300">
+            <span className="size-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-400" /> {soldOut ? t("SOLD OUT") : t("LIVE")}
           </span>
         </div>
 
         {/* Hero */}
         <section className="mt-4 flex flex-col items-center text-center sm:mt-6">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/cases/case-hero.png" alt={t("TradeLoop case")} className="tl-float pointer-events-none w-full max-w-3xl select-none" draggable={false} />
+          <CaseShowcase className="w-[min(82vw,420px)]" tone={claimed && claim?.reward ? claim.reward.tone : "brand"} />
 
-          <div className="-mt-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold tracking-wider text-white/70 uppercase sm:-mt-4">
-            <Sparkles className="size-3.5 text-violet-300" /> {t("Limited drop")}
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-black/10 bg-black/[0.04] px-3 py-1 text-xs font-semibold tracking-wider text-slate-600 uppercase dark:border-white/10 dark:bg-white/5 dark:text-white/70">
+            <Sparkles className="size-3.5 text-violet-500 dark:text-violet-300" /> {t("Limited drop")}
           </div>
           <h1 className="mt-4 text-4xl font-black leading-[0.95] tracking-tight sm:text-6xl">
             {t("TRADELOOP")}{" "}
-            <span className="bg-gradient-to-r from-violet-400 via-fuchsia-400 to-sky-400 bg-clip-text text-transparent">{t("CASES DROP")}</span>
+            <span className="bg-gradient-to-r from-violet-500 via-fuchsia-500 to-sky-500 bg-clip-text text-transparent dark:from-violet-400 dark:via-fuchsia-400 dark:to-sky-400">{t("CASES DROP")}</span>
           </h1>
-          <p className="mt-3 text-lg font-semibold text-white/80">{t("One case. Big rewards.")}</p>
-          <p className="mt-1 text-sm text-white/55">{t("Claim your FREE case and discover your reward.")}</p>
+          <p className="mt-3 text-lg font-semibold text-slate-700 dark:text-white/80">{t("One case. Big rewards.")}</p>
+          <p className={cn("mt-1 text-sm", MUTED)}>{t("Claim your FREE case and discover your reward.")}</p>
 
           {!claimed ? (
             <button
@@ -100,7 +103,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
               className={cn(
                 "group mt-7 inline-flex h-14 items-center justify-center gap-2 rounded-2xl px-8 text-base font-bold transition-transform",
                 soldOut
-                  ? "cursor-not-allowed bg-white/10 text-white/40"
+                  ? "cursor-not-allowed bg-black/5 text-slate-400 dark:bg-white/10 dark:text-white/40"
                   : "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-[0_16px_40px_-12px_rgba(139,92,246,0.7)] hover:scale-[1.03]",
               )}
             >
@@ -110,32 +113,32 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
             <button
               type="button"
               onClick={() => document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })}
-              className="mt-7 inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-6 text-base font-semibold text-white transition-colors hover:bg-white/10"
+              className="mt-7 inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/10 bg-black/[0.03] px-6 text-base font-semibold text-slate-800 transition-colors hover:bg-black/5 dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
             >
-              <PartyPopper className="size-4 text-fuchsia-300" /> {t("View your reward")}
+              <PartyPopper className="size-4 text-fuchsia-500 dark:text-fuchsia-300" /> {t("View your reward")}
             </button>
           )}
-          {error && <p className="mt-3 text-sm font-medium text-red-400">{error}</p>}
+          {error && <p className="mt-3 text-sm font-medium text-red-500 dark:text-red-400">{error}</p>}
 
-          <div className="mt-6 flex flex-wrap justify-center gap-4 text-xs font-semibold text-white/60">
-            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-4 text-violet-300" /> {t("100% FREE")}</span>
-            <span className="inline-flex items-center gap-1.5"><Users className="size-4 text-violet-300" /> {t("1 CASE PER PERSON")}</span>
-            <span className="inline-flex items-center gap-1.5"><Ticket className="size-4 text-violet-300" /> {t("ONLY {n} CASES", { n: drop.totalCases })}</span>
+          <div className="mt-6 flex flex-wrap justify-center gap-4 text-xs font-semibold text-slate-600 dark:text-white/60">
+            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-4 text-violet-500 dark:text-violet-300" /> {t("100% FREE")}</span>
+            <span className="inline-flex items-center gap-1.5"><Users className="size-4 text-violet-500 dark:text-violet-300" /> {t("1 CASE PER PERSON")}</span>
+            <span className="inline-flex items-center gap-1.5"><Ticket className="size-4 text-violet-500 dark:text-violet-300" /> {t("ONLY {n} CASES", { n: drop.totalCases })}</span>
           </div>
         </section>
 
         {/* Drop status */}
-        <section className="mt-10 rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur sm:p-6">
+        <section className={cn("mt-10 rounded-2xl p-5 backdrop-blur sm:p-6", PANEL)}>
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold tracking-wider text-white/50 uppercase">{t("{n} cases only", { n: drop.totalCases })}</p>
+              <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase dark:text-white/50">{t("{n} cases only", { n: drop.totalCases })}</p>
               <p className="mt-1 text-2xl font-bold">
-                {claimedCount} <span className="text-white/40">/ {drop.totalCases}</span> <span className="text-base font-semibold text-white/60">{t("claimed")}</span>
+                {claimedCount} <span className="text-slate-400 dark:text-white/40">/ {drop.totalCases}</span> <span className="text-base font-semibold text-slate-600 dark:text-white/60">{t("claimed")}</span>
               </p>
             </div>
-            <p className={cn("text-sm font-bold", soldOut ? "text-red-400" : "text-emerald-300")}>{soldOut ? t("Sold out") : t("{n} remaining", { n: remaining })}</p>
+            <p className={cn("text-sm font-bold", soldOut ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-300")}>{soldOut ? t("Sold out") : t("{n} remaining", { n: remaining })}</p>
           </div>
-          <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+          <div className="mt-3 h-3 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
             <div className="h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-sky-400 transition-[width] duration-700 ease-out" style={{ width: `${pct}%` }} />
           </div>
           {drop.endAt && <Countdown endAt={drop.endAt} />}
@@ -144,7 +147,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
         {/* Rewards */}
         <section className="mt-12">
           <h2 className="text-center text-2xl font-bold tracking-tight">{t("What can you win?")}</h2>
-          <p className="mt-1 text-center text-sm text-white/55">{t("Every case has a reward.")}</p>
+          <p className={cn("mt-1 text-center text-sm", MUTED)}>{t("Every case has a reward.")}</p>
           <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             {drop.rewards.map((r) => (
               <RewardCard key={r.id} reward={r} />
@@ -163,11 +166,11 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
               { icon: Ticket, label: t("Use your prize code") },
               { icon: Timer, label: t("Claim within {n} days", { n: drop.prizeExpirationDays }) },
             ].map((s, i) => (
-              <div key={i} className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-center">
-                <span className="mx-auto flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/30 to-fuchsia-500/20 text-violet-200">
+              <div key={i} className={cn("relative rounded-2xl p-4 text-center", PANEL)}>
+                <span className="mx-auto flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/15 text-violet-600 dark:from-violet-500/30 dark:to-fuchsia-500/20 dark:text-violet-200">
                   <s.icon className="size-5" />
                 </span>
-                <p className="mt-2 text-xs font-semibold text-white/70">{i + 1}. {s.label}</p>
+                <p className="mt-2 text-xs font-semibold text-slate-700 dark:text-white/70">{i + 1}. {s.label}</p>
               </div>
             ))}
           </div>
@@ -178,10 +181,10 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
           {claimed && claim ? (
             <ClaimedPanel claim={claim} />
           ) : (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center">
+            <div className={cn("rounded-2xl p-8 text-center", PANEL)}>
               <CaseVisual className="mx-auto w-28" float={false} />
               <p className="mt-4 text-lg font-bold">{soldOut ? t("This drop is sold out") : t("Your case is waiting")}</p>
-              <p className="mt-1 text-sm text-white/55">{soldOut ? t("All {n} cases have been claimed.", { n: drop.totalCases }) : t("Claim your free case and discover your reward.")}</p>
+              <p className={cn("mt-1 text-sm", MUTED)}>{soldOut ? t("All {n} cases have been claimed.", { n: drop.totalCases }) : t("Claim your free case and discover your reward.")}</p>
               {!soldOut && (
                 <button
                   type="button"
@@ -198,7 +201,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
 
       {/* Sticky mobile CTA */}
       {!claimed && !soldOut && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#0a0a18]/95 p-3 backdrop-blur sm:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 p-3 backdrop-blur sm:hidden dark:border-white/10 dark:bg-[#0a0a18]/95">
           <button
             type="button"
             onClick={() => setConfirmOpen(true)}
@@ -211,16 +214,16 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
 
       {/* Confirm modal */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#12121f] p-6 text-center shadow-2xl">
-            <button type="button" onClick={() => setConfirmOpen(false)} aria-label={t("Close")} className="ms-auto flex size-8 items-center justify-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm dark:bg-black/70" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-2xl border border-black/10 bg-white p-6 text-center text-slate-900 shadow-2xl dark:border-white/10 dark:bg-[#12121f] dark:text-white">
+            <button type="button" onClick={() => setConfirmOpen(false)} aria-label={t("Close")} className="ms-auto flex size-8 items-center justify-center rounded-lg text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white">
               <X className="size-4" />
             </button>
             <CaseVisual className="mx-auto -mt-2 w-32" float={false} />
             <h3 className="mt-3 text-xl font-bold">{t("Ready to open your case?")}</h3>
-            <p className="mt-1.5 text-sm text-white/60">{t("You can claim ONE case from this drop. Your reward will be randomly assigned.")}</p>
+            <p className="mt-1.5 text-sm text-slate-600 dark:text-white/60">{t("You can claim ONE case from this drop. Your reward will be randomly assigned.")}</p>
             <div className="mt-5 flex gap-3">
-              <button type="button" onClick={() => setConfirmOpen(false)} disabled={claiming} className="h-12 flex-1 rounded-xl border border-white/15 text-sm font-semibold text-white/80 transition-colors hover:bg-white/5 disabled:opacity-50">
+              <button type="button" onClick={() => setConfirmOpen(false)} disabled={claiming} className="h-12 flex-1 rounded-xl border border-black/10 text-sm font-semibold text-slate-700 transition-colors hover:bg-black/5 disabled:opacity-50 dark:border-white/15 dark:text-white/80 dark:hover:bg-white/5">
                 {t("Cancel")}
               </button>
               <button
@@ -256,12 +259,12 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
 function RewardCard({ reward }: { reward: CaseReward }) {
   const t = useT()
   return (
-    <div className={cn("rounded-2xl border border-white/10 bg-white/[0.03] p-4 ring-1 ring-inset", TONE_RING[reward.tone])}>
+    <div className={cn("rounded-2xl p-4 ring-1 ring-inset", PANEL, TONE_RING[reward.tone])}>
       <p className={cn("text-3xl font-black", TONE_ACCENT[reward.tone])}>{reward.probability}%</p>
-      <p className="text-[11px] font-semibold tracking-wider text-white/40 uppercase">{t("{n} cases", { n: reward.quantity })}</p>
-      <p className="mt-2 text-sm font-bold leading-snug text-white">{reward.label}</p>
+      <p className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase dark:text-white/40">{t("{n} cases", { n: reward.quantity })}</p>
+      <p className="mt-2 text-sm font-bold leading-snug text-slate-900 dark:text-white">{reward.label}</p>
       {reward.remaining > 0 && reward.remaining < reward.quantity && (
-        <p className="mt-1 text-[11px] font-medium text-emerald-300/80">{t("{n} remaining", { n: reward.remaining })}</p>
+        <p className="mt-1 text-[11px] font-medium text-emerald-600/90 dark:text-emerald-300/80">{t("{n} remaining", { n: reward.remaining })}</p>
       )}
     </div>
   )
@@ -271,15 +274,15 @@ function ClaimedPanel({ claim }: { claim: CaseClaim }) {
   const t = useT()
   const tone = claim.reward?.tone ?? "common"
   return (
-    <div className={cn("relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-6 ring-1 ring-inset sm:p-8", TONE_RING[tone])}>
+    <div className={cn("relative overflow-hidden rounded-2xl p-6 ring-1 ring-inset sm:p-8", PANEL, TONE_RING[tone])}>
       <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
         <CaseVisual className="w-32 shrink-0" open tone={tone} float={false} />
         <div className="min-w-0 flex-1 text-center sm:text-left">
-          <p className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-white/60 uppercase">
+          <p className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-600 uppercase dark:text-white/60">
             <PartyPopper className={cn("size-4", TONE_ACCENT[tone])} /> {t("Your reward")}
           </p>
           <p className={cn("mt-1 text-4xl font-black tracking-tight", TONE_ACCENT[tone])}>{claim.reward?.label ?? t("Reward")}</p>
-          <div className="mt-5 rounded-xl border border-white/10 bg-black/30 p-4">
+          <div className="mt-5 rounded-xl border border-black/10 bg-slate-50 p-4 dark:border-white/10 dark:bg-black/30">
             <PrizeCode code={claim.prizeCode} expiresAt={claim.expiresAt} status={claim.status} rewardType={claim.reward?.type} />
           </div>
         </div>
@@ -301,11 +304,11 @@ function Countdown({ endAt }: { endAt: string }) {
   const h = Math.floor((ms % 86400000) / 3600000)
   const m = Math.floor((ms % 3600000) / 60000)
   const s = Math.floor((ms % 60000) / 1000)
-  if (ms <= 0) return <p className="mt-3 text-xs font-semibold text-red-400">{t("This drop has ended.")}</p>
+  if (ms <= 0) return <p className="mt-3 text-xs font-semibold text-red-500 dark:text-red-400">{t("This drop has ended.")}</p>
   return (
-    <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-white/60">
-      <Timer className="size-3.5 text-violet-300" /> {t("Ends in")}{" "}
-      <span className="font-mono font-semibold text-white/85">{d}d {String(h).padStart(2, "0")}:{String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}</span>
+    <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-white/60">
+      <Timer className="size-3.5 text-violet-500 dark:text-violet-300" /> {t("Ends in")}{" "}
+      <span className="font-mono font-semibold text-slate-900 dark:text-white/85">{d}d {String(h).padStart(2, "0")}:{String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}</span>
     </p>
   )
 }

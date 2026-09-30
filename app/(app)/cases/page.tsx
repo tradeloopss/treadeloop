@@ -35,9 +35,9 @@ export default async function CasesPage() {
 
   if (!view) {
     return (
-      <div className="flex min-h-full items-center justify-center bg-[#0a0a18] px-4 py-24 text-center text-white">
+      <div className="flex min-h-full items-center justify-center bg-[#f6f5fc] px-4 py-24 text-center text-slate-900 dark:bg-[#0a0a18] dark:text-white">
         <div className="max-w-md">
-          <span className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-white/5 text-violet-300">
+          <span className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-black/[0.04] text-violet-500 dark:bg-white/5 dark:text-violet-300">
             <Gift className="size-7" />
           </span>
           <div className="mt-5 flex items-center justify-center gap-2.5">
@@ -45,7 +45,7 @@ export default async function CasesPage() {
             <span className="font-semibold tracking-tight">TradeLoop</span>
           </div>
           <h1 className="mt-3 text-2xl font-bold">No active case drop</h1>
-          <p className="mt-2 text-sm text-white/55">Stay tuned for the next TradeLoop drop — free cases with real rewards, dropping soon.</p>
+          <p className="mt-2 text-sm text-slate-500 dark:text-white/55">Stay tuned for the next TradeLoop drop — free cases with real rewards, dropping soon.</p>
         </div>
       </div>
     )

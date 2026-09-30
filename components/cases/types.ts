@@ -40,10 +40,10 @@ export type CaseDrop = {
 }
 
 export const TONE_ACCENT: Record<CaseTone, string> = {
-  legendary: "text-amber-300",
-  epic: "text-fuchsia-400",
-  rare: "text-sky-400",
-  common: "text-indigo-300",
+  legendary: "text-amber-500 dark:text-amber-300",
+  epic: "text-fuchsia-600 dark:text-fuchsia-400",
+  rare: "text-sky-600 dark:text-sky-400",
+  common: "text-indigo-600 dark:text-indigo-300",
 }
 
 export const TONE_RING: Record<CaseTone, string> = {

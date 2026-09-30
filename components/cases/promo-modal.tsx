@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { X, Gift, ArrowRight, Flame } from "lucide-react"
 import { useT } from "@/components/locale-provider"
+import { CaseShowcase } from "@/components/cases/case-visual"
 
 // A one-time-per-drop nudge shown when the user opens their dashboard while a
 // Cases Drop is live and unclaimed: the promo render + "don't miss this drop",
@@ -46,23 +47,22 @@ export function CasesPromoModal({ dropId, endAt, remaining, totalCases }: { drop
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t("TradeLoop Cases Drop")}>
-      <div className="animate-in fade-in-0 zoom-in-95 relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-[#0a0a18] text-white shadow-2xl duration-200">
-        <button type="button" onClick={dismiss} aria-label={t("Close")} className="absolute end-3 top-3 z-10 flex size-9 items-center justify-center rounded-lg bg-black/40 text-white/70 hover:bg-black/60 hover:text-white">
+      <div className="animate-in fade-in-0 zoom-in-95 relative w-full max-w-md overflow-hidden rounded-2xl border border-black/10 bg-white text-slate-900 shadow-2xl duration-200 dark:border-white/10 dark:bg-[#0a0a18] dark:text-white">
+        <button type="button" onClick={dismiss} aria-label={t("Close")} className="absolute end-3 top-3 z-10 flex size-9 items-center justify-center rounded-lg bg-black/5 text-slate-500 hover:bg-black/10 hover:text-slate-800 dark:bg-black/40 dark:text-white/70 dark:hover:bg-black/60 dark:hover:text-white">
           <X className="size-4" />
         </button>
 
-        {/* Clickable promo image */}
-        <button type="button" onClick={go} className="block w-full" aria-label={t("Open the Cases Drop")}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/cases/case-hero.png" alt={t("TradeLoop Cases Drop")} className="w-full select-none" draggable={false} />
+        {/* Clickable case visual */}
+        <button type="button" onClick={go} className="block w-full bg-gradient-to-b from-violet-500/10 to-transparent pt-6" aria-label={t("Open the Cases Drop")}>
+          <CaseShowcase className="mx-auto w-56" />
         </button>
 
         <div className="p-5 text-center sm:p-6">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-bold tracking-wider text-fuchsia-300 uppercase">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-bold tracking-wider text-fuchsia-600 uppercase dark:border-fuchsia-400/30 dark:text-fuchsia-300">
             <Flame className="size-3.5" /> {t("Limited time drop")}
           </div>
           <h2 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{t("Don't miss this drop!!")}</h2>
-          <p className="mt-1.5 text-sm text-white/60">
+          <p className="mt-1.5 text-sm text-slate-600 dark:text-white/60">
             {t("Claim your FREE TradeLoop case — one per person, only {n} cases. Every case wins.", { n: totalCases })}
           </p>
 
@@ -76,11 +76,11 @@ export function CasesPromoModal({ dropId, endAt, remaining, totalCases }: { drop
             >
               <Gift className="size-5" /> {t("GET YOUR FREE CASE")} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
             </button>
-            <button type="button" onClick={dismiss} className="text-xs font-medium text-white/40 hover:text-white/70">
+            <button type="button" onClick={dismiss} className="text-xs font-medium text-slate-400 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70">
               {t("Maybe later")}
             </button>
           </div>
-          <p className="mt-2 text-[11px] font-semibold text-emerald-300/80">{remaining <= 0 ? t("Sold out") : t("{n} of {total} cases still available", { n: remaining, total: totalCases })}</p>
+          <p className="mt-2 text-[11px] font-semibold text-emerald-600/90 dark:text-emerald-300/80">{remaining <= 0 ? t("Sold out") : t("{n} of {total} cases still available", { n: remaining, total: totalCases })}</p>
         </div>
       </div>
     </div>
@@ -108,9 +108,9 @@ function Countdown({ endAt }: { endAt: string }) {
   return (
     <div className="mt-4 flex items-center justify-center gap-2">
       {cells.map(([v, label], i) => (
-        <div key={i} className="min-w-14 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5">
+        <div key={i} className="min-w-14 rounded-lg border border-black/10 bg-black/[0.03] px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
           <p className="font-mono text-xl font-bold tabular-nums">{String(v).padStart(2, "0")}</p>
-          <p className="text-[10px] font-medium text-white/40 uppercase">{label}</p>
+          <p className="text-[10px] font-medium text-slate-400 uppercase dark:text-white/40">{label}</p>
         </div>
       ))}
     </div>

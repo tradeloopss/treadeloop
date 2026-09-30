@@ -40,7 +40,7 @@ export function OpeningOverlay({
   const accent = TONE_ACCENT[reward.tone]
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-[#07070f]/95 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t("Opening your case")}>
+    <div className="dark fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-[#07070f]/95 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t("Opening your case")}>
       {/* ambient glows */}
       <div className="pointer-events-none absolute left-1/2 top-1/2 -z-10 size-[80vmin] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(124,92,255,0.25),transparent_60%)]" />
 
