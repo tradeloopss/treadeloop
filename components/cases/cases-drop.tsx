@@ -52,6 +52,8 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
       expiresAt: res.expiresAt,
       redeemedAt: res.redeemedAt,
       status: res.status,
+      grantedUntil: res.grantedUntil,
+      grantExtended: res.grantExtended,
     }
     setClaim(nextClaim)
     if (res.alreadyClaimed) {

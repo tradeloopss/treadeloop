@@ -7,7 +7,7 @@ import { db } from "@/lib/db"
 import { dropClaims } from "@/lib/db/schema"
 import { claimCase } from "@/lib/cases/claim"
 import { fulfillPrize } from "@/lib/cases/fulfill"
-import { effectiveClaimStatus, rewardLabel, rewardTone } from "@/lib/cases/types"
+import { effectiveClaimStatus, grantInfo, rewardLabel, rewardTone } from "@/lib/cases/types"
 
 export type FulfillmentKind = "coupon" | "granted" | "none"
 
@@ -25,6 +25,10 @@ export type ClaimActionResult =
       // if provisioning errored (the prize still exists; an admin can re-run it).
       fulfillment: FulfillmentKind
       fulfilled: boolean
+      // Free-month prizes: when access now runs until, and whether it was
+      // stacked onto an existing subscription.
+      grantedUntil: string | null
+      grantExtended: boolean
       reward: {
         id: number
         name: string
@@ -57,12 +61,14 @@ export async function claimActiveCase(dropId: number): Promise<ClaimActionResult
   const r = result.reward
   const fulfillment = kindFor(r.type)
   let fulfilled = true
+  let ref = result.claim.fulfillmentRef
 
   // Only a brand-new claim is provisioned; an already-existing claim was
   // handled when it was first made.
   if (!result.alreadyClaimed && fulfillment !== "none") {
     const outcome = await fulfillPrize({ userId: session.user.id, userEmail: session.user.email, reward: r })
     fulfilled = outcome.status !== "failed"
+    ref = outcome.ref
     await db
       .update(dropClaims)
       .set({ fulfillmentStatus: outcome.status, fulfillmentRef: outcome.ref })
@@ -70,6 +76,7 @@ export async function claimActiveCase(dropId: number): Promise<ClaimActionResult
   } else if (result.alreadyClaimed) {
     fulfilled = result.claim.fulfillmentStatus !== "failed"
   }
+  const grant = grantInfo(ref)
 
   return {
     ok: true,
@@ -81,6 +88,8 @@ export async function claimActiveCase(dropId: number): Promise<ClaimActionResult
     status: effectiveClaimStatus(result.claim.status, result.claim.expiresAt),
     fulfillment,
     fulfilled,
+    grantedUntil: grant.until,
+    grantExtended: grant.extended,
     reward: {
       id: r.id,
       name: r.name,

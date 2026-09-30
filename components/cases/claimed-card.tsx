@@ -21,9 +21,11 @@ export function ClaimedCard({ claim, onClose, className }: { claim: CaseClaim; o
   const tone = reward?.tone ?? "common"
   const granted = isGrant(reward?.type)
   const planName = reward?.subscriptionPlan === "pro" ? "TradeLoop Pro" : "TradeLoop Essential"
+  const months = reward?.subscriptionMonths ?? 1
+  // Prefer the real end date recorded when the time was granted/stacked.
   const activeUntil = (() => {
-    const d = new Date(claim.claimedAt)
-    d.setMonth(d.getMonth() + (reward?.subscriptionMonths ?? 1))
+    const d = claim.grantedUntil ? new Date(claim.grantedUntil) : new Date(claim.claimedAt)
+    if (!claim.grantedUntil) d.setMonth(d.getMonth() + months)
     return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })
   })()
   const usable = claim.status === "active"
@@ -68,9 +70,15 @@ export function ClaimedCard({ claim, onClose, className }: { claim: CaseClaim; o
         {granted ? (
           <div className="space-y-3">
             <p className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-300">
-              <ShieldCheck className="size-4" /> {t("Activated on your account")}
+              <ShieldCheck className="size-4" /> {claim.grantExtended ? t("Added to your subscription") : t("Activated on your account")}
             </p>
-            <p className="text-sm leading-relaxed text-white/65">{t("{plan} is active until {date}. No code needed — it's already applied.", { plan: planName, date: activeUntil })}</p>
+            <p className="text-sm leading-relaxed text-white/65">
+              {claim.grantExtended
+                ? months === 1
+                  ? t("1 free month was added on top of your current subscription — it now runs until {date}, and your next charge moves out by the same amount. No code needed.", { date: activeUntil })
+                  : t("{n} free months were added on top of your current subscription — it now runs until {date}, and your next charge moves out by the same amount. No code needed.", { n: months, date: activeUntil })
+                : t("{plan} is active until {date}. No code needed — it's already applied.", { plan: planName, date: activeUntil })}
+            </p>
             <Link href="/dashboard" onClick={onClose} className="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-neutral-900 transition-opacity hover:opacity-90">
               {t("Go to dashboard")} <ArrowRight className="size-4" />
             </Link>

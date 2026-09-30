@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gt, gte, isNull, or, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { dropClaims, dropRewards, drops, user } from "@/lib/db/schema"
-import { effectiveClaimStatus, type ClaimStatus, type DropStatus } from "@/lib/cases/types"
+import { effectiveClaimStatus, grantInfo, type ClaimStatus, type DropStatus } from "@/lib/cases/types"
 
 export type RewardView = {
   id: number
@@ -23,6 +23,10 @@ export type MyClaimView = {
   expiresAt: Date
   redeemedAt: Date | null
   status: ClaimStatus
+  // Free-month prizes: access now runs until this date; `grantExtended` = it
+  // was stacked onto an existing subscription rather than started fresh.
+  grantedUntil: string | null
+  grantExtended: boolean
 }
 
 export type DropView = {
@@ -101,6 +105,8 @@ export async function getActiveDropForUser(userId: string): Promise<DropView | n
         expiresAt: mine.expiresAt,
         redeemedAt: mine.redeemedAt,
         status: effectiveClaimStatus(mine.status, mine.expiresAt, now),
+        grantedUntil: grantInfo(mine.fulfillmentRef).until,
+        grantExtended: grantInfo(mine.fulfillmentRef).extended,
       }
     : null
 

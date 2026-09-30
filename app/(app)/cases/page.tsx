@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { Gift } from "lucide-react"
 import { auth } from "@/lib/auth"
 import { getActiveDropForUser, type RewardView } from "@/lib/cases/queries"
+import { reconcileFreeTimeClaims } from "@/lib/cases/fulfill"
 import { rewardLabel, rewardTone } from "@/lib/cases/types"
 import { CasesDrop } from "@/components/cases/cases-drop"
 import type { CaseClaim, CaseReward, CaseDrop } from "@/components/cases/types"
@@ -31,6 +32,8 @@ export default async function CasesPage() {
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session?.user) redirect("/sign-in")
 
+  // Stack any free month won before stacking existed onto their subscription.
+  await reconcileFreeTimeClaims(session.user.id)
   const view = await getActiveDropForUser(session.user.id)
 
   if (!view) {
@@ -73,6 +76,8 @@ export default async function CasesPage() {
         expiresAt: view.myClaim.expiresAt.toISOString(),
         redeemedAt: view.myClaim.redeemedAt ? view.myClaim.redeemedAt.toISOString() : null,
         status: view.myClaim.status === "used" || view.myClaim.status === "expired" || view.myClaim.status === "revoked" ? view.myClaim.status : "active",
+        grantedUntil: view.myClaim.grantedUntil,
+        grantExtended: view.myClaim.grantExtended,
       }
     : null
 

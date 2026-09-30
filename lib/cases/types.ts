@@ -26,6 +26,14 @@ export function effectiveClaimStatus(status: string, expiresAt: Date | string, n
   return s
 }
 
+// Where a won free month went, read from the claim's fulfillment ref
+// (lib/cases/fulfill.stackFreeTime): the date access now runs until, and
+// whether it was stacked onto an existing subscription.
+export function grantInfo(ref: string | null | undefined): { until: string | null; extended: boolean } {
+  if (!ref) return { until: null, extended: false }
+  return { until: ref.match(/until=([^;]+)/)?.[1] ?? null, extended: ref.startsWith("whop:") || ref.startsWith("ext:") }
+}
+
 // Whole days remaining until expiry (never negative). 0 = expires today.
 export function daysUntil(expiresAt: Date | string, now: Date = new Date()): number {
   const ms = new Date(expiresAt).getTime() - now.getTime()

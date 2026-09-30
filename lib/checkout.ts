@@ -3,7 +3,7 @@ import { subscriptions } from "@/lib/db/schema"
 import { and, desc, eq, gt, isNotNull } from "drizzle-orm"
 import { getWhopClient, renewalPriceFor, getProductIdForPlan, PLAN_PRICING, type PlanTier, type Billing } from "@/lib/whop"
 import { hasUsedTrial, PENDING_STATUS } from "@/lib/subscription"
-import { bindPrizeToCheckout } from "@/lib/cases/fulfill"
+import { bindPrizeToCheckout, remainingPrizeDays } from "@/lib/cases/fulfill"
 
 // Membership statuses that mean the user should have access right now,
 // mapped to what gets stored. "canceling" is an active membership that
@@ -40,7 +40,10 @@ export async function createCheckout(
   ipHash: string | null = null
 ): Promise<string> {
   const withTrial = !(await hasUsedTrial(user.id, user.email, ipHash))
-  const { amount, billingPeriodDays, trialPeriodDays } = renewalPriceFor(plan, billing, withTrial)
+  const { amount, billingPeriodDays, trialPeriodDays: baseTrialDays } = renewalPriceFor(plan, billing, withTrial)
+  // Free time still left from a Cases Drop prize stacks on top: the first
+  // charge only happens once it (and any trial) has run out.
+  const trialPeriodDays = baseTrialDays + (await remainingPrizeDays(user.id))
   const title = `${PLAN_PRICING[plan].title} (${billing === "annual" ? "Annual" : "Monthly"})`
   const productId = await getProductIdForPlan(plan)
 

@@ -2,6 +2,7 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { getBillingOverview, type PlanOption } from "@/lib/billing"
+import { reconcileFreeTimeClaims } from "@/lib/cases/fulfill"
 import { trialIpHashFrom } from "@/lib/trial-ip"
 import { PLAN_PRICING, renewalPriceFor, type Billing, type PlanTier } from "@/lib/whop"
 import { getT } from "@/lib/i18n/server"
@@ -19,6 +20,8 @@ export default async function BillingPage() {
   const h = await headers()
   const session = await auth.api.getSession({ headers: h })
   if (!session?.user) redirect("/sign-in?next=/billing")
+  // Stack any Cases Drop free month that's still running alongside a subscription.
+  await reconcileFreeTimeClaims(session.user.id)
   const overview = await getBillingOverview({ id: session.user.id, email: session.user.email, name: session.user.name }, trialIpHashFrom(h))
 
   // What each plan would charge if chosen now — the same numbers checkout

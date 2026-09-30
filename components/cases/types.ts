@@ -24,6 +24,10 @@ export type CaseClaim = {
   expiresAt: string
   redeemedAt: string | null
   status: "active" | "used" | "expired" | "revoked"
+  // Free-month prizes: access runs until this date; extended = stacked onto
+  // an existing subscription.
+  grantedUntil?: string | null
+  grantExtended?: boolean
 }
 
 export type CaseDrop = {
