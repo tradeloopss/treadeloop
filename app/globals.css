@@ -248,3 +248,17 @@ html[lang="ar"] * {
 @media (prefers-reduced-motion: reduce) {
   .tl-float, .tl-shake, .tl-glow, .tl-burst, .tl-rise, .tl-sheen { animation: none }
 }
+
+/* Cases Drop 3D opening — reward reveal + the brief purple screen flash on burst. */
+@keyframes tl-reveal {
+  0% { transform: translateY(22px) scale(.7); opacity: 0; filter: blur(8px) }
+  55% { opacity: 1; filter: blur(0) }
+  100% { transform: translateY(0) scale(1); opacity: 1; filter: blur(0) }
+}
+@keyframes tl-flash { 0% { opacity: 0 } 16% { opacity: 1 } 100% { opacity: 0 } }
+.tl-reveal { animation: tl-reveal .75s cubic-bezier(.2,.9,.25,1.12) both }
+.tl-flash { animation: tl-flash .85s ease-out forwards }
+@media (prefers-reduced-motion: reduce) {
+  .tl-reveal { animation: none }
+  .tl-flash { animation: none; opacity: 0 }
+}

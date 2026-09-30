@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { X, Gift, ArrowRight, Flame } from "lucide-react"
 import { useT } from "@/components/locale-provider"
-import { CaseShowcase } from "@/components/cases/case-visual"
+import { Case3D } from "@/components/cases/case-3d"
 
 // A one-time-per-drop nudge shown when the user opens their dashboard while a
 // Cases Drop is live and unclaimed: the promo render + "don't miss this drop",
@@ -52,10 +52,10 @@ export function CasesPromoModal({ dropId, endAt, remaining, totalCases }: { drop
           <X className="size-4" />
         </button>
 
-        {/* Clickable case visual */}
-        <button type="button" onClick={go} className="block w-full bg-gradient-to-b from-violet-500/10 to-transparent pt-6" aria-label={t("Open the Cases Drop")}>
-          <CaseShowcase className="mx-auto w-56" />
-        </button>
+        {/* The live 3D case — tap it to go to the drop */}
+        <div className="bg-gradient-to-b from-violet-500/10 to-transparent pt-4">
+          <Case3D className="mx-auto aspect-[4/3] w-[min(78vw,340px)]" framing="compact" interactive clickMode="activate" onActivate={go} ariaLabel={t("Open the Cases Drop")} />
+        </div>
 
         <div className="p-5 text-center sm:p-6">
           <div className="inline-flex items-center gap-1.5 rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-bold tracking-wider text-fuchsia-600 uppercase dark:border-fuchsia-400/30 dark:text-fuchsia-300">

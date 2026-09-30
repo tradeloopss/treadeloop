@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Gift, Users, Ticket, ShieldCheck, Sparkles, Zap, ArrowRight, Loader2, X, Lock, PartyPopper, Timer } from "lucide-react"
+import { Gift, Users, Ticket, ShieldCheck, Sparkles, Zap, ArrowRight, Loader2, X, Lock, PartyPopper, Timer, Hand } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT } from "@/components/locale-provider"
 import { BrandMark } from "@/components/brand-mark"
-import { CaseVisual, CaseShowcase } from "@/components/cases/case-visual"
+import { Case3D, type Case3DHandle } from "@/components/cases/case-3d"
 import { OpeningOverlay } from "@/components/cases/opening-overlay"
 import { PrizeCode } from "@/components/cases/prize-code"
 import { TONE_ACCENT, TONE_RING, type CaseClaim, type CaseDrop, type CaseReward } from "@/components/cases/types"
@@ -26,6 +26,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
   const [claiming, setClaiming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [overlay, setOverlay] = useState<{ reward: CaseReward; prizeCode: string; expiresAt: string } | null>(null)
+  const heroCase = useRef<Case3DHandle>(null)
 
   const remaining = Math.max(0, drop.totalCases - claimedCount)
   const pct = drop.totalCases > 0 ? Math.min(100, Math.round((claimedCount / drop.totalCases) * 100)) : 0
@@ -53,6 +54,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
     }
     setClaim(nextClaim)
     if (res.alreadyClaimed) {
+      heroCase.current?.open({ cinematic: false })
       router.refresh()
       document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })
       return
@@ -126,17 +128,24 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
             </div>
           </div>
 
-          {/* The case — hover lifts + intensifies on desktop */}
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={() => (claimed ? document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" }) : soldOut ? null : setConfirmOpen(true))}
-              aria-label={claimed ? t("View your reward") : t("Open your free case")}
-              className="w-[min(90vw,560px)] cursor-pointer transition-transform duration-300 hover:scale-[1.02] disabled:cursor-default"
-              disabled={soldOut && !claimed}
-            >
-              <CaseShowcase className="w-full" tone={claimed && claim?.reward ? claim.reward.tone : "brand"} />
-            </button>
+          {/* The 3D case — drag to rotate; tap to open (or, once claimed, to close/reopen) */}
+          <div className="flex flex-col items-center">
+            <Case3D
+              ref={heroCase}
+              className="aspect-[4/3] w-[min(92vw,580px)]"
+              framing="hero"
+              initial={claimed ? "open" : "closed"}
+              tone={claimed && claim?.reward ? claim.reward.tone : "brand"}
+              interactive
+              paused={overlay != null}
+              clickMode={claimed ? "toggle" : soldOut ? "none" : "activate"}
+              onActivate={() => setConfirmOpen(true)}
+              ariaLabel={claimed ? t("Your open TradeLoop case — press to close or reopen") : t("TradeLoop case — press to open your free case")}
+            />
+            <p className="-mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-white/45">
+              <Hand className="size-3.5" />
+              {claimed ? t("Drag to rotate · tap to close or reopen") : soldOut ? t("Drag to rotate") : t("Drag to rotate · tap to open")}
+            </p>
           </div>
         </section>
 
@@ -195,7 +204,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
             <ClaimedPanel claim={claim} />
           ) : (
             <div className={cn("rounded-2xl p-8 text-center", PANEL)}>
-              <CaseVisual className="mx-auto w-28" float={false} />
+              <CaseBadge className="mx-auto size-16" />
               <p className="mt-4 text-lg font-bold">{soldOut ? t("This drop is sold out") : t("Your case is waiting")}</p>
               <p className={cn("mt-1 text-sm", MUTED)}>{soldOut ? t("All {n} cases have been claimed.", { n: drop.totalCases }) : t("Claim your free case and discover your reward.")}</p>
               {!soldOut && (
@@ -232,7 +241,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
             <button type="button" onClick={() => setConfirmOpen(false)} aria-label={t("Close")} className="ms-auto flex size-8 items-center justify-center rounded-lg text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white">
               <X className="size-4" />
             </button>
-            <CaseVisual className="mx-auto -mt-2 w-32" float={false} />
+            <CaseBadge className="mx-auto -mt-2 size-16" />
             <h3 className="mt-3 text-xl font-bold">{t("Ready to open your case?")}</h3>
             <p className="mt-1.5 text-sm text-slate-600 dark:text-white/60">{t("You can claim ONE case from this drop. Your reward will be randomly assigned.")}</p>
             <div className="mt-5 flex gap-3">
@@ -261,11 +270,30 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
           onDone={() => {
             setOverlay(null)
             router.refresh()
+            // The hero case was closed behind the overlay — pop it open to match.
+            heroCase.current?.open({ cinematic: false })
             document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })
           }}
         />
       )}
     </div>
+  )
+}
+
+const TONE_BADGE: Record<CaseReward["tone"] | "brand", string> = {
+  brand: "from-violet-500 to-fuchsia-500",
+  legendary: "from-amber-400 to-fuchsia-500",
+  epic: "from-fuchsia-500 to-violet-600",
+  rare: "from-sky-400 to-violet-500",
+  common: "from-indigo-500 to-violet-500",
+}
+
+// A small glowing badge used where a full 3D case would be too much.
+function CaseBadge({ tone = "brand", icon: Icon = Gift, className }: { tone?: CaseReward["tone"] | "brand"; icon?: typeof Gift; className?: string }) {
+  return (
+    <span className={cn("flex items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-[0_0_40px_-6px_rgba(139,92,246,0.75)]", TONE_BADGE[tone], className)}>
+      <Icon className="size-1/2" strokeWidth={2.2} />
+    </span>
   )
 }
 
@@ -289,7 +317,7 @@ function ClaimedPanel({ claim }: { claim: CaseClaim }) {
   return (
     <div className={cn("relative overflow-hidden rounded-2xl p-6 ring-1 ring-inset sm:p-8", PANEL, TONE_RING[tone])}>
       <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
-        <CaseVisual className="w-32 shrink-0" open tone={tone} float={false} />
+        <CaseBadge tone={tone} icon={PartyPopper} className="size-20 shrink-0" />
         <div className="min-w-0 flex-1 text-center sm:text-left">
           <p className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-600 uppercase dark:text-white/60">
             <PartyPopper className={cn("size-4", TONE_ACCENT[tone])} /> {t("Your reward")}
