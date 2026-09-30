@@ -1445,6 +1445,11 @@ export const dropClaims = pgTable(
     redeemedAt: timestamp("redeemedAt"),
     // active | used | expired | revoked (expired is also derived from expiresAt)
     status: text("status").notNull().default("active"),
+    // How the prize was provisioned: none | fulfilled | failed. A discount
+    // creates a billing promo code (fulfillmentRef = its id); a free
+    // subscription grants a plan (fulfillmentRef = sub:<id>). See lib/cases/fulfill.ts.
+    fulfillmentStatus: text("fulfillmentStatus").notNull().default("none"),
+    fulfillmentRef: text("fulfillmentRef"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
   },
   (t) => [

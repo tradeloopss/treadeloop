@@ -37,7 +37,9 @@ export async function isOwner(userId: string): Promise<boolean> {
 // their period end isn't enforced here.
 export function rowGrantsAccess(row: { status: string; source: string; currentPeriodEnd: Date | null }): boolean {
   if (!ACTIVE_STATUSES.includes(row.status)) return false
-  if (row.source === "admin" && row.currentPeriodEnd && row.currentPeriodEnd.getTime() < Date.now()) return false
+  // Granted plans (admin, or a Cases Drop free-subscription prize) lapse at
+  // their period end; Whop rows are kept current by the webhook instead.
+  if ((row.source === "admin" || row.source === "cases") && row.currentPeriodEnd && row.currentPeriodEnd.getTime() < Date.now()) return false
   return true
 }
 

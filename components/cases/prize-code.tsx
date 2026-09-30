@@ -8,10 +8,13 @@ import { daysUntil } from "@/lib/cases/types"
 
 // The prize-code block: the code with a copy button, the valid-until date and
 // a live "expires in N days" indicator that warns as the deadline nears.
-export function PrizeCode({ code, expiresAt, status }: { code: string; expiresAt: string; status?: "active" | "used" | "expired" | "revoked" }) {
+// `rewardType` tailors the helper line — a discount is a coupon to apply at
+// checkout, a free subscription is already active and needs no code.
+export function PrizeCode({ code, expiresAt, status, rewardType }: { code: string; expiresAt: string; status?: "active" | "used" | "expired" | "revoked"; rewardType?: string }) {
   const t = useT()
   const [copied, setCopied] = useState(false)
   const [, force] = useState(0)
+  const granted = rewardType === "free_subscription" || rewardType === "free_month"
 
   // Re-render hourly so the countdown stays roughly current on a long session.
   useEffect(() => {
@@ -36,7 +39,12 @@ export function PrizeCode({ code, expiresAt, status }: { code: string; expiresAt
 
   return (
     <div>
-      <p className="text-[11px] font-semibold tracking-wider text-white/50 uppercase">{t("Your prize code")}</p>
+      <p className="text-[11px] font-semibold tracking-wider text-white/50 uppercase">{granted ? t("Your reference code") : t("Your prize code")}</p>
+      {granted ? (
+        <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><Check className="size-3.5" /> {t("Active on your account — no code needed")}</p>
+      ) : (
+        <p className="mt-1 text-xs text-white/50">{t("Apply this code at checkout to get your discount.")}</p>
+      )}
       <div className="mt-2 flex items-center gap-2">
         <code className="flex-1 truncate rounded-lg border border-white/15 bg-black/40 px-3 py-2.5 font-mono text-lg font-bold tracking-wider text-white">{code}</code>
         <button

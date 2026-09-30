@@ -35,6 +35,8 @@ import { DollarSign, Percent, Scale, Activity, TrendingUp, Wallet } from "lucide
 import { recordRequestTiming } from "@/lib/telemetry"
 import { getLocale, getT } from "@/lib/i18n/server"
 import { intlLocale } from "@/lib/i18n"
+import { getDropTeaser } from "@/lib/cases/queries"
+import { CasesPromoModal } from "@/components/cases/promo-modal"
 
 export default async function DashboardPage() {
   const startedAt = Date.now()
@@ -45,7 +47,7 @@ export default async function DashboardPage() {
   const h = await headers()
   const tz = resolveTimeZone(h)
   const session = await auth.api.getSession({ headers: h })
-  const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template, plan] = await Promise.all([
+  const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template, plan, dropTeaser] = await Promise.all([
     getTrades(),
     getAccounts(),
     getActiveAccountIds(),
@@ -55,6 +57,7 @@ export default async function DashboardPage() {
     getTemplates(),
     getActiveTemplate(),
     session?.user ? getUserPlan(session.user.id) : Promise.resolve(null),
+    session?.user ? getDropTeaser(session.user.id) : Promise.resolve(null),
   ])
   const dayPnlByDay = computeDayPnl(rows, journalEntries, tz)
 
@@ -353,6 +356,11 @@ export default async function DashboardPage() {
       {/* Only nudge subscribed users to connect an account — someone with no
           plan is behind the subscription paywall, so don't pop it for them. */}
       <ConnectFirstAccountDialog show={accounts.length === 0 && plan !== null} />
+      {/* Cases Drop promo — for subscribed users with a live, unclaimed drop,
+          and not while the connect-account prompt is up (don't stack popups). */}
+      {plan !== null && !(accounts.length === 0) && dropTeaser && !dropTeaser.claimed && dropTeaser.remaining > 0 && (
+        <CasesPromoModal dropId={dropTeaser.dropId} endAt={dropTeaser.endAt ? dropTeaser.endAt.toISOString() : null} remaining={dropTeaser.remaining} totalCases={dropTeaser.totalCases} />
+      )}
       <AutoSyncBanner events={syncEvents} />
       <PageHeader
         sticky

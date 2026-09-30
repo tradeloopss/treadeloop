@@ -120,6 +120,40 @@ export async function getActiveDropForUser(userId: string): Promise<DropView | n
   }
 }
 
+// A lightweight look at the active drop for the dashboard promo popup — just
+// enough to decide whether to nudge the user, without loading rewards/claims.
+export type DropTeaser = { dropId: number; name: string; endAt: Date | null; remaining: number; totalCases: number; claimed: boolean }
+
+export async function getDropTeaser(userId: string): Promise<DropTeaser | null> {
+  const now = new Date()
+  const [drop] = await db
+    .select()
+    .from(drops)
+    .where(
+      and(
+        eq(drops.status, "active"),
+        or(isNull(drops.startAt), sql`${drops.startAt} <= ${now}`),
+        or(isNull(drops.endAt), gt(drops.endAt, now)),
+      ),
+    )
+    .orderBy(desc(drops.startAt), desc(drops.id))
+    .limit(1)
+  if (!drop) return null
+  const [mine] = await db
+    .select({ id: dropClaims.id })
+    .from(dropClaims)
+    .where(and(eq(dropClaims.dropId, drop.id), eq(dropClaims.userId, userId)))
+    .limit(1)
+  return {
+    dropId: drop.id,
+    name: drop.name,
+    endAt: drop.endAt,
+    remaining: Math.max(0, drop.totalCases - drop.claimedCases),
+    totalCases: drop.totalCases,
+    claimed: !!mine,
+  }
+}
+
 // -------------------------------------------------------------- admin reads
 
 export type AdminDropRow = {
@@ -161,6 +195,7 @@ export type ClaimRowView = {
   expiresAt: Date
   redeemedAt: Date | null
   status: ClaimStatus
+  fulfillmentStatus: string
 }
 
 export async function listClaims(dropId: number, limit = 500): Promise<ClaimRowView[]> {
@@ -178,6 +213,7 @@ export async function listClaims(dropId: number, limit = 500): Promise<ClaimRowV
       expiresAt: dropClaims.expiresAt,
       redeemedAt: dropClaims.redeemedAt,
       status: dropClaims.status,
+      fulfillmentStatus: dropClaims.fulfillmentStatus,
     })
     .from(dropClaims)
     .leftJoin(user, eq(user.id, dropClaims.userId))

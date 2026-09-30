@@ -71,7 +71,7 @@ export function OpeningOverlay({
           {reward.type === "free_subscription" && <p className="mt-1 text-lg font-semibold text-white/80">{t("on us — enjoy TradeLoop")}</p>}
 
           <div className="mx-auto mt-7 max-w-sm rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-left">
-            <PrizeCode code={prizeCode} expiresAt={expiresAt} />
+            <PrizeCode code={prizeCode} expiresAt={expiresAt} rewardType={reward.type} />
           </div>
 
           <button
