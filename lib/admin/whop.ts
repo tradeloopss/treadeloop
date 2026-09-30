@@ -249,6 +249,8 @@ export async function createPromoCode(input: {
   onePerCustomer: boolean
   stock: number | null
   expiresAt: string | null
+  // Restrict the code to these plans only (e.g. one user's own checkout plan).
+  planIds?: string[]
 }) {
   const accountId = await whopAccountId()
   return guarded(() =>
@@ -263,6 +265,7 @@ export async function createPromoCode(input: {
       one_per_customer: input.onePerCustomer,
       stock: input.stock,
       expires_at: input.expiresAt,
+      ...(input.planIds?.length ? { plan_ids: input.planIds } : {}),
     } as never)
   )
 }

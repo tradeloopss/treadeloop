@@ -1,16 +1,15 @@
 "use client"
 
-import type React from "react"
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { LOGO_MARK_DATA_URI } from "@/lib/brand-logo"
 import type { CaseFraming, CaseSceneController, CaseTone } from "@/lib/cases/case3d/scene"
 
-// The interactive 3D TradeLoop loot case. Loads three.js lazily (its own
-// chunk, only where a case is shown), renders into a transparent canvas, and
-// forwards pointer input: drag to rotate, hover to light up, click/tap or
-// Enter/Space to activate. Rendering pauses off-screen and in hidden tabs.
-// If WebGL isn't available it falls back to a static render of the case.
+// The 3D TradeLoop loot case. Loads three.js lazily (its own chunk, only where
+// a case is shown) and renders into a transparent canvas. Users can't drag or
+// tilt it — it floats and sways gently on its own; hover brightens it, and a
+// click/tap or Enter/Space activates it. Rendering pauses off-screen, in hidden
+// tabs and while `paused`. Without WebGL it falls back to a static render.
 
 export type Case3DHandle = {
   open(opts?: { cinematic?: boolean }): void
@@ -23,7 +22,7 @@ type Props = {
   initial?: "closed" | "open"
   framing?: CaseFraming
   tone?: CaseTone
-  /** drag-to-rotate, hover and pointer parallax */
+  /** brighten on hover */
   interactive?: boolean
   /** additive neon glow regardless of the page theme (for dark stages) */
   forceDark?: boolean
@@ -191,9 +190,8 @@ export const Case3D = forwardRef<Case3DHandle, Props>(function Case3D(
     updateVisibility.current()
   }, [paused])
 
-  // ---- pointer + keyboard
-  const drag = useRef<{ x: number; y: number; t: number; lastX: number; lastY: number; moved: boolean } | null>(null)
-
+  // ---- click + keyboard. The case can't be dragged or tilted by the user —
+  // it only floats and sways gently on its own; hover just brightens it.
   const activate = () => {
     const mode = live.current.clickMode
     if (mode === "activate") live.current.onActivate?.()
@@ -204,53 +202,18 @@ export const Case3D = forwardRef<Case3DHandle, Props>(function Case3D(
     }
   }
 
-  const onPointerDown = (e: React.PointerEvent) => {
-    drag.current = { x: e.clientX, y: e.clientY, t: performance.now(), lastX: e.clientX, lastY: e.clientY, moved: false }
-    if (live.current.interactive) (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-  }
-  const onPointerMove = (e: React.PointerEvent) => {
-    const c = ctl.current
-    const d = drag.current
-    if (d) {
-      if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) d.moved = true
-      if (d.moved && live.current.interactive && c) c.dragBy(e.clientX - d.lastX, e.clientY - d.lastY)
-      d.lastX = e.clientX
-      d.lastY = e.clientY
-      return
-    }
-    if (!live.current.interactive || !c || e.pointerType === "touch") return
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    c.setPointer(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1))
-  }
-  const onPointerUp = () => {
-    const d = drag.current
-    drag.current = null
-    ctl.current?.endDrag()
-    if (d && !d.moved && performance.now() - d.t < 600) activate()
-  }
-
   const clickable = clickMode !== "none"
 
   return (
     <div
       ref={wrapRef}
-      className={cn("relative select-none outline-none", interactive && "cursor-grab active:cursor-grabbing", clickable && !interactive && "cursor-pointer", className)}
-      style={{ touchAction: interactive ? "pan-y" : "auto" }}
+      className={cn("relative select-none outline-none focus-visible:rounded-2xl focus-visible:ring-2 focus-visible:ring-violet-400/60", clickable && "cursor-pointer", className)}
       role={clickable ? "button" : "img"}
       tabIndex={clickable ? 0 : undefined}
       aria-label={ariaLabel ?? "TradeLoop case"}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={() => {
-        drag.current = null
-        ctl.current?.endDrag()
-      }}
+      onClick={clickable ? activate : undefined}
       onPointerEnter={() => live.current.interactive && ctl.current?.setHover(true)}
-      onPointerLeave={() => {
-        ctl.current?.setHover(false)
-        ctl.current?.setPointer(0, 0)
-      }}
+      onPointerLeave={() => ctl.current?.setHover(false)}
       onKeyDown={(e) => {
         if (clickable && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault()

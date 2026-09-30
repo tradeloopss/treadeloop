@@ -5,7 +5,6 @@ import {
   FRAME_TEX,
   barGlowTexture,
   frameGlowTexture,
-  iconTextures,
   logoTexture,
   noiseTexture,
   radialGlowTexture,
@@ -48,9 +47,6 @@ export interface CaseSceneController {
   setGlowBlend(blend: GlowBlend): void
   setReducedMotion(reduced: boolean): void
   setHover(hover: boolean): void
-  setPointer(x: number, y: number): void
-  dragBy(dx: number, dy: number): void
-  endDrag(): void
   setVisible(visible: boolean): void
   resize(width: number, height: number, dpr: number): void
   renderAt(mode: CaseMode, t: number, opts?: { cinematic?: boolean; yaw?: number; pitch?: number; hover?: number }): void
@@ -351,7 +347,6 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
   const rayTex = track(rayTexture())
   const logo = logoTexture(options.logoSrc)
   track(logo.texture)
-  const icons = iconTextures().map((t) => track(t))
 
   // ---- materials
   const M = {
@@ -674,9 +669,9 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
   const rayMat = glowMat(rayTex, 0xcfb4ff)
   const rayGeo = geo(new THREE.PlaneGeometry(0.16, 3.4))
   rayGeo.translate(0, 1.7, 0)
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 6; i++) {
     const r = new THREE.Mesh(rayGeo, rayMat)
-    r.rotation.y = (i / 9) * Math.PI
+    r.rotation.y = (i / 6) * Math.PI
     r.rotation.z = ((i % 2 ? 1 : -1) * (0.12 + ((i * 37) % 10) / 22))
     r.renderOrder = 3
     rays.add(r)
@@ -685,14 +680,6 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
   const particles = new Particles()
   body.add(particles.points)
   disposables.push(particles)
-
-  const iconSprites = icons.map((map, i) => {
-    const s = new THREE.Sprite(track(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, opacity: 0, toneMapped: false })))
-    s.visible = false
-    s.renderOrder = 4
-    body.add(s)
-    return { sprite: s, x: [-1.15, -0.4, 0.4, 1.15][i], lift: [1.45, 1.95, 1.8, 1.4][i], delay: [0.05, 0, 0.08, 0.12][i] }
-  })
 
   // ------------------------------------------------------------ state
   let mode: CaseMode = options.initial === "open" ? "open" : "closed"
@@ -705,12 +692,9 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
   let simTime = 0
   let modeStart = 0
   const fired = { burst: false, opened: false, closed: false, puff: false }
-  let burstAt = -10
   let hoverTarget = 0
   let hover = 0
-  let pointer = { x: 0, y: 0 }
-  let smoothPointer = { x: 0, y: 0 }
-  let dragging = false
+  let holdAngle = false // renderAt: hold a fixed angle instead of easing back
   let userYaw = 0
   let userPitch = 0
   let yaw = 0
@@ -748,9 +732,6 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
       m.blending = b
       m.needsUpdate = true
     }
-    iconSprites.forEach(({ sprite }) => {
-      ;(sprite.material as THREE.SpriteMaterial).blending = THREE.NormalBlending
-    })
   }
   applyBlend()
 
@@ -797,7 +778,7 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
     for (let i = 0; i < n; i++) {
       const x = (Math.random() - 0.5) * 2.4
       const z = (Math.random() - 0.5) * 1.2
-      particles.spawn(x, HB - 0.05, z, x * 0.5 + (Math.random() - 0.5) * 0.8 * power, (2 + Math.random() * 2.8) * power, z * 0.4 + (Math.random() - 0.5) * 0.5, 1.1 + Math.random() * 1.1, 0.06 + Math.random() * 0.08, pick())
+      particles.spawn(x, HB - 0.05, z, x * 0.5 + (Math.random() - 0.5) * 0.8 * power, (2 + Math.random() * 2.8) * power, z * 0.4 + (Math.random() - 0.5) * 0.5, 1.1 + Math.random() * 1.1, 0.045 + Math.random() * 0.05, pick())
     }
   }
   const emitAmbient = (n: number) => {
@@ -824,8 +805,7 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
       P = openParams(t, kind)
       if (!fired.burst && t >= OPEN_BURST[kind]) {
         fired.burst = true
-        burstAt = simTime
-        if (kind !== "reduced") emitBurst(kind === "cinematic" ? 150 : 70, kind === "cinematic" ? 1 : 0.75)
+        if (kind !== "reduced") emitBurst(kind === "cinematic" ? 55 : 28, kind === "cinematic" ? 0.85 : 0.7)
         options.onBurst?.()
       }
       if (!fired.opened && t >= OPEN_REVEAL[kind]) {
@@ -837,7 +817,7 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
       P = closeParams(t, reduced)
       if (!reduced && !fired.puff && t >= CLOSE_IMPACT) {
         fired.puff = true
-        emitPuff(26)
+        emitPuff(12)
       }
       if (t >= (reduced ? CLOSE_DONE.reduced : CLOSE_DONE.normal)) {
         setMode("closed")
@@ -860,28 +840,26 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
     const s = reduced ? 0 : P.shake
     const tt = simTime
     body.position.set(
-      s * 0.032 * Math.sin(tt * 71) * Math.sin(tt * 13),
-      s * 0.018 * Math.sin(tt * 57 + 1.3) - 0.028 * P.thud,
+      s * 0.016 * Math.sin(tt * 61) * Math.sin(tt * 11),
+      s * 0.009 * Math.sin(tt * 47 + 1.3) - 0.022 * P.thud,
       0.3 * P.approach + s * 0.01 * Math.sin(tt * 43),
     )
-    body.rotation.set(s * 0.012 * Math.sin(tt * 49), 0, s * 0.02 * Math.sin(tt * 63 + 0.4))
+    body.rotation.set(s * 0.006 * Math.sin(tt * 41), 0, s * 0.011 * Math.sin(tt * 53 + 0.4))
 
     // Root: float, sway, parallax, drag, hover.
     hover = lerp(hover, hoverTarget, k(8))
-    smoothPointer.x = lerp(smoothPointer.x, pointer.x, k(5))
-    smoothPointer.y = lerp(smoothPointer.y, pointer.y, k(5))
     swayWeight = lerp(swayWeight, mode === "opening" || !idleSway || reduced ? 0 : 1, k(3))
-    if (!dragging) {
+    if (!holdAngle) {
       userYaw = lerp(userYaw, 0, k(1.6))
       userPitch = lerp(userPitch, 0, k(2))
     }
-    const sway = 0.2 * Math.sin(tt * 0.42) * swayWeight
-    yaw = lerp(yaw, sway + smoothPointer.x * 0.26 + userYaw, k(dragging ? 22 : 5))
-    pitch = lerp(pitch, -smoothPointer.y * 0.08 + userPitch, k(dragging ? 22 : 5))
+    const sway = 0.15 * Math.sin(tt * 0.36) * swayWeight
+    yaw = lerp(yaw, sway + userYaw, k(holdAngle ? 22 : 5))
+    pitch = lerp(pitch, userPitch, k(holdAngle ? 22 : 5))
     root.rotation.set(pitch, yaw, 0)
     floor.rotation.y = yaw
     floor.position.z = body.position.z
-    const floatY = reduced ? 0.06 : 0.06 + 0.045 * Math.sin(tt * 1.65)
+    const floatY = reduced ? 0.06 : 0.06 + 0.03 * Math.sin(tt * 1.5)
     root.position.y = floatY
     root.scale.setScalar(1 + 0.025 * hover)
     shadow.scale.setScalar(1 - (floatY - 0.06) * 1.5)
@@ -917,7 +895,7 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
     beamUniforms.uOpacity.value = P.beam * 0.42
     beamCoreMat.uniforms.uOpacity.value = P.beam * 0.34 + P.burst * 0.4
     beam.visible = beamCore.visible = P.beam > 0.002 || P.burst > 0.002
-    rayMat.opacity = clamp01(P.rays) * 0.55 * glowScale
+    rayMat.opacity = clamp01(P.rays) * 0.3 * glowScale
     rays.visible = P.rays > 0.002
     rays.rotation.y = tt * 0.25
 
@@ -927,8 +905,8 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
 
     // Particles: sparks off the seam while charging, a slow rise while open.
     if (!reduced) {
-      seamAcc += (mode === "opening" && kind === "cinematic" ? P.charge * 60 * (1 - P.burst) : 0) * dt
-      ambAcc += (P.interior > 0.5 ? 10 : 0) * dt
+      seamAcc += (mode === "opening" && kind === "cinematic" ? P.charge * 22 * (1 - P.burst) : 0) * dt
+      ambAcc += (P.interior > 0.5 ? 4 : 0) * dt
       const ns = Math.floor(seamAcc)
       const na = Math.floor(ambAcc)
       seamAcc -= ns
@@ -938,23 +916,6 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
     }
     particles.update(dt, 1.1)
     particles.material.uniforms.uScale.value = (renderer.getPixelRatio() * viewH) / (2 * Math.tan(THREE.MathUtils.degToRad(framing.fov / 2)))
-
-    // Reward icons rising out of the burst.
-    const since = simTime - burstAt
-    for (const ic of iconSprites) {
-      const q = (since - ic.delay) / (kind === "cinematic" ? 1.9 : 1.4)
-      if (reduced || q < 0 || q > 1) {
-        ic.sprite.visible = false
-        continue
-      }
-      ic.sprite.visible = true
-      const e = easeOutCubic(q)
-      ic.sprite.position.set(ic.x * e, HB + 0.2 + e * ic.lift, 0.15)
-      const sc = 0.62 * easeOutBack(clamp01(q * 2.4), 1.6)
-      ic.sprite.scale.set(sc, sc, 1)
-      ;(ic.sprite.material as THREE.SpriteMaterial).opacity = q < 0.12 ? q / 0.12 : q > 0.68 ? (1 - q) / 0.32 : 1
-      ;(ic.sprite.material as THREE.SpriteMaterial).rotation = Math.sin(simTime * 2 + ic.x * 3) * 0.12
-    }
 
     // Camera: frame the case, pulling back as the lid rises.
     const openAmt = clamp01(P.lid / LID_OPEN)
@@ -1031,17 +992,6 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
     setHover(h) {
       hoverTarget = h ? 1 : 0
     },
-    setPointer(x, y) {
-      pointer = { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) }
-    },
-    dragBy(dx, dy) {
-      dragging = true
-      userYaw += dx * 0.012
-      userPitch = Math.max(-0.35, Math.min(0.3, userPitch + dy * 0.005))
-    },
-    endDrag() {
-      dragging = false
-    },
     setVisible(v) {
       visible = v
       if (visible) start()
@@ -1066,21 +1016,20 @@ export function createCaseScene(canvas: HTMLCanvasElement, options: CaseSceneOpt
       stop()
       particles.reset()
       simTime = 0
-      burstAt = -10
       seamAcc = ambAcc = 0
       kind = reduced ? "reduced" : opts?.cinematic === false ? "quick" : "cinematic"
       setMode(m)
       openSmooth = m === "open" || m === "closing" ? 1 : 0
       hover = hoverTarget = opts?.hover ?? 0
       swayWeight = 0
-      dragging = true // hold the requested angle instead of springing back
+      holdAngle = true
       userYaw = opts?.yaw ?? 0
       userPitch = opts?.pitch ?? 0
       const step = 1 / 60
       if (m === "closed") simTime = t
       else for (let x = 0; x < t; x += step) update(step)
       update(0, true)
-      dragging = false
+      holdAngle = false
       renderer.render(scene, camera)
     },
     dispose() {

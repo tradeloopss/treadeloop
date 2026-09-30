@@ -1,14 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Gift, Users, Ticket, ShieldCheck, Sparkles, Zap, ArrowRight, Loader2, X, Lock, PartyPopper, Timer, Hand } from "lucide-react"
+import { Gift, Users, Ticket, ShieldCheck, Sparkles, Zap, ArrowRight, Loader2, X, Lock, PartyPopper, Timer } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useT } from "@/components/locale-provider"
 import { BrandMark } from "@/components/brand-mark"
-import { Case3D, type Case3DHandle } from "@/components/cases/case-3d"
+import { Case3D } from "@/components/cases/case-3d"
 import { OpeningOverlay } from "@/components/cases/opening-overlay"
-import { PrizeCode } from "@/components/cases/prize-code"
+import { ClaimedCard, ClaimedModal } from "@/components/cases/claimed-card"
 import { TONE_ACCENT, TONE_RING, type CaseClaim, type CaseDrop, type CaseReward } from "@/components/cases/types"
 import { claimActiveCase } from "@/app/actions/cases"
 
@@ -25,8 +25,9 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [claiming, setClaiming] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [overlay, setOverlay] = useState<{ reward: CaseReward; prizeCode: string; expiresAt: string } | null>(null)
-  const heroCase = useRef<Case3DHandle>(null)
+  // The claim being revealed in the full-screen opening, and the "Claimed" pop-up.
+  const [overlay, setOverlay] = useState<CaseClaim | null>(null)
+  const [showClaimed, setShowClaimed] = useState(false)
 
   const remaining = Math.max(0, drop.totalCases - claimedCount)
   const pct = drop.totalCases > 0 ? Math.min(100, Math.round((claimedCount / drop.totalCases) * 100)) : 0
@@ -54,13 +55,13 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
     }
     setClaim(nextClaim)
     if (res.alreadyClaimed) {
-      heroCase.current?.open({ cinematic: false })
+      // Already had a prize — just show it; no second opening.
+      setShowClaimed(true)
       router.refresh()
-      document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })
       return
     }
     setClaimedCount((n) => n + 1)
-    setOverlay({ reward: nextClaim.reward as CaseReward, prizeCode: res.prizeCode, expiresAt: res.expiresAt })
+    setOverlay(nextClaim)
   }
 
   return (
@@ -128,24 +129,19 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
             </div>
           </div>
 
-          {/* The 3D case — drag to rotate; tap to open (or, once claimed, to close/reopen) */}
-          <div className="flex flex-col items-center">
+          {/* The 3D case — it stays closed; tapping opens your case (or, once claimed, shows what you won) */}
+          <div className="flex justify-center">
             <Case3D
-              ref={heroCase}
               className="aspect-[4/3] w-[min(92vw,580px)]"
               framing="hero"
-              initial={claimed ? "open" : "closed"}
+              initial="closed"
               tone={claimed && claim?.reward ? claim.reward.tone : "brand"}
               interactive
               paused={overlay != null}
-              clickMode={claimed ? "toggle" : soldOut ? "none" : "activate"}
-              onActivate={() => setConfirmOpen(true)}
-              ariaLabel={claimed ? t("Your open TradeLoop case — press to close or reopen") : t("TradeLoop case — press to open your free case")}
+              clickMode={claimed || !soldOut ? "activate" : "none"}
+              onActivate={() => (claimed ? setShowClaimed(true) : setConfirmOpen(true))}
+              ariaLabel={claimed ? t("Your TradeLoop case — press to see your reward") : t("TradeLoop case — press to open your free case")}
             />
-            <p className="-mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-white/45">
-              <Hand className="size-3.5" />
-              {claimed ? t("Drag to rotate · tap to close or reopen") : soldOut ? t("Drag to rotate") : t("Drag to rotate · tap to open")}
-            </p>
           </div>
         </section>
 
@@ -185,7 +181,7 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
               { icon: Gift, label: t("Claim your case") },
               { icon: Zap, label: t("Open your case") },
               { icon: Sparkles, label: t("Reveal your reward") },
-              { icon: Ticket, label: t("Use your prize code") },
+              { icon: Ticket, label: t("Use your reward") },
               { icon: Timer, label: t("Claim within {n} days", { n: drop.prizeExpirationDays }) },
             ].map((s, i) => (
               <div key={i} className={cn("relative rounded-2xl p-4 text-center", PANEL)}>
@@ -201,7 +197,9 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
         {/* Your reward / waiting */}
         <section id="your-reward" className="mt-12 scroll-mt-6">
           {claimed && claim ? (
-            <ClaimedPanel claim={claim} />
+            <div className="flex justify-center">
+              <ClaimedCard claim={claim} />
+            </div>
           ) : (
             <div className={cn("rounded-2xl p-8 text-center", PANEL)}>
               <CaseBadge className="mx-auto size-16" />
@@ -261,21 +259,19 @@ export function CasesDrop({ drop, initialClaim }: { drop: CaseDrop; initialClaim
         </div>
       )}
 
-      {/* Opening animation */}
+      {/* Opening animation → the case closes → "Claimed" */}
       {overlay && (
         <OpeningOverlay
-          reward={overlay.reward}
-          prizeCode={overlay.prizeCode}
-          expiresAt={overlay.expiresAt}
+          claim={overlay}
           onDone={() => {
             setOverlay(null)
             router.refresh()
-            // The hero case was closed behind the overlay — pop it open to match.
-            heroCase.current?.open({ cinematic: false })
             document.getElementById("your-reward")?.scrollIntoView({ behavior: "smooth" })
           }}
         />
       )}
+
+      {showClaimed && claim && <ClaimedModal claim={claim} onClose={() => setShowClaimed(false)} />}
     </div>
   )
 }
@@ -311,26 +307,6 @@ function RewardCard({ reward }: { reward: CaseReward }) {
   )
 }
 
-function ClaimedPanel({ claim }: { claim: CaseClaim }) {
-  const t = useT()
-  const tone = claim.reward?.tone ?? "common"
-  return (
-    <div className={cn("relative overflow-hidden rounded-2xl p-6 ring-1 ring-inset sm:p-8", PANEL, TONE_RING[tone])}>
-      <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
-        <CaseBadge tone={tone} icon={PartyPopper} className="size-20 shrink-0" />
-        <div className="min-w-0 flex-1 text-center sm:text-left">
-          <p className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-600 uppercase dark:text-white/60">
-            <PartyPopper className={cn("size-4", TONE_ACCENT[tone])} /> {t("Your reward")}
-          </p>
-          <p className={cn("mt-1 text-4xl font-black tracking-tight", TONE_ACCENT[tone])}>{claim.reward?.label ?? t("Reward")}</p>
-          <div className="mt-5 rounded-xl border border-black/10 bg-slate-50 p-4 dark:border-white/10 dark:bg-black/30">
-            <PrizeCode code={claim.prizeCode} expiresAt={claim.expiresAt} status={claim.status} rewardType={claim.reward?.type} />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function Countdown({ endAt }: { endAt: string }) {
   const t = useT()

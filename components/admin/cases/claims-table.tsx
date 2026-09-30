@@ -94,7 +94,8 @@ export function ClaimsTable({ dropId, claims, canManage }: { dropId: number; cla
                 <td className="px-3 py-2.5">{c.rewardName}</td>
                 <td className="px-3 py-2.5 font-mono text-xs">
                   {c.prizeCode}
-                  {c.fulfillmentStatus === "failed" && <span className="ms-2 rounded bg-amber-500/15 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-amber-600 dark:text-amber-400" title="The coupon/grant couldn't be provisioned automatically — create it manually.">not provisioned</span>}
+                  {c.fulfillmentStatus === "failed" && <span className="ms-2 rounded bg-amber-500/15 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-amber-600 dark:text-amber-400" title="The plan grant couldn't be provisioned automatically — grant it manually.">not provisioned</span>}
+                  {c.fulfillmentStatus === "pending" && <span className="ms-2 rounded bg-sky-500/10 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-sky-600 dark:text-sky-400" title="Discount codes are minted when this user starts a checkout, locked to that checkout only.">binds at checkout</span>}
                   {c.fulfillmentStatus === "fulfilled" && <span className="ms-2 rounded bg-emerald-500/10 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">provisioned</span>}
                 </td>
                 <td className="px-3 py-2.5 text-xs text-muted-foreground">{new Date(c.claimedAt).toLocaleDateString()}</td>

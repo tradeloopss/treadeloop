@@ -61,13 +61,7 @@ export async function claimActiveCase(dropId: number): Promise<ClaimActionResult
   // Only a brand-new claim is provisioned; an already-existing claim was
   // handled when it was first made.
   if (!result.alreadyClaimed && fulfillment !== "none") {
-    const outcome = await fulfillPrize({
-      userId: session.user.id,
-      userEmail: session.user.email,
-      prizeCode: result.claim.prizeCode,
-      expiresAt: result.claim.expiresAt,
-      reward: r,
-    })
+    const outcome = await fulfillPrize({ userId: session.user.id, userEmail: session.user.email, reward: r })
     fulfilled = outcome.status !== "failed"
     await db
       .update(dropClaims)

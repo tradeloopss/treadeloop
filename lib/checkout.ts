@@ -3,6 +3,7 @@ import { subscriptions } from "@/lib/db/schema"
 import { and, desc, eq, gt, isNotNull } from "drizzle-orm"
 import { getWhopClient, renewalPriceFor, getProductIdForPlan, PLAN_PRICING, type PlanTier, type Billing } from "@/lib/whop"
 import { hasUsedTrial, PENDING_STATUS } from "@/lib/subscription"
+import { bindPrizeToCheckout } from "@/lib/cases/fulfill"
 
 // Membership statuses that mean the user should have access right now,
 // mapped to what gets stored. "canceling" is an active membership that
@@ -77,6 +78,9 @@ export async function createCheckout(
       // check counts trials, not every checkout, from an address.
       trialIpHash: withTrial ? ipHash : null,
     })
+    // A Cases Drop discount is locked to its owner: its code is minted now,
+    // valid only on this user's own checkout plan.
+    await bindPrizeToCheckout(user.id, config.plan.id)
   }
   return config.purchase_url
 }
