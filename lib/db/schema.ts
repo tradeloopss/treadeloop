@@ -1355,3 +1355,101 @@ export const tradeTemplates = pgTable(
   },
   (t) => [index("trade_templates_user").on(t.userId)]
 )
+
+// --- Cases Drop ------------------------------------------------------------
+// A limited promotional "free case" drop. Each drop has a fixed number of
+// cases; each case is one pre-shuffled reward slot. A user claims one case per
+// drop and receives that slot's reward as a prize code. All the sensitive
+// logic (availability, one-per-user, slot assignment, expiry) is enforced in
+// the DB + server transaction — see lib/cases/*.
+
+// One promotional drop. `claimedCases` is a denormalised counter kept in step
+// with the claimed slots inside the claim transaction (drops row is locked
+// FOR UPDATE), so availability never races past totalCases.
+export const drops = pgTable(
+  "drops",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    // draft | active | paused | ended
+    status: text("status").notNull().default("draft"),
+    totalCases: integer("totalCases").notNull(),
+    claimedCases: integer("claimedCases").notNull().default(0),
+    startAt: timestamp("startAt"),
+    endAt: timestamp("endAt"),
+    prizeExpirationDays: integer("prizeExpirationDays").notNull().default(14),
+    createdBy: text("createdBy").notNull(), // admin user id, or "system" for the seed
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("drops_status").on(t.status)]
+)
+
+// The reward types a drop can hand out. `quantity` is how many of this reward
+// exist in the drop; the actual per-case assignment lives in drop_reward_slots.
+// `probability` is the intended share (whole percent) — informational/for the
+// UI and the publish-time validation; the real distribution is the slot set.
+export const dropRewards = pgTable(
+  "drop_rewards",
+  {
+    id: serial("id").primaryKey(),
+    dropId: integer("dropId").notNull(),
+    name: text("name").notNull(),
+    // discount | free_subscription | free_month | custom
+    type: text("type").notNull(),
+    discountPercent: integer("discountPercent"), // for type=discount
+    subscriptionPlan: text("subscriptionPlan"), // for type=free_subscription (essential | pro)
+    subscriptionMonths: integer("subscriptionMonths"), // for type=free_subscription/free_month
+    quantity: integer("quantity").notNull(),
+    probability: integer("probability").notNull().default(0),
+    sortOrder: integer("sortOrder").notNull().default(0),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("drop_rewards_drop").on(t.dropId)]
+)
+
+// One case = one reward slot. Exactly `totalCases` rows per drop, shuffled at
+// seed/publish time. A claim consumes the next available slot, guaranteeing the
+// final distribution is exactly the configured quantities.
+export const dropRewardSlots = pgTable(
+  "drop_reward_slots",
+  {
+    id: serial("id").primaryKey(),
+    dropId: integer("dropId").notNull(),
+    rewardId: integer("rewardId").notNull(),
+    slotIndex: integer("slotIndex").notNull(),
+    status: text("status").notNull().default("available"), // available | claimed
+    claimedBy: text("claimedBy"),
+    claimedAt: timestamp("claimedAt"),
+  },
+  (t) => [
+    uniqueIndex("drop_reward_slots_drop_index").on(t.dropId, t.slotIndex),
+    index("drop_reward_slots_pick").on(t.dropId, t.status),
+  ]
+)
+
+// One claim per (drop, user). Holds the assigned reward, the unique prize code,
+// and the individual 14-day expiry measured from this user's claim time.
+export const dropClaims = pgTable(
+  "drop_claims",
+  {
+    id: serial("id").primaryKey(),
+    dropId: integer("dropId").notNull(),
+    userId: text("userId").notNull(),
+    rewardId: integer("rewardId").notNull(),
+    rewardSlotId: integer("rewardSlotId").notNull(),
+    prizeCode: text("prizeCode").notNull(),
+    claimedAt: timestamp("claimedAt").notNull().defaultNow(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    redeemedAt: timestamp("redeemedAt"),
+    // active | used | expired | revoked (expired is also derived from expiresAt)
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("drop_claims_drop_user").on(t.dropId, t.userId),
+    uniqueIndex("drop_claims_code").on(t.prizeCode),
+    index("drop_claims_user").on(t.userId),
+  ]
+)

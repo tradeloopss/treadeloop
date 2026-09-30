@@ -217,3 +217,34 @@ html[lang="ar"] * {
   .lucide-redo-2, .lucide-reply, .lucide-send, .lucide-align-left, .lucide-align-right) {
   transform: scaleX(-1);
 }
+
+/* --- Cases Drop animations -------------------------------------------------
+   Scoped keyframes for the promotional Cases Drop experience (components/
+   cases/*). Kept here so the case, glow and reveal animate without a library.
+   All motion is suppressed under prefers-reduced-motion. */
+@keyframes tl-case-float { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-10px) } }
+@keyframes tl-case-shake {
+  0%, 100% { transform: translateX(0) rotate(0deg) }
+  20% { transform: translateX(-5px) rotate(-1.8deg) }
+  40% { transform: translateX(6px) rotate(1.8deg) }
+  60% { transform: translateX(-5px) rotate(-1.2deg) }
+  80% { transform: translateX(5px) rotate(1.2deg) }
+}
+@keyframes tl-glow-pulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
+@keyframes tl-burst { 0% { transform: scale(0); opacity: .95 } 100% { transform: scale(3.6); opacity: 0 } }
+@keyframes tl-rise { 0% { transform: translateY(24px) scale(.9); opacity: 0 } 100% { transform: translateY(0) scale(1); opacity: 1 } }
+@keyframes tl-spark { 0% { transform: translateY(0) scale(1); opacity: 1 } 100% { transform: translateY(-140px) scale(0); opacity: 0 } }
+@keyframes tl-sheen { 0% { background-position: -160% 0 } 100% { background-position: 260% 0 } }
+.tl-float { animation: tl-case-float 4s ease-in-out infinite }
+.tl-shake { animation: tl-case-shake .5s ease-in-out infinite }
+.tl-glow { animation: tl-glow-pulse 2.6s ease-in-out infinite }
+.tl-burst { animation: tl-burst .7s ease-out forwards }
+.tl-rise { animation: tl-rise .5s cubic-bezier(.2,.8,.2,1) forwards }
+.tl-sheen {
+  background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.14) 45%, rgba(255,255,255,.05) 55%, transparent 80%);
+  background-size: 200% 100%;
+  animation: tl-sheen 3.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-float, .tl-shake, .tl-glow, .tl-burst, .tl-rise, .tl-sheen { animation: none }
+}

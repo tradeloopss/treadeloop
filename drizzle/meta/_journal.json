@@ -176,6 +176,13 @@
       "when": 1790760000000,
       "tag": "0024_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790840000000,
+      "tag": "0025_cases_drop",
+      "breakpoints": true
     }
   ]
 }

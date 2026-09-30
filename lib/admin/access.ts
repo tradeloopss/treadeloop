@@ -17,6 +17,7 @@ export const statement = {
   team: ["manage"],
   security: ["view", "manage"],
   support: ["view", "reply"],
+  cases: ["view", "manage"],
 } as const
 
 export const ac = createAccessControl(statement)
@@ -35,6 +36,7 @@ export const roles = {
     team: ["manage"],
     security: ["view", "manage"],
     support: ["view", "reply"],
+    cases: ["view", "manage"],
   }),
   support: ac.newRole({
     user: ["list", "get", "ban", "impersonate"],
@@ -54,6 +56,7 @@ export const roles = {
   content: ac.newRole({
     user: ["list"],
     announcements: ["manage"],
+    cases: ["view", "manage"],
   }),
 }
 

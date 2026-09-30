@@ -40,6 +40,7 @@ import {
   Rewind,
   Wallet,
   CreditCard,
+  Gift,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -62,6 +63,7 @@ const links: NavLink[] = [
   { href: "/propfirm", label: "Prop Firm", icon: ShieldCheck },
   { href: "/propfirm-max", label: "Propfirm Tracker", icon: Gauge, gate: "soon" },
   { href: "/payouts", label: "Payouts", icon: Banknote },
+  { href: "/cases", label: "Cases Drop", icon: Gift },
 ]
 
 const COLLAPSED_KEY = "sidebarCollapsed"
