@@ -6,7 +6,8 @@ import { roleCan } from "@/lib/admin/access"
 import { FREQUENCY_LABELS } from "@/lib/affiliates/payout-engine"
 import { getPayoutSettings, getProgram } from "@/lib/affiliates/program"
 import { methodAvailable } from "@/lib/affiliates/providers"
-import { payoutWalletStatus } from "@/lib/affiliates/admin-queries"
+import { exchangeStatus, payoutWalletStatus } from "@/lib/affiliates/admin-queries"
+import { formatAsset } from "@/lib/affiliates/crypto"
 import { money } from "@/lib/affiliates/types"
 import { AdminPageHeader, Panel } from "@/components/admin/ui"
 import { Kpi, KpiGrid, StatusBadge } from "@/components/affiliate/ui"
@@ -16,15 +17,20 @@ export default async function AdminAffiliatePayoutSettingsPage() {
   const admin = await requireAdmin({ affiliates: ["view"] })
   const canManage = roleCan(admin.role, { affiliates: ["manage"] })
   const one = sql<number>`count(*)::int`
-  const [settings, program, wallet, [optedIn], [disabled]] = await Promise.all([
+  const [settings, program, wallet, exchange, [optedIn], [disabled]] = await Promise.all([
     getPayoutSettings(),
     getProgram(),
     payoutWalletStatus(),
+    exchangeStatus(),
     db.select({ v: one }).from(affiliates).where(and(eq(affiliates.status, "approved"), eq(affiliates.autoPayout, true), eq(affiliates.autoPayoutAllowed, true))),
     db.select({ v: one }).from(affiliates).where(and(eq(affiliates.status, "approved"), eq(affiliates.autoPayoutAllowed, false))),
   ])
   const running = settings.autoPayouts && !settings.paused
-  const sending = settings.cryptoAutoSend && wallet.ready && !settings.paused
+  // With an exchange account connected it sends every crypto payout; the payout wallet is the fallback for USDT on TRON.
+  const exchangeSending = settings.cryptoAutoSend && exchange.ready && !settings.paused
+  const sending = settings.cryptoAutoSend && wallet.ready && !exchange.ready && !settings.paused
+  const anySending = exchangeSending || sending
+  const relayIp = exchange.relay?.split(":")[0] ?? null
   const trx = wallet.balances ? wallet.balances.trxSun / 1_000_000 : null
   // Roughly what one USDT transfer burns when the wallet has no staked energy.
   const lowTrx = trx != null && wallet.balances!.energyAvailable < 65_000 && trx < 30
@@ -48,13 +54,81 @@ export default async function AdminAffiliatePayoutSettingsPage() {
           description="These apply to every affiliate, unless an affiliate has a custom minimum or maximum on their own page."
           action={canManage ? <RunAutoPayoutsButton disabled={!running} /> : undefined}
         >
-          <PayoutSettingsForm settings={settings} minPayout={program.minPayout} stripeReady={methodAvailable("stripe")} walletReady={wallet.ready} canManage={canManage} />
+          <PayoutSettingsForm settings={settings} minPayout={program.minPayout} stripeReady={methodAvailable("stripe")} walletReady={wallet.ready} exchangeReady={exchange.ready} canManage={canManage} />
+        </Panel>
+
+        <Panel
+          title="KuCoin account"
+          description="Crypto payouts — USDT on TRON and Aptos, and Litecoin — are withdrawn from this exchange account through its API. No wallet key is kept on the server; the API key lives only in the server's environment."
+          action={<StatusBadge status={exchangeSending ? "paid" : exchange.ready ? "pending" : "disabled"} label={exchangeSending ? "Sending automatically" : exchange.ready ? (settings.paused ? "Paused" : "Connected — automatic sending is off") : "Not connected"} className="normal-case" />}
+        >
+          {exchange.problem && <p className="mb-4 rounded-lg bg-[var(--chart-4)]/10 px-3 py-2 text-sm text-[var(--chart-4)]">{exchange.problem}</p>}
+          {exchange.ready && !exchange.relay && <p className="mb-4 rounded-lg bg-[var(--chart-4)]/10 px-3 py-2 text-sm text-[var(--chart-4)]">KUCOIN_RELAY isn&apos;t set, so requests leave from changing addresses and KuCoin will refuse an API key that is restricted to a fixed IP.</p>}
+          {exchange.ready ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full min-w-[34rem] text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 text-start font-medium">Payout method</th>
+                      <th className="px-3 py-2 text-end font-medium">Available</th>
+                      <th className="px-3 py-2 text-end font-medium">KuCoin&apos;s fee</th>
+                      <th className="px-3 py-2 text-end font-medium">Smallest withdrawal</th>
+                      <th className="px-3 py-2 text-end font-medium">Withdrawals</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {exchange.networks.map((n) => (
+                      <tr key={n.type}>
+                        <td className="px-3 py-2">
+                          <span className="font-medium">{n.asset}</span> <span className="text-muted-foreground">on {n.network}</span>
+                        </td>
+                        <td className="px-3 py-2 text-end tabular-nums">
+                          {n.quota ? formatAsset(n.quota.available, n.asset, 6) : "—"}
+                          {n.quota && n.priceUsd && n.priceUsd !== 1 ? <span className="block text-xs text-muted-foreground">about {money(n.quota.available * n.priceUsd)}</span> : null}
+                        </td>
+                        <td className="px-3 py-2 text-end tabular-nums">
+                          {n.quota ? formatAsset(n.quota.fee, n.asset) : "—"}
+                          {n.quota && n.priceUsd && n.quota.fee * n.priceUsd > settings.cryptoMaxFeeUsd ? <span className="block text-xs text-[var(--loss)]">above your {money(settings.cryptoMaxFeeUsd)} limit</span> : null}
+                        </td>
+                        <td className="px-3 py-2 text-end tabular-nums">{n.quota ? formatAsset(n.quota.min, n.asset) : "—"}</td>
+                        <td className="px-3 py-2 text-end">{n.quota ? n.quota.enabled ? "Open" : <span className="text-[var(--loss)]">Closed by KuCoin</span> : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <KpiGrid>
+                <Kpi label="Sent automatically today" value={money(wallet.sentToday)} note={`${wallet.sentTodayCount} payout${wallet.sentTodayCount === 1 ? "" : "s"} · limit ${money(settings.cryptoAutoDaily)}`} />
+                <Kpi label="Waiting on the account" value={money(exchange.waiting)} note={`${exchange.waitingCount} payout${exchange.waitingCount === 1 ? "" : "s"} queued or needing a retry`} />
+              </KpiGrid>
+              <p className="text-xs text-muted-foreground">
+                Withdrawals come out of the account&apos;s <span className="font-medium text-foreground">Funding</span> balance, and KuCoin&apos;s fee is paid on top, so the affiliate receives the full amount. Keep a working float there — a few days of payouts — not your reserves. Litecoin payouts need LTC in the account: they are converted from US dollars at the market price when sent.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>To connect it:</p>
+              <ol className="list-decimal space-y-1.5 ps-5">
+                <li>
+                  In KuCoin, create an API key with the <span className="font-medium text-foreground">General</span> and <span className="font-medium text-foreground">Withdrawal</span> permissions only — no trading.
+                </li>
+                <li>
+                  Restrict the key to this IP address: <span className="font-mono text-xs text-foreground">{relayIp ?? "the sync server's address (KUCOIN_RELAY)"}</span>. KuCoin requires a fixed IP for withdrawals.
+                </li>
+                <li>
+                  Set <span className="font-mono text-xs">KUCOIN_API_KEY</span>, <span className="font-mono text-xs">KUCOIN_API_SECRET</span> and <span className="font-mono text-xs">KUCOIN_API_PASSPHRASE</span> in the server environment (mark them Sensitive), then redeploy.
+                </li>
+                <li>Move the payout float into the account&apos;s Funding balance: USDT for the USDT payouts and their fees, LTC for Litecoin.</li>
+              </ol>
+            </div>
+          )}
         </Panel>
 
         <Panel
           title="Payout wallet"
-          description="The wallet automatic USDT payouts are sent from. Its key lives only in the server's environment — never in the database, the logs or this page."
-          action={<StatusBadge status={sending ? "paid" : wallet.ready ? "pending" : "disabled"} label={sending ? "Sending automatically" : wallet.ready ? (settings.paused ? "Paused" : "Ready — sending is off") : "Not configured"} className="normal-case" />}
+          description={exchange.ready ? "Not in use while the KuCoin account is connected. Without it, USDT (TRC-20) payouts can be sent from this wallet instead." : "The wallet automatic USDT (TRC-20) payouts are sent from when no exchange account is connected. Its key lives only in the server's environment — never in the database, the logs or this page."}
+          action={<StatusBadge status={sending ? "paid" : wallet.ready ? "pending" : "disabled"} label={sending ? "Sending automatically" : wallet.ready ? (exchange.ready ? "Standby" : settings.paused ? "Paused" : "Ready — sending is off") : "Not configured"} className="normal-case" />}
         >
           {!wallet.ready && <p className="mb-4 rounded-lg bg-[var(--chart-4)]/10 px-3 py-2 text-sm text-[var(--chart-4)]">{wallet.problem}</p>}
           {wallet.address ? (
@@ -86,19 +160,22 @@ export default async function AdminAffiliatePayoutSettingsPage() {
               <span className="font-medium text-foreground">PayPal, Wise and bank transfer</span> are sent by hand: open the payout, see the account, send the money, then mark it paid.
             </li>
             <li>
-              <span className="font-medium text-foreground">USDT (TRC-20)</span> is sent {sending ? "automatically from the payout wallet when the request is inside the limits; otherwise" : ""} by hand from your own wallet: you paste the transaction hash. Either way the payout completes only when the TRON network confirms a USDT transfer of the payout amount to the affiliate&apos;s wallet — never on the server&apos;s say-so.
+              <span className="font-medium text-foreground">USDT (TRC-20)</span> is sent {anySending ? `automatically from ${exchangeSending ? "the KuCoin account" : "the payout wallet"} when the request is inside the limits; otherwise` : ""} {exchange.ready ? "by the KuCoin account once you approve it, or" : ""} by hand from your own wallet: you paste the transaction hash. Either way the payout completes only when the TRON network confirms a USDT transfer of the payout amount to the affiliate&apos;s wallet — never on the server&apos;s say-so.
             </li>
             <li>
-              <span className="font-medium text-foreground">An automatic transfer is never sent twice.</span> The signed transaction is recorded before it is broadcast, and a new one is signed only after the network proves the earlier one expired without being included.
+              <span className="font-medium text-foreground">USDT (Aptos) and Litecoin</span> are sent only by the KuCoin account: automatically inside the limits, otherwise the moment you approve the payout. They complete when KuCoin reports the withdrawal as sent. A Litecoin payout is converted from US dollars at the market price when it is sent.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">An automatic transfer is never sent twice.</span> Each attempt is recorded before anything is sent, and a new one is made only after it is proven the earlier one can no longer go through.
             </li>
             <li>
               <span className="font-medium text-foreground">Stripe Connect</span> is sent automatically by API once it&apos;s configured.
             </li>
             <li>
-              <span className="font-medium text-foreground">Automatic payouts</span> create and reserve the payout on schedule for affiliates who opted in. With the methods sent by hand, they then wait in the queue for you; they do not move money on their own.{sending ? " USDT payouts inside the limits are the exception: they are sent from the payout wallet." : ""}
+              <span className="font-medium text-foreground">Automatic payouts</span> create and reserve the payout on schedule for affiliates who opted in. With the methods sent by hand, they then wait in the queue for you; they do not move money on their own.{anySending ? " Crypto payouts inside the limits are the exception: they are sent straight away." : ""}
             </li>
             <li>
-              <span className="font-medium text-foreground">The worker runs every two minutes</span> from the sync server (it calls <span className="font-mono text-xs">/api/cron/affiliate-payouts</span> with the cron secret), once a day as a fallback, and whenever you press Run now. Each run confirms transfers on the network, sends what is queued for the payout wallet, and creates the automatic payouts that are due. A second run in the same period never creates a second payout.
+              <span className="font-medium text-foreground">The worker runs every two minutes</span> from the sync server (it calls <span className="font-mono text-xs">/api/cron/affiliate-payouts</span> with the cron secret), once a day as a fallback, and whenever you press Run now. Each run confirms transfers, sends the crypto payouts that are queued, and creates the automatic payouts that are due. A second run in the same period never creates a second payout.
             </li>
           </ul>
         </Panel>

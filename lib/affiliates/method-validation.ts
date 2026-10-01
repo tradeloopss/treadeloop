@@ -1,5 +1,6 @@
 import { maskEmail } from "./engine"
-import { INVALID_TRC20_MESSAGE, TRON_NETWORK, TRON_STANDARD, USDT_ASSET, maskAddress, normalizeTronAddress, tronAddressProblem } from "./tron"
+import { cryptoSpec } from "./crypto"
+import { maskAddress } from "./tron"
 import { PAYOUT_CURRENCIES, type PayoutMethodType } from "./types"
 
 // Validation of payout-method details. Pure, so the form can use the same
@@ -123,20 +124,22 @@ export function validateMethod(type: PayoutMethodType | string, input: unknown):
     return { ok: true, method: { details: { holder, account, swift, bankName }, metadata: { ...cc, scheme }, label: `${bankName} ···· ${account.slice(-4)}`, nickname, identity: `bank:swift:${swift}:${account}` } }
   }
 
-  if (type === "crypto_trc20") {
-    const address = normalizeTronAddress(raw.address)
+  const crypto = cryptoSpec(type)
+  if (crypto) {
+    const address = crypto.normalize(raw.address)
     if (!address) return fail("Enter your wallet address.", "address")
-    if (tronAddressProblem(address)) return fail(INVALID_TRC20_MESSAGE, "address")
+    if (crypto.addressProblem(address)) return fail(crypto.invalidMessage, "address")
     // The network is fixed by the method — a request naming any other is refused
     // rather than quietly corrected.
-    if (raw.network != null && raw.network !== TRON_NETWORK) return fail("USDT payouts are sent on the TRON (TRC-20) network only.", "network")
-    if (raw.asset != null && raw.asset !== USDT_ASSET) return fail("This payout method pays USDT only.", "asset")
-    if (raw.confirmNetwork !== true) return fail("Confirm that this wallet supports USDT on TRC-20.", "confirmNetwork")
+    if (raw.network != null && raw.network !== crypto.network) return fail(crypto.networkOnlyMessage, "network")
+    if (raw.asset != null && raw.asset !== crypto.asset) return fail(`This payout method pays ${crypto.asset} only.`, "asset")
+    if (raw.confirmNetwork !== true) return fail(crypto.confirmMessage, "confirmNetwork")
     // A second look at the address, typed by hand: the last six characters.
-    if (text(raw.confirmTail, 6) !== address.slice(-6)) return fail("The last six characters you typed don't match the wallet address.", "confirmTail")
+    const tail = text(raw.confirmTail, 6)
+    if ((crypto.caseInsensitive ? tail.toLowerCase() : tail) !== address.slice(-6)) return fail("The last six characters you typed don't match the wallet address.", "confirmTail")
     return {
       ok: true,
-      method: { details: { address }, metadata: { network: TRON_NETWORK, standard: TRON_STANDARD, asset: USDT_ASSET, currency: USDT_ASSET }, label: maskAddress(address), nickname: nickname ?? "USDT wallet", identity: `crypto_trc20:${address}` },
+      method: { details: { address }, metadata: { network: crypto.network, standard: crypto.standard, asset: crypto.asset, currency: crypto.asset }, label: maskAddress(address), nickname: nickname ?? crypto.defaultNickname, identity: `${crypto.type}:${address}` },
     }
   }
 

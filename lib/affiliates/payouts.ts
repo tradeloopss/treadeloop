@@ -9,12 +9,16 @@ import { recordSignal } from "./fraud"
 import { validateMethod } from "./method-validation"
 import { notifyAffiliate, notifyOwners } from "./notify"
 import {
+  EXCHANGE_REQUEST_WINDOW_MS,
   MAX_AUTO_ATTEMPTS,
   PAYOUT_IN_FLIGHT,
   affiliateCanCancel,
+  assetAmount,
   autoSendProblem,
   decideAutoPayout,
   effectiveLimits,
+  exchangeRequestProvablyDead,
+  exchangeSendProblem,
   manualPayoutProblem,
   methodHoldUntil,
   payoutLedgerStatus,
@@ -29,10 +33,12 @@ import {
   type WindowTotals,
 } from "./payout-engine"
 import { getPayoutSettings, getProgram } from "./program"
-import { HOT_PROVIDER, cryptoProvider, hotWalletReady, isCryptoMethod, methodAvailable, providerByName, providerFor } from "./providers"
+import { cryptoSpec, cryptoSpecByNetwork, formatAsset, type CryptoSpec } from "./crypto"
+import { EXCHANGE_NAME, ExchangeRefused, applyWithdrawal, assetPriceUsd, lookupWithdrawal, withdrawalQuota, withdrawalRemark, type Quota, type Withdrawal } from "./kucoin"
+import { AUTO_SENDERS, EXCHANGE_PROVIDER, HOT_PROVIDER, autoSenderFor, cryptoProvider, exchangeOnly, isAutoSender, isCryptoMethod, methodAvailable, providerByName, providerFor } from "./providers"
 import { judgeTransaction, lookupTransaction, solidHeadBlock } from "./tron-chain"
 import { broadcast, quoteSend, signTransfer, type Broadcast } from "./tron-wallet"
-import { TRON_NETWORK, USDT_ASSET, isTxHash, maskAddress, maskTxHash } from "./tron"
+import { isTxHash, maskAddress, maskTxHash } from "./tron"
 import { money, methodLabel, type PayoutMethodType } from "./types"
 
 // Payouts. Money leaves the ledger as a negative "payout" row written in the
@@ -105,10 +111,8 @@ export async function addPayoutMethod(affiliateId: number, type: string, raw: un
   const check = validateMethod(type, raw)
   if (!check.ok) throw new Error(check.error)
   const m = check.method
-  if (isCryptoMethod(type)) {
-    const problem = cryptoProvider().validateAddress(m.details.address)
-    if (problem) throw new Error(problem)
-  }
+  const problem = cryptoSpec(type)?.addressProblem(m.details.address)
+  if (problem) throw new Error(problem)
   const print = fingerprint(m.identity)
   const now = new Date()
 
@@ -341,28 +345,33 @@ export async function createPayout(input: CreateInput): Promise<CreateResult> {
     if (!method) throw new Error("Add a payout method first.")
 
     const quote = quoteFee(amount, method.type, settings)
-    const crypto = isCryptoMethod(method.type)
-    // USDT inside the caps, to a wallet that has been on file long enough, for
-    // an affiliate with nothing flagged, is approved by the rules instead of a
-    // person and sent from the payout wallet. Decided here, under the lock, so
-    // today's cap can't be overrun by requests arriving together.
+    const crypto = cryptoSpec(method.type)
+    // Crypto inside the caps, to a wallet that has been on file long enough,
+    // for an affiliate with nothing flagged, is approved by the rules instead
+    // of a person and sent straight away (by the exchange account, or the
+    // payout wallet). Decided here, under the lock, so today's cap can't be
+    // overrun by requests arriving together.
     let hot = false
+    const sender = crypto ? autoSenderFor(method.type) : null
     if (crypto && settings.cryptoAutoSend) {
       const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
       const [[sent], [signals]] = await Promise.all([
         tx
           .select({ v: sql<string>`coalesce(sum(coalesce(${affiliatePayouts.netAmount}, ${affiliatePayouts.amount})), 0)` })
           .from(affiliatePayouts)
-          .where(and(eq(affiliatePayouts.provider, HOT_PROVIDER), gte(affiliatePayouts.requestedAt, dayStart), notInArray(affiliatePayouts.status, DEAD))),
+          // what the rules approved today — a payout a person approved doesn't use up the unattended allowance
+          .where(and(inArray(affiliatePayouts.provider, AUTO_SENDERS), eq(affiliatePayouts.approvedBy, "auto"), gte(affiliatePayouts.requestedAt, dayStart), notInArray(affiliatePayouts.status, DEAD))),
         tx
           .select({ n: sql<number>`count(*)::int` })
           .from(affiliateFraudSignals)
           .where(and(eq(affiliateFraudSignals.affiliateId, aff.id), inArray(affiliateFraudSignals.risk, ["medium", "high"]), inArray(affiliateFraudSignals.status, ["open", "reviewing"]))),
       ])
-      hot = autoSendProblem({ settings, walletReady: hotWalletReady(), amount: quote.net, sentToday: Number(sent?.v ?? 0), methodAgeHours: (now.getTime() - method.createdAt.getTime()) / 3_600_000, openRiskSignals: signals?.n ?? 0, affiliate: stateOf(aff) }) === null
+      hot = autoSendProblem({ settings, walletReady: sender != null, amount: quote.net, sentToday: Number(sent?.v ?? 0), methodAgeHours: (now.getTime() - method.createdAt.getTime()) / 3_600_000, openRiskSignals: signals?.n ?? 0, affiliate: stateOf(aff) }) === null
     }
-    const provider = crypto ? providerByName(hot ? HOT_PROVIDER : "tron_manual") : providerFor(method.type)
-    const status: PayoutStatus = hot || settings.approval === "automatic" ? "queued" : "pending"
+    const provider = hot && sender ? providerByName(sender) : providerFor(method.type)
+    // A payout only the exchange can send has no "queued for a person to send":
+    // unless the rules approved it, approving it IS what sends it.
+    const status: PayoutStatus = hot ? "queued" : crypto && exchangeOnly(method.type) ? "pending" : settings.approval === "automatic" ? "queued" : "pending"
     const [payout] = await tx
       .insert(affiliatePayouts)
       .values({
@@ -375,8 +384,8 @@ export async function createPayout(input: CreateInput): Promise<CreateResult> {
         methodType: method.type,
         methodLabel: method.label,
         provider: provider.name,
-        network: crypto ? TRON_NETWORK : null,
-        asset: crypto ? USDT_ASSET : null,
+        network: crypto?.network ?? null,
+        asset: crypto?.asset ?? null,
         status,
         mode: input.mode,
         idempotencyKey: key,
@@ -421,7 +430,7 @@ export async function requestPayout(req: PayoutRequest): Promise<{ id: number; c
   if ("skipped" in result) throw new Error(result.message)
   // Read back rather than assumed: whether it is on its way from the payout wallet.
   const [now] = await db.select({ provider: affiliatePayouts.provider, status: affiliatePayouts.status }).from(affiliatePayouts).where(eq(affiliatePayouts.id, result.id)).limit(1)
-  return { id: result.id, created: result.created, sending: now?.provider === HOT_PROVIDER && ["queued", "processing", "submitted", "confirming", "paid"].includes(now.status) }
+  return { id: result.id, created: result.created, sending: isAutoSender(now?.provider) && ["queued", "processing", "submitted", "confirming", "paid"].includes(now!.status) }
 }
 
 // --- State changes -------------------------------------------------------------
@@ -452,7 +461,7 @@ const NOTICES: Partial<Record<PayoutStatus, (p: Payout, reason: string) => [stri
   confirming: (p) => ["Payout confirming", `Your ${p.asset ?? ""} payout of ${money(p.netAmount ?? p.amount)} is on the ${p.network ?? "network"} and waiting for final confirmation${p.transactionHash ? ` (transaction ${maskTxHash(p.transactionHash)})` : ""}.`],
   paid: (p) =>
     p.asset
-      ? [`Your ${p.asset} payout has been sent`, `Your ${p.asset} payout has been sent.\n\nAmount: ${money(p.netAmount ?? p.amount)}\nNetwork: TRC-20\nTransaction: ${maskTxHash(p.transactionHash)}`]
+      ? [`Your ${p.asset} payout has been sent`, `Your ${p.asset} payout has been sent.\n\nAmount: ${money(p.netAmount ?? p.amount)}\nNetwork: ${cryptoSpecByNetwork(p.network)?.networkLabel ?? p.network ?? "—"}${p.transactionHash ? `\nTransaction: ${maskTxHash(p.transactionHash)}` : ""}`]
       : ["Payout completed", `Your payout of ${money(p.netAmount ?? p.amount)} to ${methodLabel(p.methodType)} (${p.methodLabel}) has been sent.`],
   failed: (p, r) => ["Payout failed", `Your payout of ${money(p.amount)} couldn't be sent: ${r} The amount is back in your available balance.`],
   rejected: (p, r) => ["Payout rejected", `Your payout request of ${money(p.amount)} was not approved.${r ? ` ${r}` : ""} The amount is back in your available balance.`],
@@ -532,6 +541,7 @@ export async function executePayout(payoutId: number, actor: Actor = SYSTEM): Pr
   const [p] = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, payoutId))
   if (!p || p.status !== "queued") return null
   if (p.provider === HOT_PROVIDER) return sendFromPayoutWallet(p, actor)
+  if (p.provider === EXCHANGE_PROVIDER) return sendViaExchange(p, actor)
   const provider = providerByName(p.provider)
   if (!provider.automated) return p
   // The pause is checked right before the money would move.
@@ -591,13 +601,13 @@ async function waitForWallet(p: Payout, reason: string): Promise<Payout> {
   if (p.failureReason === reason) return p
   const [row] = await db.update(affiliatePayouts).set({ failureReason: reason }).where(eq(affiliatePayouts.id, p.id)).returning()
   await logEvent(db, { affiliateId: p.affiliateId, payoutId: p.id, actor: SYSTEM, action: "payout.auto_waiting", reason })
-  await notifyOwners("A USDT payout is waiting on the payout wallet", `Payout PO-${p.id} (${money(p.netAmount ?? p.amount)} USDT) can't be sent yet:\n\n${reason}\n\nIt stays queued and is sent automatically once this is resolved.`)
+  await notifyOwners(`A ${p.asset ?? "crypto"} payout is waiting to be sent`, `Payout PO-${p.id} (${money(p.netAmount ?? p.amount)} in ${p.asset ?? "crypto"}) can't be sent yet:\n\n${reason}\n\nIt stays queued and is sent automatically once this is resolved.`)
   return row ?? p
 }
 
 async function needsPerson(p: Payout, from: PayoutStatus[], reason: string): Promise<Payout> {
   const row = await transition({ payoutId: p.id, to: "retry_required", from, actor: SYSTEM, reason, silent: true })
-  await notifyOwners("An automatic USDT payout needs attention", `Payout PO-${p.id} (${money(p.netAmount ?? p.amount)} USDT) was not sent:\n\n${reason}\n\nThe amount is still reserved. Retry it, pay it by hand, or cancel it.`)
+  await notifyOwners(`An automatic ${p.asset ?? "crypto"} payout needs attention`, `Payout PO-${p.id} (${money(p.netAmount ?? p.amount)} in ${p.asset ?? "crypto"}) was not sent:\n\n${reason}\n\nThe amount is still reserved. Retry it, or cancel it.`)
   return row
 }
 
@@ -654,7 +664,7 @@ async function sendFromPayoutWallet(p: Payout, actor: Actor): Promise<Payout | n
   // Rule 2: written down first…
   const now = new Date()
   await db.transaction(async (tx) => {
-    await tx.insert(affiliatePayoutTransactions).values({ payoutId: p.id, provider: HOT_PROVIDER, network: TRON_NETWORK, asset: USDT_ASSET, amount: String(target.amount), destination: maskAddress(target.address), transactionHash: signed.txId, signedTx: signed.signedHex, expiresAt: new Date(signed.expiration), status: "signed", submittedAt: now })
+    await tx.insert(affiliatePayoutTransactions).values({ payoutId: p.id, provider: HOT_PROVIDER, network: p.network, asset: p.asset, amount: String(target.amount), destination: maskAddress(target.address), transactionHash: signed.txId, signedTx: signed.signedHex, expiresAt: new Date(signed.expiration), status: "signed", submittedAt: now })
     await tx.update(affiliatePayouts).set({ transactionHash: signed.txId, failureReason: null }).where(eq(affiliatePayouts.id, p.id))
     await logEvent(tx, { affiliateId: p.affiliateId, payoutId: p.id, actor: SYSTEM, action: "payout.transaction_signed", next: { transactionHash: signed.txId, expiresAt: new Date(signed.expiration).toISOString() } })
   })
@@ -736,10 +746,11 @@ async function trackAutomatic(p: Payout, actor: Actor): Promise<Payout | null> {
   return needsPerson(p, ["processing", "submitted", "confirming"], reason)
 }
 
-// Sends what is waiting in the queue for the payout wallet: payouts that were
-// short of funds last time, and ones put back after a dead transaction.
+// Sends what is waiting in the queue for an automatic sender: payouts that
+// were short of funds last time, and ones put back after an attempt that
+// provably never happened.
 export async function sendQueuedAutomatic(limit = 20): Promise<{ tried: number; submitted: number }> {
-  const rows = await db.select({ id: affiliatePayouts.id }).from(affiliatePayouts).where(and(eq(affiliatePayouts.provider, HOT_PROVIDER), eq(affiliatePayouts.status, "queued"))).orderBy(affiliatePayouts.id).limit(limit)
+  const rows = await db.select({ id: affiliatePayouts.id }).from(affiliatePayouts).where(and(inArray(affiliatePayouts.provider, AUTO_SENDERS), eq(affiliatePayouts.status, "queued"))).orderBy(affiliatePayouts.id).limit(limit)
   let submitted = 0
   for (const r of rows) {
     try {
@@ -749,6 +760,213 @@ export async function sendQueuedAutomatic(limit = 20): Promise<{ tried: number; 
     }
   }
   return { tried: rows.length, submitted }
+}
+
+// --- Sending from the exchange account ------------------------------------------
+// The same four rules as the payout wallet, for a withdrawal the exchange
+// makes on our behalf:
+//
+//   1. Everything is checked BEFORE anything is requested (the account holds
+//      the funds, the network is open, the amount clears the minimum, the fee
+//      is within the limit, the affiliate is still fine).
+//   2. The attempt is WRITTEN DOWN, with the tag the withdrawal will carry and
+//      the moment after which the request can no longer be accepted, before
+//      the exchange is asked.
+//   3. An attempt whose answer was lost is never repeated until it is proven
+//      that it created nothing: its window has passed and the account's
+//      history, looked up after that, has no such withdrawal. If the history
+//      does have it, it is adopted — not sent again.
+//   4. "Completed" comes only from the exchange reporting the withdrawal as
+//      done — and for USDT on TRON, from the chain confirming the transfer too.
+
+type ExchangeQuote = { quota: Quota; price: number; units: number }
+
+async function exchangeQuote(spec: CryptoSpec, usd: number): Promise<ExchangeQuote> {
+  const [quota, price] = await Promise.all([withdrawalQuota(spec.asset, spec.exchangeChain), spec.usdPegged ? Promise.resolve(1) : assetPriceUsd(spec.asset)])
+  return { quota, price, units: assetAmount(usd, price, Math.min(quota.precision, spec.decimals)) }
+}
+
+async function sendViaExchange(p: Payout, actor: Actor): Promise<Payout | null> {
+  const settings = await getPayoutSettings()
+  // The pause is checked right before the money would move.
+  if (settings.paused) return p
+  const spec = cryptoSpec(p.methodType)
+  if (!spec) return needsPerson(p, ["queued"], "This payout isn't a crypto payout.")
+  // Switched off after this payout was auto-approved: it goes back to a person.
+  if (!settings.cryptoAutoSend && p.approvedBy === "auto") {
+    if (!exchangeOnly(p.methodType)) {
+      const [row] = await db.update(affiliatePayouts).set({ provider: "tron_manual", failureReason: null }).where(eq(affiliatePayouts.id, p.id)).returning()
+      await logEvent(db, { affiliateId: p.affiliateId, payoutId: p.id, actor: SYSTEM, action: "payout.auto_send_off", reason: "Automatic crypto sending was switched off; the payout waits to be sent by hand." })
+      return row
+    }
+    return transition({ payoutId: p.id, to: "on_hold", from: ["queued"], actor: SYSTEM, action: "payout.auto_send_off", reason: "Automatic crypto sending was switched off before this payout was sent. Release it to send it." })
+  }
+  // The affiliate may have been flagged since the request.
+  const [aff] = await db.select().from(affiliates).where(eq(affiliates.id, p.affiliateId))
+  if (!aff || aff.status !== "approved" || aff.fraudLock || aff.payoutHold) return transition({ payoutId: p.id, to: "on_hold", from: ["queued"], actor: SYSTEM, reason: "The affiliate's account was flagged before the payout was sent." })
+  // Rule 3.
+  if ((await liveTransactions(p.id)).length) return p
+  if (p.attempts >= MAX_AUTO_ATTEMPTS) {
+    const [last] = await db.select({ why: affiliatePayoutTransactions.failureReason }).from(affiliatePayoutTransactions).where(eq(affiliatePayoutTransactions.payoutId, p.id)).orderBy(desc(affiliatePayoutTransactions.id)).limit(1)
+    return needsPerson(p, ["queued"], `Automatic sending didn't go through after ${MAX_AUTO_ATTEMPTS} attempts.${last?.why ? ` Last answer from ${EXCHANGE_NAME}: ${last.why}` : ""}`)
+  }
+
+  let target: { address: string; amount: number }
+  try {
+    target = await cryptoTarget(p)
+    const bad = spec.addressProblem(target.address)
+    if (bad) throw new Error(bad)
+  } catch (e) {
+    return needsPerson(p, ["queued"], e instanceof Error ? e.message : "The wallet address couldn't be read.")
+  }
+
+  // Rule 1. An exchange that can't be reached leaves the payout queued, untouched.
+  let quote: ExchangeQuote
+  try {
+    quote = await exchangeQuote(spec, target.amount)
+  } catch (e) {
+    if (e instanceof ExchangeRefused) return waitForWallet(p, `${EXCHANGE_NAME} refused the request: ${e.message}`)
+    console.error("[affiliates] exchange check failed:", e instanceof Error ? e.message : e)
+    return p
+  }
+  const problem = exchangeSendProblem({ asset: spec.asset, network: spec.networkLabel, amount: quote.units, available: quote.quota.available, fee: quote.quota.fee, min: quote.quota.min, enabled: quote.quota.enabled, priceUsd: quote.price, maxFeeUsd: settings.cryptoMaxFeeUsd })
+  if (problem) return problem.kind === "funds" ? waitForWallet(p, problem.reason) : needsPerson(p, ["queued"], problem.reason)
+
+  // Claim it: two workers can't both get past this line for one payout.
+  const claimed = await transition({ payoutId: p.id, to: "processing", from: ["queued"], actor, silent: true }).catch(() => null)
+  if (!claimed) return null
+
+  // Rule 2: written down first…
+  const now = new Date()
+  const amount = quote.units.toFixed(Math.min(quote.quota.precision, spec.decimals)).replace(/\.?0+$/, "")
+  const attempt = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(affiliatePayoutTransactions)
+      .values({ payoutId: p.id, provider: EXCHANGE_PROVIDER, network: spec.network, asset: spec.asset, amount, destination: maskAddress(target.address), expiresAt: new Date(now.getTime() + EXCHANGE_REQUEST_WINDOW_MS), status: "signed", submittedAt: now })
+      .returning({ id: affiliatePayoutTransactions.id })
+    await tx.update(affiliatePayouts).set({ failureReason: null }).where(eq(affiliatePayouts.id, p.id))
+    await logEvent(tx, { affiliateId: p.affiliateId, payoutId: p.id, actor: SYSTEM, action: "payout.withdrawal_prepared", next: { tag: withdrawalRemark(p.id, row.id), amount: `${amount} ${spec.asset}`, network: spec.network, ...(spec.usdPegged ? {} : { priceUsd: quote.price }), fee: `${quote.quota.fee} ${spec.asset}` } })
+    return row
+  })
+  const setAttempt = (patch: Partial<typeof affiliatePayoutTransactions.$inferInsert>) => db.update(affiliatePayoutTransactions).set(patch).where(eq(affiliatePayoutTransactions.id, attempt.id))
+
+  // …then asked.
+  try {
+    const { withdrawalId } = await applyWithdrawal({ currency: spec.asset, chain: spec.exchangeChain, address: target.address, amount, remark: withdrawalRemark(p.id, attempt.id) })
+    await setAttempt({ providerTransactionId: withdrawalId, status: "submitted", failureReason: null })
+    return transition({ payoutId: p.id, to: "submitted", from: ["processing"], actor: SYSTEM, action: "payout.withdrawal_requested", reference: withdrawalId })
+  } catch (e) {
+    const why = e instanceof Error ? e.message : "The exchange couldn't be reached."
+    if (e instanceof ExchangeRefused) {
+      // A plain "no": nothing was created, so it can be tried again later.
+      await setAttempt({ status: "failed", failureReason: why.slice(0, 300) })
+      return transition({ payoutId: p.id, to: "queued", from: ["processing"], actor: SYSTEM, action: "payout.requeued", reason: `${EXCHANGE_NAME} refused the withdrawal: ${why}`, silent: true })
+    }
+    // No answer: the withdrawal may exist. The attempt stays open and
+    // trackExchange finds out which (rule 3).
+    await setAttempt({ failureReason: why.slice(0, 300) })
+    return claimed
+  }
+}
+
+// Follows a payout the exchange is sending: adopt a withdrawal whose answer was
+// lost, complete it when the exchange (and the chain, where it can be checked)
+// says it is done, or prove the attempt created nothing and send it again.
+async function trackExchange(p: Payout, actor: Actor): Promise<Payout | null> {
+  const spec = cryptoSpec(p.methodType)
+  const [attempt] = await db.select().from(affiliatePayoutTransactions).where(and(eq(affiliatePayoutTransactions.payoutId, p.id), eq(affiliatePayoutTransactions.provider, EXCHANGE_PROVIDER), inArray(affiliatePayoutTransactions.status, LIVE_TX))).orderBy(desc(affiliatePayoutTransactions.id)).limit(1)
+  if (!spec || !attempt) {
+    // Claimed, but the process ended before the attempt was written down —
+    // and nothing is ever requested without that. After ten quiet minutes it
+    // goes back to the queue.
+    const [lastEvent] = await db.select({ at: affiliatePayoutEvents.createdAt }).from(affiliatePayoutEvents).where(eq(affiliatePayoutEvents.payoutId, p.id)).orderBy(desc(affiliatePayoutEvents.id)).limit(1)
+    if (spec && p.status === "processing" && lastEvent && Date.now() - lastEvent.at.getTime() > 10 * 60_000) {
+      await transition({ payoutId: p.id, to: "queued", from: ["processing"], actor: SYSTEM, action: "payout.requeued", reason: "The send was interrupted before a withdrawal was requested.", silent: true })
+      return executePayout(p.id)
+    }
+    return p
+  }
+  const target = await cryptoTarget(p)
+  const units = Number(attempt.amount)
+  const setAttempt = (patch: Partial<typeof affiliatePayoutTransactions.$inferInsert>) => db.update(affiliatePayoutTransactions).set(patch).where(eq(affiliatePayoutTransactions.id, attempt.id))
+  await db.update(affiliatePayouts).set({ lastCheckedAt: new Date() }).where(eq(affiliatePayouts.id, p.id))
+
+  let found: Withdrawal | null
+  try {
+    found = await lookupWithdrawal({ id: attempt.providerTransactionId, currency: spec.asset, remark: withdrawalRemark(p.id, attempt.id), address: target.address, amount: units, since: (attempt.submittedAt ?? attempt.createdAt).getTime(), caseInsensitive: spec.caseInsensitive })
+  } catch (e) {
+    // Not being able to ask proves nothing: wait.
+    console.error("[affiliates] exchange lookup failed:", p.id, e instanceof Error ? e.message : e)
+    return p
+  }
+  const lookedUpAt = Date.now()
+
+  if (!found) {
+    // The exchange gave us an id for it: it exists, whatever this lookup says.
+    if (attempt.providerTransactionId || !attempt.expiresAt) return p
+    // Rule 3.
+    if (!exchangeRequestProvablyDead({ expiresAt: attempt.expiresAt.getTime(), lookedUpAt, found: false })) return p
+    await setAttempt({ status: "expired", failureReason: attempt.failureReason ?? "The request never reached the exchange." })
+    await transition({ payoutId: p.id, to: "queued", from: ["processing", "submitted"], actor: SYSTEM, action: "payout.requeued", reason: "The withdrawal request never reached the exchange. It is being sent again.", silent: true })
+    return executePayout(p.id)
+  }
+
+  // The answer was lost but the withdrawal was made: this is the one.
+  if (!attempt.providerTransactionId) {
+    await setAttempt({ providerTransactionId: found.id, status: "submitted", failureReason: null })
+    await logEvent(db, { affiliateId: p.affiliateId, payoutId: p.id, actor: SYSTEM, action: "payout.withdrawal_found", next: { reference: found.id } })
+  }
+  const hash = found.inner ? null : spec.hashFrom(found.txId)
+  const inFlight: PayoutStatus[] = ["processing", "submitted", "confirming"]
+
+  if (found.status === "FAILURE") {
+    const reason = `${EXCHANGE_NAME} reported the withdrawal as failed. Nothing was sent, and the funds are back in the exchange account.`
+    await setAttempt({ status: "failed", failureReason: reason })
+    return needsPerson(p, inFlight, reason)
+  }
+  if (found.status !== "SUCCESS") {
+    // Under review or being sent by the exchange.
+    if (p.status === "processing") return transition({ payoutId: p.id, to: "submitted", from: ["processing"], actor: SYSTEM, action: "payout.withdrawal_requested", reference: found.id })
+    return p
+  }
+
+  // The exchange says it is done. For USDT on TRON the chain is asked as well,
+  // exactly as for a transfer sent any other way.
+  if (hash && spec.verifiable) {
+    const verdict = await cryptoProvider().getTransaction(hash, { address: target.address, amount: units })
+    if (verdict.state === "failed" || verdict.state === "mismatch") {
+      await setAttempt({ status: "failed", failureReason: verdict.reason, transactionHash: hash })
+      return needsPerson(p, inFlight, `${EXCHANGE_NAME} reported the withdrawal as sent, but the transaction doesn't check out on-chain: ${verdict.reason}`)
+    }
+    if (verdict.state === "not_found" && Date.now() - (attempt.submittedAt ?? attempt.createdAt).getTime() > NOT_FOUND_AFTER_MS) {
+      const reason = `${EXCHANGE_NAME} reported the withdrawal as sent, but the transaction wasn't found on the TRON network after 24 hours. Check it in the exchange account.`
+      await setAttempt({ status: "not_found", failureReason: reason, transactionHash: hash })
+      return needsPerson(p, inFlight, reason)
+    }
+    if (verdict.state !== "confirmed") {
+      await setAttempt({ status: "confirming", transactionHash: hash })
+      return p.status === "confirming" ? p : transition({ payoutId: p.id, to: "confirming", from: ["processing", "submitted"], actor: SYSTEM, hash, reference: found.id })
+    }
+  }
+  await setAttempt({ status: "confirmed", failureReason: null, confirmedAt: new Date(), ...(hash ? { transactionHash: hash } : {}) })
+  const paid = await transition({ payoutId: p.id, to: "paid", from: inFlight, actor, action: "payout.confirmed", reference: found.id, ...(hash ? { hash } : {}), silent: true }).catch(async (e) => {
+    // Another worker completed it a moment ago (and told the affiliate): nothing left to do.
+    const [now] = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, p.id))
+    if (now?.status === "paid") return null
+    throw e
+  })
+  if (!paid) return (await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, p.id)))[0] ?? null
+  // Said here rather than by transition(): this notice carries the exact amount of the asset that was sent.
+  await notifyAffiliate({
+    affiliateId: p.affiliateId,
+    type: "payout",
+    title: `Your ${spec.assetName} payout has been sent`,
+    body: `Your ${spec.assetName} payout has been sent.\n\nAmount: ${formatAsset(units, spec.asset, spec.decimals)}${spec.usdPegged ? "" : ` (${money(p.netAmount ?? p.amount)})`}\nNetwork: ${spec.networkLabel}${hash ? `\nTransaction: ${maskTxHash(hash)}` : ""}`,
+    href: "/affiliate/payouts",
+    pref: "payout",
+    email: true,
+  })
+  return paid
 }
 
 // --- Crypto: transaction tracking ----------------------------------------------
@@ -765,7 +983,7 @@ async function recordTx(p: Payout, hash: string, address: string, amount: number
   const now = new Date()
   await db
     .insert(affiliatePayoutTransactions)
-    .values({ payoutId: p.id, provider: p.provider, network: TRON_NETWORK, asset: USDT_ASSET, amount: String(amount), destination: maskAddress(address), transactionHash: hash, status, failureReason, submittedAt: now, confirmedAt: status === "confirmed" ? now : null })
+    .values({ payoutId: p.id, provider: p.provider, network: p.network, asset: p.asset, amount: String(amount), destination: maskAddress(address), transactionHash: hash, status, failureReason, submittedAt: now, confirmedAt: status === "confirmed" ? now : null })
     .onConflictDoUpdate({ target: affiliatePayoutTransactions.transactionHash, set: { status, failureReason, confirmedAt: status === "confirmed" ? now : null } })
 }
 
@@ -782,7 +1000,9 @@ export async function submitCryptoTransaction(payoutId: number, rawHash: string,
   const [p] = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, payoutId))
   if (!p) throw new Error("That payout no longer exists.")
   if (!["queued", "processing", "retry_required", "submitted"].includes(p.status)) throw new Error(`A payout that is ${p.status.replace("_", " ")} can't take a transaction.`)
-  if (p.provider === HOT_PROVIDER) {
+  // Only a USDT (TRC-20) transfer can be checked on-chain here.
+  if (!cryptoSpec(p.methodType)?.verifiable) throw new Error(`A ${methodLabel(p.methodType)} payout is sent by the exchange account; it can't be paid by hand here.`)
+  if (isAutoSender(p.provider)) {
     // Paying by hand a payout the wallet may already be paying would pay it twice.
     if (!["queued", "retry_required"].includes(p.status) || (await liveTransactions(p.id)).length) throw new Error("This payout is being sent automatically. Wait for the network to confirm it, or for it to come back for a retry.")
     await db.update(affiliatePayouts).set({ provider: "tron_manual" }).where(eq(affiliatePayouts.id, p.id))
@@ -816,6 +1036,7 @@ async function replaceHash(p: Payout, hash: string, actor: Actor): Promise<Payou
 export async function trackPayout(payoutId: number, actor: Actor = SYSTEM): Promise<Payout | null> {
   const [p] = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, payoutId))
   if (p && p.provider === HOT_PROVIDER && ["processing", "submitted", "confirming"].includes(p.status)) return trackAutomatic(p, actor)
+  if (p && p.provider === EXCHANGE_PROVIDER && ["processing", "submitted", "confirming"].includes(p.status)) return trackExchange(p, actor)
   if (!p || !p.transactionHash || !["submitted", "confirming"].includes(p.status) || !isCryptoMethod(p.methodType)) return p ?? null
   const target = await cryptoTarget(p)
   const verdict = await cryptoProvider().getTransaction(p.transactionHash, target)
@@ -854,7 +1075,7 @@ export async function trackPayouts(opts: { affiliateId?: number; olderThanSecond
   const rows = await db
     .select({ id: affiliatePayouts.id })
     .from(affiliatePayouts)
-    .where(and(sql`((${affiliatePayouts.status} in ('submitted','confirming') and ${affiliatePayouts.transactionHash} is not null) or (${affiliatePayouts.provider} = ${HOT_PROVIDER} and ${affiliatePayouts.status} = 'processing'))`, opts.affiliateId != null ? eq(affiliatePayouts.affiliateId, opts.affiliateId) : undefined, sql`(${affiliatePayouts.lastCheckedAt} is null or ${affiliatePayouts.lastCheckedAt} < ${stale})`))
+    .where(and(sql`((${affiliatePayouts.status} in ('submitted','confirming') and ${affiliatePayouts.transactionHash} is not null) or (${affiliatePayouts.provider} = ${HOT_PROVIDER} and ${affiliatePayouts.status} = 'processing') or (${affiliatePayouts.provider} = ${EXCHANGE_PROVIDER} and ${affiliatePayouts.status} in ('processing','submitted','confirming')))`, opts.affiliateId != null ? eq(affiliatePayouts.affiliateId, opts.affiliateId) : undefined, sql`(${affiliatePayouts.lastCheckedAt} is null or ${affiliatePayouts.lastCheckedAt} < ${stale})`))
     .orderBy(sql`${affiliatePayouts.lastCheckedAt} asc nulls first`, affiliatePayouts.id)
     .limit(opts.limit ?? 50)
   let completed = 0
@@ -895,6 +1116,8 @@ export async function adminPayoutAction(payoutId: number, action: AdminAction, a
     case "hold":
       return transition({ payoutId, to: "on_hold", from: ["pending", "queued", "retry_required"], actor, reason })
     case "release": {
+      // A person is now the one approving it, whatever approved it before.
+      if (p.approvedBy === "auto") await db.update(affiliatePayouts).set({ approvedBy: actor.id }).where(eq(affiliatePayouts.id, p.id))
       const next = await transition({ payoutId, to: p.heldFrom === "pending" || !p.approvedAt ? "pending" : "queued", from: ["on_hold"], actor, action: "payout.released" })
       return next.status === "queued" ? ((await executePayout(payoutId, actor)) ?? next) : next
     }
@@ -909,12 +1132,13 @@ export async function adminPayoutAction(payoutId: number, action: AdminAction, a
       if (providerFor(p.methodType).automated) throw new Error("This payout is confirmed by the provider, not by hand.")
       return transition({ payoutId, to: "paid", from: ["queued", "processing", "retry_required"], actor, reference: input.reference, action: "payout.marked_paid" })
     case "send_auto": {
-      // An admin hands a USDT payout to the payout wallet instead of sending it by hand.
-      if (!isCryptoMethod(p.methodType)) throw new Error("Only a USDT payout can be sent from the payout wallet.")
+      // An admin hands a crypto payout to the automatic sender instead of sending it by hand.
+      if (!isCryptoMethod(p.methodType)) throw new Error("Only a crypto payout can be sent automatically.")
       if (!["queued", "retry_required"].includes(p.status)) throw new Error("Approve the payout first.")
-      if (!hotWalletReady()) throw new Error("The payout wallet isn't configured.")
+      const sender = autoSenderFor(p.methodType)
+      if (!sender) throw new Error("Nothing is configured to send this payout automatically.")
       if (p.transactionHash || (await liveTransactions(p.id)).length) throw new Error("This payout already has a transaction.")
-      await db.update(affiliatePayouts).set({ provider: HOT_PROVIDER, attempts: 0, approvedBy: p.approvedBy === "auto" || !p.approvedBy ? actor.id : p.approvedBy }).where(eq(affiliatePayouts.id, p.id))
+      await db.update(affiliatePayouts).set({ provider: sender, attempts: 0, approvedBy: p.approvedBy === "auto" || !p.approvedBy ? actor.id : p.approvedBy }).where(eq(affiliatePayouts.id, p.id))
       const next = p.status === "retry_required" ? await transition({ payoutId, to: "queued", from: ["retry_required"], actor, action: "payout.send_auto", silent: true }) : p
       if (p.status === "queued") await logEvent(db, { affiliateId: p.affiliateId, payoutId: p.id, actor, action: "payout.send_auto" })
       return (await executePayout(payoutId, actor)) ?? next
@@ -922,12 +1146,12 @@ export async function adminPayoutAction(payoutId: number, action: AdminAction, a
     case "fail":
       if (!reason) throw new Error("Say why the payout failed — the affiliate will see it.")
       // A signed transaction of ours may still land: releasing the money now could pay it twice.
-      if (p.provider === HOT_PROVIDER && ["processing", "submitted", "confirming"].includes(p.status)) throw new Error("A transaction for this payout may still confirm. Wait for the network — it comes back for a retry if it didn't go through.")
+      if (isAutoSender(p.provider) && ["processing", "submitted", "confirming"].includes(p.status)) throw new Error("A transaction for this payout may still confirm. Wait for the network — it comes back for a retry if it didn't go through.")
       return transition({ payoutId, to: "failed", from: ["queued", "processing", "submitted", "confirming", "retry_required"], actor, reason })
     case "retry": {
       if (p.status !== "retry_required" && p.status !== "queued") throw new Error(`A payout that is ${p.status.replace("_", " ")} can't be retried.`)
       // An admin's retry starts the automatic attempts afresh.
-      if (p.provider === HOT_PROVIDER) await db.update(affiliatePayouts).set({ attempts: 0 }).where(eq(affiliatePayouts.id, p.id))
+      if (isAutoSender(p.provider)) await db.update(affiliatePayouts).set({ attempts: 0 }).where(eq(affiliatePayouts.id, p.id))
       const next = p.status === "retry_required" ? await transition({ payoutId, to: "queued", from: ["retry_required"], actor, action: "payout.retried" }) : p
       return (await executePayout(payoutId, actor)) ?? next
     }

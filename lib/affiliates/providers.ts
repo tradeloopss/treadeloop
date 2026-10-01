@@ -1,3 +1,5 @@
+import { cryptoSpec, isCryptoMethod } from "./crypto"
+import { EXCHANGE_PROVIDER, exchangeReady } from "./kucoin"
 import { StripeError, createTransfer, retrieveTransfer, stripeConfigured, stripeFailurePermanent } from "./stripe-connect"
 import { TRON_NETWORK, USDT_ASSET, tronAddressProblem } from "./tron"
 import { verifyUsdtPayment, type ChainVerdict } from "./tron-chain"
@@ -17,10 +19,12 @@ import type { PayoutMethodType } from "./types"
 //                tron-wallet.ts). The send itself is orchestrated by
 //                payouts.sendFromPayoutWallet, which records the signed
 //                transaction before it is broadcast.
+//   kucoin       Crypto (USDT on TRON or Aptos, Litecoin) withdrawn from the
+//                company's exchange account through its API — no wallet key on
+//                this server (see kucoin.ts). Orchestrated by
+//                payouts.sendViaExchange, which records each attempt before
+//                the exchange is asked.
 //   stripe       Stripe Connect — sent by API, when configured.
-//
-// An external crypto custodian (Fireblocks, a payments API…) would plug in as
-// another CryptoPayoutProvider.
 
 export type ProviderPayout = { id: number; amount: number; currency: string; methodType: string; details: Record<string, string>; idempotencyKey: string }
 
@@ -133,22 +137,57 @@ const tronHot: CryptoPayoutProvider = {
   },
 }
 
-export const isCryptoMethod = (type: string) => type === "crypto_trc20"
+// The money is moved by payouts.sendViaExchange (attempt recorded first, then
+// the request); this entry only says what kind of provider it is.
+const exchange: PayoutProvider = {
+  name: EXCHANGE_PROVIDER,
+  automated: true,
+  async createPayout() {
+    return { state: "retry", reason: "Exchange payouts are sent by the payout worker." }
+  },
+  async getPayoutStatus() {
+    return null
+  },
+  async cancelPayout() {
+    return false
+  },
+}
+
+export { EXCHANGE_PROVIDER, exchangeReady, isCryptoMethod }
+
+// The providers that send crypto with nobody in the loop.
+export const AUTO_SENDERS = [HOT_PROVIDER, EXCHANGE_PROVIDER]
+export const isAutoSender = (provider: string | null | undefined) => !!provider && AUTO_SENDERS.includes(provider)
 
 // A payout remembers which provider it was created for.
 export function providerByName(name: string): PayoutProvider {
-  return name === HOT_PROVIDER ? tronHot : name === "tron_manual" ? tronManual : name === "stripe" ? stripe : manual
+  return name === EXCHANGE_PROVIDER ? exchange : name === HOT_PROVIDER ? tronHot : name === "tron_manual" ? tronManual : name === "stripe" ? stripe : manual
 }
 
 export const hotWalletReady = payoutWalletReady
 
+// A crypto method with no by-hand route: only the exchange can send it (a
+// transaction a person sent couldn't be verified here).
+export const exchangeOnly = (methodType: string) => cryptoSpec(methodType)?.verifiable === false
+
+// What can send this crypto payout automatically on this deployment, if
+// anything: the exchange account when one is connected, otherwise the payout
+// wallet (USDT on TRON only).
+export function autoSenderFor(methodType: string): string | null {
+  if (!isCryptoMethod(methodType)) return null
+  if (exchangeReady()) return EXCHANGE_PROVIDER
+  return methodType === "crypto_trc20" && hotWalletReady() ? HOT_PROVIDER : null
+}
+
 export function providerFor(methodType: PayoutMethodType | string): PayoutProvider {
+  if (exchangeOnly(methodType)) return exchange
   if (methodType === "crypto_trc20") return tronManual
   if (methodType === "stripe") return stripe
   return manual
 }
 
+// On-chain verification of a transaction a person sent (USDT on TRON).
 export const cryptoProvider = (): CryptoPayoutProvider => tronManual
 
 // Which methods can be offered at all on this deployment.
-export const methodAvailable = (type: PayoutMethodType | string) => (type === "stripe" ? stripeConfigured() : true)
+export const methodAvailable = (type: PayoutMethodType | string) => (type === "stripe" ? stripeConfigured() : exchangeOnly(type) ? exchangeReady() : true)

@@ -8,7 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { cancelPayoutRequest, connectStripe, deletePayoutMethod, makeDefaultPayoutMethod, renamePayoutMethod, saveAutoPayout, submitPayoutRequest, togglePayoutMethod } from "@/app/actions/affiliate"
 import { DEFAULT_PAYOUT_SETTINGS, PAYOUT_STATUS_LABELS, affiliateCanCancel, quoteFee, type FeeRule, type PayoutStatus } from "@/lib/affiliates/payout-engine"
-import { explorerTxUrl, maskTxHash } from "@/lib/affiliates/tron"
+import { cryptoSpec, cryptoSpecByNetwork, explorerTxUrl, formatAsset } from "@/lib/affiliates/crypto"
+import { maskTxHash } from "@/lib/affiliates/tron"
 import { methodLabel, money, type PayoutMethodType } from "@/lib/affiliates/types"
 import { ConfirmButton } from "./confirm"
 import { MethodMark, PayoutMethodDialog } from "./payout-method-dialog"
@@ -255,8 +256,10 @@ export function AutoPayoutPanel({ auto }: { auto: AutoPayoutView }) {
 
 // --- Request a payout -------------------------------------------------------
 
-// instantUpTo: the most a USDT payout can be for it to be sent automatically (null when that isn't on).
-export function RequestPayout({ available, min, max, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null }: { available: number; min: number; max: number | null; methods: MethodView[]; blocked: string | null; eta: string; feePolicy: "platform" | "affiliate"; fees: Record<string, FeeRule>; approval: "manual" | "automatic"; instantUpTo?: number | null }) {
+// instantUpTo: the most a crypto payout can be for it to be sent automatically (null when that isn't on).
+// instantTypes: the crypto methods something is set up to send automatically.
+// prices: the market price in USD of assets that aren't dollar-pegged, when known — for an estimate only.
+export function RequestPayout({ available, min, max, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null, instantTypes = ["crypto_trc20"], prices = {} }: { available: number; min: number; max: number | null; methods: MethodView[]; blocked: string | null; eta: string; feePolicy: "platform" | "affiliate"; fees: Record<string, FeeRule>; approval: "manual" | "automatic"; instantUpTo?: number | null; instantTypes?: string[]; prices?: Record<string, number> }) {
   const ready = methods.filter(usable)
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState("")
@@ -272,8 +275,11 @@ export function RequestPayout({ available, min, max, methods, blocked, eta, feeP
   const method = ready.find((m) => String(m.id) === methodId)
   // The same quote the server computes and stores — shown before anything is sent.
   const quote = method && amount && !problem ? quoteFee(value, method.type, { ...DEFAULT_PAYOUT_SETTINGS, feePolicy, fees: fees as typeof DEFAULT_PAYOUT_SETTINGS.fees }) : null
-  // A USDT payout inside the limit is normally sent without waiting for review.
-  const instant = instantUpTo != null && method?.type === "crypto_trc20" && !(quote && quote.net > instantUpTo)
+  const coin = cryptoSpec(method?.type)
+  // A crypto payout inside the limit is normally sent without waiting for review.
+  const automatic = instantUpTo != null && !!coin && instantTypes.includes(coin.type)
+  const instant = automatic && !(quote && quote.net > instantUpTo)
+  const price = coin && !coin.usdPegged ? prices[coin.asset] : undefined
 
   return (
     <>
@@ -342,16 +348,21 @@ export function RequestPayout({ available, min, max, methods, blocked, eta, feeP
                   <dd className="tabular-nums">{quote.fee > 0 ? `− ${money(quote.fee)}` : "None"}</dd>
                 </div>
                 <div className="flex justify-between px-3 py-2 font-medium">
-                  <dt>You receive{method?.type === "crypto_trc20" ? " (USDT, TRC-20)" : ""}</dt>
+                  <dt>You receive{coin ? (coin.usdPegged ? ` (${coin.asset}, ${coin.standard})` : ` (in ${coin.asset})`) : ""}</dt>
                   <dd className="tabular-nums">{money(quote.net)}</dd>
                 </div>
+                {coin && !coin.usdPegged && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">
+                    {price ? `About ${formatAsset(quote.net / price, coin.asset, 6)} at the current price. ` : ""}The exact amount of {coin.asset} is set by the market price at the moment the payout is sent.
+                  </div>
+                )}
               </dl>
             )}
-            {instantUpTo != null && method?.type === "crypto_trc20" && (
+            {automatic && coin && instantUpTo != null && (
               <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
                 {!instant
-                  ? `USDT payouts above ${money(instantUpTo)} are reviewed by our team before they're sent.`
-                  : `USDT payouts up to ${money(instantUpTo)} are normally sent to your wallet automatically, within minutes. Check the address — a transfer on the TRON network can't be reversed.`}
+                  ? `${coin.assetName} payouts above ${money(instantUpTo)} are reviewed by our team before they're sent.`
+                  : `${coin.assetName} payouts up to ${money(instantUpTo)} are normally sent to your wallet automatically, within minutes. Check the address — a transfer on the ${coin.networkLabel} network can't be reversed.`}
               </p>
             )}
             <DialogFooter>
@@ -430,7 +441,7 @@ export function PayoutHistory({ payouts }: { payouts: PayoutView[] }) {
                     − {money(p.fee)} fee = {money(p.net)}
                   </span>
                 )}
-                {p.asset && <span className="block text-xs font-normal text-muted-foreground">{p.asset} · TRC-20</span>}
+                {p.asset && <span className="block text-xs font-normal text-muted-foreground">{cryptoSpecByNetwork(p.network)?.summary ?? p.asset}</span>}
               </td>
               <td className={`${tdClass} text-end`}>
                 {affiliateCanCancel(p.status) && (

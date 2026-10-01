@@ -6,7 +6,9 @@ import { countryOptions } from "@/lib/affiliates/countries"
 import { FREQUENCY_LABELS, nextPeriodStart, payoutInFlight, type AutoSkip } from "@/lib/affiliates/payout-engine"
 import { autoPayoutPreview, syncStripeMethods, trackPayouts } from "@/lib/affiliates/payouts"
 import { getProgram } from "@/lib/affiliates/program"
-import { methodAvailable, hotWalletReady } from "@/lib/affiliates/providers"
+import { CRYPTO_METHOD_TYPES, cryptoSpec } from "@/lib/affiliates/crypto"
+import { assetPriceUsd } from "@/lib/affiliates/kucoin"
+import { autoSenderFor, methodAvailable } from "@/lib/affiliates/providers"
 import { payoutMethodsFor, payoutsFor } from "@/lib/affiliates/queries"
 import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
@@ -69,6 +71,14 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
   const config: MethodDialogConfig = { methods: offered, countries: countryOptions(), defaultCountry: affiliate.country ?? "", holdHours: settings.methodHoldHours, hasMethod: methods.length > 0 }
   const methodViews = methods.map((m) => ({ id: m.id, type: m.type, label: m.label, nickname: m.nickname, status: m.status, isDefault: m.isDefault, holdUntil: m.holdUntil ? m.holdUntil.toISOString() : null, metadata: m.metadata }))
   const autoOn = affiliate.autoPayout && affiliate.autoPayoutAllowed
+  // Which crypto methods something is set up to send without review, and — for
+  // an asset that isn't dollar-pegged — its price, for an estimate in the dialog.
+  const instantTypes = settings.cryptoAutoSend && !settings.paused ? CRYPTO_METHOD_TYPES.filter((t) => autoSenderFor(t)) : []
+  const prices: Record<string, number> = {}
+  for (const asset of new Set(methods.map((m) => cryptoSpec(m.type)).filter((c) => c && !c.usdPegged).map((c) => c!.asset))) {
+    const price = await Promise.race([assetPriceUsd(asset).catch(() => null), new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))])
+    if (price) prices[asset] = price
+  }
 
   return (
     <div>
@@ -98,7 +108,7 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Available to withdraw</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{money(balances.available)}</p>
             <div className="mt-4">
-              <RequestPayout available={balances.available} min={limits.min} max={limits.max} methods={methodViews} blocked={blocked} eta={program.payoutEta} feePolicy={settings.feePolicy} fees={settings.fees} approval={settings.approval} instantUpTo={settings.cryptoAutoSend && !settings.paused && hotWalletReady() ? settings.cryptoAutoMax : null} />
+              <RequestPayout available={balances.available} min={limits.min} max={limits.max} methods={methodViews} blocked={blocked} eta={program.payoutEta} feePolicy={settings.feePolicy} fees={settings.fees} approval={settings.approval} instantUpTo={instantTypes.length ? settings.cryptoAutoMax : null} instantTypes={instantTypes} prices={prices} />
             </div>
           </section>
           <KpiGrid className="lg:col-span-2">

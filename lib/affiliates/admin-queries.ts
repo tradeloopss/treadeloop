@@ -22,7 +22,9 @@ import { PAYOUT_GROUPS, PAYOUT_IN_FLIGHT, type PayoutGroup } from "./payout-engi
 import { EARNED, PAGE_SIZE, ledgerWhere, performance, type LedgerFilters } from "./queries"
 import { rangeStart, type Range } from "./types"
 import { EXPORT_LIMIT } from "./csv"
-import { HOT_PROVIDER } from "./providers"
+import { CRYPTO } from "./crypto"
+import { assetPriceUsd, exchangeConfig, withdrawalQuota, type Quota } from "./kucoin"
+import { AUTO_SENDERS, EXCHANGE_PROVIDER, HOT_PROVIDER } from "./providers"
 import { payoutWallet, walletBalances, type WalletBalances } from "./tron-wallet"
 
 // What the admin side reads. Callers are admin pages/actions that have already
@@ -438,7 +440,8 @@ export async function payoutWalletStatus() {
     db
       .select({ v: sql<string>`coalesce(sum(coalesce(${affiliatePayouts.netAmount}, ${affiliatePayouts.amount})), 0)`, n: sql<number>`count(*)::int` })
       .from(affiliatePayouts)
-      .where(and(eq(affiliatePayouts.provider, HOT_PROVIDER), gte(affiliatePayouts.requestedAt, dayStart), sql`${affiliatePayouts.status} not in ('failed','cancelled','rejected','reversed')`)),
+      // what the rules approved today, through any automatic sender: this is what the daily limit measures
+      .where(and(inArray(affiliatePayouts.provider, AUTO_SENDERS), eq(affiliatePayouts.approvedBy, "auto"), gte(affiliatePayouts.requestedAt, dayStart), sql`${affiliatePayouts.status} not in ('failed','cancelled','rejected','reversed')`)),
     db
       .select({ v: sql<string>`coalesce(sum(coalesce(${affiliatePayouts.netAmount}, ${affiliatePayouts.amount})), 0)`, n: sql<number>`count(*)::int` })
       .from(affiliatePayouts)
@@ -452,6 +455,38 @@ export async function payoutWalletStatus() {
     balances,
     sentToday: Number(sent?.v ?? 0),
     sentTodayCount: sent?.n ?? 0,
+    waiting: Number(waiting?.v ?? 0),
+    waitingCount: waiting?.n ?? 0,
+  }
+}
+
+// The exchange account as the settings page shows it: whether it is connected,
+// and for each network what can be withdrawn, what a withdrawal costs and
+// whether withdrawals are open. Best-effort and time-boxed, like the wallet's.
+type Boxed<T> = { value: T | null; error: string | null }
+const boxed = <T>(work: Promise<T>): Promise<Boxed<T>> =>
+  Promise.race([
+    work.then((value): Boxed<T> => ({ value, error: null })).catch((e): Boxed<T> => ({ value: null, error: e instanceof Error ? e.message : "KuCoin couldn't be reached." })),
+    new Promise<Boxed<T>>((resolve) => setTimeout(() => resolve({ value: null, error: "KuCoin didn't answer in time." }), 7000)),
+  ])
+
+export async function exchangeStatus() {
+  const config = exchangeConfig()
+  const specs = Object.values(CRYPTO)
+  const none = <T>(): Promise<Boxed<T>> => Promise.resolve({ value: null, error: null })
+  const [quotas, prices, [waiting]] = await Promise.all([
+    Promise.all(specs.map((s) => (config.ready ? boxed<Quota>(withdrawalQuota(s.asset, s.exchangeChain)) : none<Quota>()))),
+    Promise.all(specs.map((s) => (s.usdPegged ? Promise.resolve<Boxed<number>>({ value: 1, error: null }) : config.ready ? boxed<number>(assetPriceUsd(s.asset)) : none<number>()))),
+    db
+      .select({ v: sql<string>`coalesce(sum(coalesce(${affiliatePayouts.netAmount}, ${affiliatePayouts.amount})), 0)`, n: sql<number>`count(*)::int` })
+      .from(affiliatePayouts)
+      .where(and(eq(affiliatePayouts.provider, EXCHANGE_PROVIDER), inArray(affiliatePayouts.status, ["queued", "retry_required"]))),
+  ])
+  return {
+    ready: config.ready,
+    problem: config.ready ? (quotas.find((q) => q.error)?.error ?? null) : config.problem,
+    relay: process.env.KUCOIN_RELAY?.trim() || null,
+    networks: specs.map((spec, i) => ({ type: spec.type, asset: spec.asset, network: spec.networkLabel, quota: quotas[i].value, priceUsd: prices[i].value })),
     waiting: Number(waiting?.v ?? 0),
     waitingCount: waiting?.n ?? 0,
   }

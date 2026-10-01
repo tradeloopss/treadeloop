@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Input } from "@/components/ui/input"
 import { connectStripe, savePayoutMethod } from "@/app/actions/affiliate"
 import { bankScheme, validateMethod } from "@/lib/affiliates/method-validation"
-import { INVALID_TRC20_MESSAGE, maskAddress, normalizeTronAddress, tronAddressProblem } from "@/lib/affiliates/tron"
+import { cryptoSpec } from "@/lib/affiliates/crypto"
+import { maskAddress } from "@/lib/affiliates/tron"
 import { PAYOUT_CURRENCIES, PAYOUT_METHOD_BLURBS, PAYOUT_METHOD_LABELS, type PayoutMethodType } from "@/lib/affiliates/types"
 import { selectClass } from "./ui"
 import { useAction } from "./use-action"
@@ -23,6 +24,8 @@ const MARKS: Record<PayoutMethodType, { className: string; node: React.ReactNode
   bank: { className: "bg-muted text-foreground", node: <Landmark className="size-4" aria-hidden /> },
   stripe: { className: "bg-[#635bff] text-white", node: <span className="text-[15px] font-bold leading-none">S</span> },
   crypto_trc20: { className: "bg-[#26a17b] text-white", node: <span className="text-[15px] font-bold leading-none">₮</span> },
+  crypto_aptos: { className: "bg-[#0d1b1a] text-[#3ddbb4]", node: <span className="text-[15px] font-bold leading-none">₮</span> },
+  crypto_ltc: { className: "bg-[#345d9d] text-white", node: <span className="text-[15px] font-bold leading-none">Ł</span> },
 }
 
 export function MethodMark({ type, className }: { type: string; className?: string }) {
@@ -154,8 +157,10 @@ export function PayoutMethodDialog({
     onOpenChange(next)
   }
 
-  const address = normalizeTronAddress(form.address)
-  const addressProblem = address ? tronAddressProblem(address) : null
+  // A crypto method is a fixed asset on a fixed network; its own rules check the address.
+  const coin = cryptoSpec(type)
+  const address = coin ? coin.normalize(form.address) : ""
+  const addressProblem = coin && address ? coin.addressProblem(address) : null
   const scheme = bankScheme(form.country ?? "")
 
   // What gets sent. The server validates it again from scratch.
@@ -163,18 +168,18 @@ export function PayoutMethodDialog({
     if (type === "paypal") return { email: form.email, accountType: form.accountType, country: form.country, currency: form.currency }
     if (type === "wise") return { email: form.email, holder: form.holder, country: form.country, currency: form.currency }
     if (type === "bank") return { holder: form.holder, country: form.country, currency: form.currency, bankName: form.bankName, routing: form.routing, account: form.account, accountType: form.bankAccountType, iban: form.iban, swift: form.swift }
-    return { nickname: form.nickname, address, network: "TRON", asset: "USDT", confirmNetwork, confirmTail: tail }
+    return { nickname: form.nickname, address, network: coin?.network, asset: coin?.asset, confirmNetwork, confirmTail: tail }
   }
 
   function submit() {
     // Same rules as the server, for an answer without a round trip. For crypto
     // the re-typed tail is only asked for on the confirmation step.
-    const check = validateMethod(type, type === "crypto_trc20" && !confirming ? { ...payload(), confirmTail: address.slice(-6) } : payload())
+    const check = validateMethod(type, coin && !confirming ? { ...payload(), confirmTail: address.slice(-6) } : payload())
     if (!check.ok) {
       setErrors({ [check.field ?? "form"]: check.error })
       return
     }
-    if (type === "crypto_trc20" && !confirming) {
+    if (coin && !confirming) {
       setConfirming(true)
       return
     }
@@ -192,7 +197,7 @@ export function PayoutMethodDialog({
   }
 
   const label = PAYOUT_METHOD_LABELS[type]
-  const canSubmit = type === "crypto_trc20" ? (confirming ? tail.length === 6 : !!address && !addressProblem && confirmNetwork) : type !== "stripe"
+  const canSubmit = coin ? (confirming ? tail.length === 6 : !!address && !addressProblem && confirmNetwork) : type !== "stripe"
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -220,13 +225,15 @@ export function PayoutMethodDialog({
               <div className="mx-auto flex max-w-md flex-col gap-4">
                 <p className="text-sm text-muted-foreground">You are adding:</p>
                 <div className="flex items-center gap-3 rounded-xl border px-4 py-3.5">
-                  <MethodMark type="crypto_trc20" />
+                  <MethodMark type={type} />
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold">USDT · TRC-20 / TRON</p>
+                    <p className="text-sm font-semibold">{coin?.summary}</p>
                     <p className="font-mono text-sm text-muted-foreground">Wallet: {maskAddress(address)}</p>
                   </div>
                 </div>
-                <p className="text-sm">Make sure this address is correct. USDT sent to a wrong address, or to a wallet that doesn&apos;t support TRC-20, is lost for good.</p>
+                <p className="text-sm">
+                  Make sure this address is correct. {coin?.assetName} sent to a wrong address, or to a wallet that doesn&apos;t support {coin?.standard}, is lost for good.
+                </p>
                 <Field label="Type the last 6 characters of the wallet address" required error={errors.confirmTail} hint="Check them against your wallet app, not this screen.">
                   <Input value={tail} onChange={(e) => (setTail(e.target.value.trim().slice(0, 6)), setErrors({}))} maxLength={6} autoComplete="off" autoCapitalize="off" spellCheck={false} className="font-mono tracking-widest" autoFocus aria-invalid={!!errors.confirmTail} />
                 </Field>
@@ -251,9 +258,9 @@ export function PayoutMethodDialog({
                       <span className={cn("hidden size-4 shrink-0 items-center justify-center rounded-full border sm:flex", selected ? "border-primary" : "border-muted-foreground/40")}>{selected && <span className="size-2 rounded-full bg-primary" />}</span>
                       <MethodMark type={m} className="size-8" />
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{m === "crypto_trc20" ? "Crypto — USDT" : PAYOUT_METHOD_LABELS[m]}</span>
+                        <span className="block truncate text-sm font-medium">{cryptoSpec(m)?.title ?? PAYOUT_METHOD_LABELS[m]}</span>
                         <span className="block truncate text-xs text-muted-foreground">{PAYOUT_METHOD_BLURBS[m].tagline}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{m === "crypto_trc20" ? PAYOUT_METHOD_BLURBS[m].timing : `(${PAYOUT_METHOD_BLURBS[m].timing})`}</span>
+                        <span className="block truncate text-xs text-muted-foreground">{cryptoSpec(m) ? PAYOUT_METHOD_BLURBS[m].timing : `(${PAYOUT_METHOD_BLURBS[m].timing})`}</span>
                       </span>
                     </button>
                   )
@@ -264,13 +271,13 @@ export function PayoutMethodDialog({
                 <div className="mb-4 flex items-center gap-3">
                   <MethodMark type={type} />
                   <div>
-                    <p className="text-sm font-semibold">{type === "crypto_trc20" ? "Crypto — USDT" : label}</p>
+                    <p className="text-sm font-semibold">{coin?.title ?? label}</p>
                     <p className="text-xs text-muted-foreground">
                       {type === "paypal" && "Get paid directly to your PayPal account."}
                       {type === "wise" && "Get paid to your Wise account."}
                       {type === "bank" && "Get paid by transfer to your bank account."}
                       {type === "stripe" && "Get paid through your own Stripe account."}
-                      {type === "crypto_trc20" && "Get paid in USDT on the TRON network."}
+                      {coin && `Get paid in ${coin.assetName} on the ${coin.networkLabel} network.`}
                     </p>
                   </div>
                 </div>
@@ -380,34 +387,36 @@ export function PayoutMethodDialog({
                     </>
                   )}
 
-                  {type === "crypto_trc20" && (
+                  {coin && (
                     <>
                       <Field label="Wallet Label" hint="Only you see this.">
-                        <Input value={form.nickname ?? ""} onChange={(e) => set("nickname", e.target.value)} maxLength={40} placeholder="Main USDT Wallet" autoFocus />
+                        <Input value={form.nickname ?? ""} onChange={(e) => set("nickname", e.target.value)} maxLength={40} placeholder={`Main ${coin.asset} Wallet`} autoFocus />
                       </Field>
-                      <Field label="Wallet Address" required error={errors.address ?? (address.length >= 34 && addressProblem ? INVALID_TRC20_MESSAGE : null)}>
-                        <Input value={form.address ?? ""} onChange={(e) => set("address", e.target.value)} placeholder="T…" maxLength={40} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} className="font-mono" aria-invalid={!!errors.address || (address.length >= 34 && !!addressProblem)} />
+                      <Field label="Wallet Address" required error={errors.address ?? (address.length >= coin.minLength && addressProblem ? coin.invalidMessage : null)}>
+                        <Input value={form.address ?? ""} onChange={(e) => set("address", e.target.value)} placeholder={coin.placeholder} maxLength={coin.maxLength} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} className="font-mono" aria-invalid={!!errors.address || (address.length >= coin.minLength && !!addressProblem)} />
                       </Field>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        {/* Fixed, not choosable: this method is USDT on TRON and nothing else. */}
+                        {/* Fixed, not choosable: this method is one asset on one network and nothing else. */}
                         <Field label="Network">
-                          <Input value="TRON (TRC-20)" readOnly disabled aria-readonly />
+                          <Input value={coin.networkLabel} readOnly disabled aria-readonly />
                         </Field>
                         <Field label="Currency">
-                          <Input value="USDT" readOnly disabled aria-readonly />
+                          <Input value={coin.asset} readOnly disabled aria-readonly />
                         </Field>
                       </div>
                       <div className="rounded-lg border border-[var(--chart-4)]/40 bg-[var(--chart-4)]/8 px-3.5 py-3">
                         <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--chart-4)]">
                           <TriangleAlert className="size-4" aria-hidden /> Important
                         </p>
-                        <p className="mt-2 text-sm">USDT will be sent using the TRON (TRC-20) network.</p>
-                        <p className="mt-1.5 text-sm">Only use a wallet address that supports USDT on TRC-20.</p>
-                        <p className="mt-1.5 text-sm">Sending funds to an incompatible network may result in permanent loss of funds.</p>
+                        {coin.warnings.map((line, i) => (
+                          <p key={line} className={i === 0 ? "mt-2 text-sm" : "mt-1.5 text-sm"}>
+                            {line}
+                          </p>
+                        ))}
                       </div>
                       <label className="flex cursor-pointer items-start gap-2.5 text-sm">
                         <input type="checkbox" checked={confirmNetwork} onChange={(e) => (setConfirmNetwork(e.target.checked), setErrors({}))} className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" aria-invalid={!!errors.confirmNetwork} />
-                        <span>I confirm that this wallet address supports USDT on TRC-20.</span>
+                        <span>{coin.confirmLabel}</span>
                       </label>
                       {errors.confirmNetwork && <p role="alert" className="-mt-2 text-xs text-[var(--loss)]">{errors.confirmNetwork}</p>}
                     </>

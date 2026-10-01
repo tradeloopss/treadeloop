@@ -5,8 +5,12 @@ import {
   MAX_AUTO_ATTEMPTS,
   PAYOUT_GROUPS,
   PAYOUT_STATUSES,
+  EXCHANGE_DEAD_MARGIN_MS,
   adminPayoutActions,
+  assetAmount,
   autoSendProblem,
+  exchangeRequestProvablyDead,
+  exchangeSendProblem,
   affiliateCanCancel,
   decideAutoPayout,
   effectiveLimits,
@@ -26,11 +30,14 @@ import {
   type AffiliateState,
   type PayoutSettings,
 } from "@/lib/affiliates/payout-engine"
+import { createHmac } from "node:crypto"
+import { CRYPTO, aptosAddressProblem, cryptoSpec, cryptoSpecByNetwork, explorerTxUrl as cryptoExplorerUrl, formatAsset, isCryptoMethod, litecoinAddressProblem } from "@/lib/affiliates/crypto"
 import { ledgerBalances } from "@/lib/affiliates/engine"
+import { matchWithdrawal, signedHeaders, withdrawalRemark, type Withdrawal } from "@/lib/affiliates/kucoin"
 import { abaValid, bankScheme, bicValid, ibanValid, validateMethod } from "@/lib/affiliates/method-validation"
 import { StripeError, stripeAccountState, stripeFailurePermanent } from "@/lib/affiliates/stripe-connect"
 import { judgeTransaction, usdtTransfers, type TxInfo } from "@/lib/affiliates/tron-chain"
-import { INVALID_TRC20_MESSAGE, USDT_TRC20_CONTRACT, base58Decode, explorerTxUrl, isTxHash, maskAddress, maskTxHash, sha256, tronAddressFromHex, tronAddressProblem, tronAddressToHex, usdtFromUnits, usdtUnits } from "@/lib/affiliates/tron"
+import { INVALID_TRC20_MESSAGE, USDT_TRC20_CONTRACT, base58Decode, base58Encode, explorerTxUrl, isTxHash, maskAddress, maskTxHash, sha256, tronAddressFromHex, tronAddressProblem, tronAddressToHex, usdtFromUnits, usdtUnits } from "@/lib/affiliates/tron"
 import { addressFromPrivateKey, buildSignedTransfer, encodeTransferRaw, privateKeyValid, recoverSigner, refBlock, signTransactionId, transactionId, transferCallData } from "@/lib/affiliates/tron-tx"
 
 const NOW = new Date("2026-10-07T12:00:00Z") // a Wednesday
@@ -547,7 +554,7 @@ test("automatic sending: every condition must hold, or the payout waits for a pe
   assert.equal(DEFAULT_PAYOUT_SETTINGS.cryptoAutoSend, false)
   assert.match(autoSendProblem({ ...ok, settings: settings() })!, /switched off/)
   assert.match(autoSendProblem({ ...ok, settings: { ...on, paused: true } })!, /paused/)
-  assert.match(autoSendProblem({ ...ok, walletReady: false })!, /isn't configured/)
+  assert.match(autoSendProblem({ ...ok, walletReady: false })!, /Nothing is configured/)
   // the affiliate
   for (const bad of [{ status: "suspended" }, { fraudLock: true }, { payoutHold: true }]) assert.match(autoSendProblem({ ...ok, affiliate: affiliate(bad) })!, /good standing/)
   assert.match(autoSendProblem({ ...ok, openRiskSignals: 1 })!, /risk signal/)
@@ -603,4 +610,181 @@ test("admin actions on a payout sent from the payout wallet", () => {
   assert.ok(!byHand("queued", false).includes("send_auto"))
   assert.ok(!byHand("pending", true).includes("send_auto")) // approval comes first
   assert.ok(!adminPayoutActions({ status: "queued", crypto: false, automated: false, hasHash: false, canAutoSend: true }).includes("send_auto"))
+})
+
+// ------------------------------------------- USDT on Aptos, Litecoin, exchange
+
+const APTOS = "0x" + "a1b2c3d4".repeat(8)
+// witness program 751e76e8199196d454941c45d1b3a323f1433bd6 — the BIP-173 example key, with Litecoin's prefix
+const LTC_SEGWIT = "ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9"
+// base58check built from the spec (version byte + 20 bytes + 4 checksum bytes), independent of the validator
+const litecoinAddress = (version: number, fill: number) => {
+  const payload = new Uint8Array([version, ...new Array(20).fill(fill)])
+  return base58Encode(new Uint8Array([...payload, ...sha256(sha256(payload)).subarray(0, 4)]))
+}
+const LTC_LEGACY = litecoinAddress(0x30, 0x11)
+const LTC_SCRIPT = litecoinAddress(0x32, 0x22)
+
+test("each crypto method is one asset on one network", () => {
+  assert.deepEqual(Object.keys(CRYPTO), ["crypto_trc20", "crypto_aptos", "crypto_ltc"])
+  assert.deepEqual(Object.values(CRYPTO).map((c) => [c.asset, c.network, c.exchangeChain, c.usdPegged, c.verifiable]), [["USDT", "TRON", "trx", true, true], ["USDT", "APTOS", "aptos", true, false], ["LTC", "LITECOIN", "ltc", false, false]])
+  for (const t of ["crypto_trc20", "crypto_aptos", "crypto_ltc"]) assert.equal(isCryptoMethod(t), true)
+  for (const t of ["paypal", "bank", "crypto_eth", "", null, "toString", "__proto__"]) assert.equal(isCryptoMethod(t as string), false)
+  assert.equal(cryptoSpec("paypal"), null)
+  assert.equal(cryptoSpecByNetwork("APTOS")?.type, "crypto_aptos")
+  assert.equal(formatAsset(1.5, "LTC"), "1.5 LTC")
+  assert.equal(formatAsset(120, "USDT", 6), "120 USDT")
+  assert.equal(formatAsset(0.00012345, "LTC"), "0.00012345 LTC")
+})
+
+test("Aptos addresses: 0x and 64 hex characters, nothing else", () => {
+  assert.equal(aptosAddressProblem(APTOS), null)
+  assert.equal(aptosAddressProblem(`  ${APTOS.toUpperCase().replace("0X", "0x")}  `), null) // case and stray spaces don't matter
+  assert.equal(CRYPTO.crypto_aptos.normalize(` ${APTOS.toUpperCase().replace("0X", "0x")} `), APTOS)
+  assert.match(aptosAddressProblem("")!, /Enter your wallet/)
+  assert.match(aptosAddressProblem(APTOS.slice(2))!, /starts with 0x/)
+  assert.match(aptosAddressProblem(APTOS.slice(0, 65))!, /66 characters/)
+  assert.match(aptosAddressProblem(APTOS + "a")!, /66 characters/)
+  assert.match(aptosAddressProblem("0x" + "g".repeat(64))!, /digits 0–9 and the letters a–f/)
+  assert.match(aptosAddressProblem("0x" + "0".repeat(63) + "1")!, /system address/)
+  // the other networks' addresses are not Aptos addresses
+  for (const other of ["T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb", LTC_SEGWIT, "0xdAC17F958D2ee523a2206206994597C13D831ec7"]) assert.notEqual(aptosAddressProblem(other), null, other)
+})
+
+test("Litecoin addresses: L…, M… and ltc1q…, each with its checksum", () => {
+  for (const ok of [LTC_LEGACY, LTC_SCRIPT, LTC_SEGWIT, LTC_SEGWIT.toUpperCase()]) assert.equal(litecoinAddressProblem(ok), null, ok)
+  assert.ok(LTC_LEGACY.startsWith("L") && LTC_SCRIPT.startsWith("M"))
+  assert.equal(CRYPTO.crypto_ltc.normalize(LTC_SEGWIT.toUpperCase()), LTC_SEGWIT)
+  // one changed character anywhere breaks the checksum
+  const swap = (a: string, i: number, to: string) => a.slice(0, i) + (a[i] === to ? "q" : to) + a.slice(i + 1)
+  for (const [a, i, to] of [[LTC_LEGACY, 10, "x"], [LTC_SCRIPT, 20, "y"], [LTC_SEGWIT, 12, "z"], [LTC_SEGWIT, 40, "p"]] as const) assert.match(litecoinAddressProblem(swap(a, i, to))!, /typo|can't have/, a)
+  // a segwit address is stored in lower case however it was typed
+  assert.equal(CRYPTO.crypto_ltc.normalize("Ltc1Qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9"), LTC_SEGWIT)
+  // what this method does not pay to, each with its own reason
+  assert.match(litecoinAddressProblem(litecoinAddress(0x05, 0x33))!, /M… form/)
+  assert.match(litecoinAddressProblem("ltcmweb1qq" + "q".repeat(40))!, /MWEB/)
+  assert.match(litecoinAddressProblem("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")!, /starts with L, M or ltc1/) // a Bitcoin address
+  assert.match(litecoinAddressProblem("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")!, /starts with L, M or ltc1/)
+  assert.match(litecoinAddressProblem("T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb")!, /starts with L, M or ltc1/)
+  assert.match(litecoinAddressProblem(litecoinAddress(0x30, 0x11).slice(0, 20))!, /26 to 35/)
+  assert.match(litecoinAddressProblem("")!, /Enter your wallet/)
+})
+
+test("adding a USDT (Aptos) or Litecoin wallet: fixed network, confirmation and re-typed tail", () => {
+  const aptos = { address: APTOS, network: "APTOS", asset: "USDT", confirmNetwork: true, confirmTail: APTOS.slice(-6).toUpperCase() }
+  const a = validateMethod("crypto_aptos", aptos)
+  assert.ok(a.ok)
+  assert.deepEqual([a.method.details, a.method.metadata, a.method.label, a.method.identity], [{ address: APTOS }, { network: "APTOS", standard: "Aptos", asset: "USDT", currency: "USDT" }, "0xa1…c3d4", `crypto_aptos:${APTOS}`])
+  // a TRON address is not accepted by the Aptos method, nor the other way round
+  assert.equal(validateMethod("crypto_aptos", { ...aptos, address: "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb" }).ok, false)
+  assert.equal(validateMethod("crypto_trc20", { ...aptos, network: "TRON" }).ok, false)
+  const refused = (over: Record<string, unknown>, field: string, type = "crypto_aptos", base: Record<string, unknown> = aptos) => {
+    const r = validateMethod(type, { ...base, ...over })
+    assert.ok(!r.ok && r.field === field, `${type} ${JSON.stringify(over)}`)
+  }
+  refused({ network: "TRON" }, "network")
+  refused({ asset: "USDC" }, "asset")
+  refused({ confirmNetwork: false }, "confirmNetwork")
+  refused({ confirmTail: "000000" }, "confirmTail")
+
+  const ltc = { address: LTC_SEGWIT, network: "LITECOIN", asset: "LTC", confirmNetwork: true, confirmTail: LTC_SEGWIT.slice(-6) }
+  const l = validateMethod("crypto_ltc", ltc)
+  assert.ok(l.ok)
+  assert.deepEqual([l.method.metadata, l.method.label, l.method.nickname], [{ network: "LITECOIN", standard: "Litecoin", asset: "LTC", currency: "LTC" }, "ltc1…n4n9", "Litecoin wallet"])
+  refused({ asset: "USDT" }, "asset", "crypto_ltc", ltc)
+  refused({ address: APTOS }, "address", "crypto_ltc", ltc)
+  // a base58 address is case-sensitive: the tail has to match exactly
+  assert.equal(validateMethod("crypto_ltc", { ...ltc, address: LTC_LEGACY, confirmTail: LTC_LEGACY.slice(-6) }).ok, true)
+  refused({ address: LTC_LEGACY, confirmTail: LTC_LEGACY.slice(-6).toLowerCase() === LTC_LEGACY.slice(-6) ? "zzzzzz" : LTC_LEGACY.slice(-6).toLowerCase() }, "confirmTail", "crypto_ltc", ltc)
+  // the new methods have fees and can be switched on, but are not offered until an admin does
+  const s = normalizePayoutSettings({ methods: ["crypto_aptos", "crypto_ltc", "dogecoin"], cryptoMaxFeeUsd: 1000 })
+  assert.deepEqual([s.methods, s.fees.crypto_aptos, s.cryptoMaxFeeUsd], [["crypto_aptos", "crypto_ltc"], { fixed: 0, percent: 0 }, 100])
+  assert.ok(!DEFAULT_PAYOUT_SETTINGS.methods.includes("crypto_aptos") && !DEFAULT_PAYOUT_SETTINGS.methods.includes("crypto_ltc"))
+})
+
+test("explorer links: only for the payout's own network and a real transaction id", () => {
+  const h = "ab".repeat(32)
+  assert.equal(cryptoExplorerUrl("TRON", h), `https://tronscan.org/#/transaction/${h}`)
+  assert.equal(cryptoExplorerUrl("APTOS", `0x${h}`), `https://explorer.aptoslabs.com/txn/0x${h}?network=mainnet`)
+  assert.equal(cryptoExplorerUrl("LITECOIN", h.toUpperCase()), `https://blockchair.com/litecoin/transaction/${h}`)
+  for (const bad of ["javascript:alert(1)", `${h}/../x`, `x ${h}`, h.slice(1), "", null]) assert.equal(cryptoExplorerUrl("LITECOIN", bad), null, String(bad))
+  assert.equal(cryptoExplorerUrl("ETHEREUM", h), null)
+  // what an exchange reports can carry more than the id; only the id is taken
+  assert.equal(CRYPTO.crypto_trc20.hashFrom(`${h}@TXYZ`), h)
+  assert.equal(CRYPTO.crypto_aptos.hashFrom(`0x${h}`), `0x${h}`)
+  assert.equal(CRYPTO.crypto_ltc.hashFrom("Internal transfer 99812"), null)
+  assert.equal(CRYPTO.crypto_ltc.hashFrom(null), null)
+})
+
+test("exchange requests are signed over the time, the method, the path and the exact body", () => {
+  const input = { key: "key-1", secret: "secret-1", passphrase: "phrase-1", timestamp: 1790000000000, method: "post", path: "/api/v3/withdrawals", body: '{"currency":"USDT","amount":"120"}' }
+  const h = signedHeaders(input)
+  const mac = (text: string) => createHmac("sha256", "secret-1").update(text).digest("base64")
+  assert.deepEqual(h, { "KC-API-KEY": "key-1", "KC-API-SIGN": mac(`1790000000000POST/api/v3/withdrawals${input.body}`), "KC-API-TIMESTAMP": "1790000000000", "KC-API-PASSPHRASE": mac("phrase-1"), "KC-API-KEY-VERSION": "3" })
+  // nothing about the request can change without the signature changing
+  for (const other of [{ body: '{"currency":"USDT","amount":"121"}' }, { path: "/api/v1/withdrawals" }, { method: "GET" }, { timestamp: 1790000000001 }]) assert.notEqual(signedHeaders({ ...input, ...other })["KC-API-SIGN"], h["KC-API-SIGN"])
+  // the secret and the passphrase never travel
+  assert.ok(!JSON.stringify(h).includes("secret-1") && !JSON.stringify(h).includes("phrase-1"))
+  assert.equal(signedHeaders({ ...input, version: "2" })["KC-API-KEY-VERSION"], "2")
+})
+
+test("a withdrawal whose answer was lost is recognised in the account's history", () => {
+  const w = (over: Partial<Withdrawal>): Withdrawal => ({ id: "w1", currency: "USDT", chain: "aptos", status: "PROCESSING", address: APTOS, amount: 120, fee: 0.5, txId: null, remark: "", inner: false, createdAt: 1_000_000, ...over })
+  const want = { remark: withdrawalRemark(12, 345), address: APTOS, amount: 120, since: 1_000_000 }
+  assert.equal(withdrawalRemark(12, 345), "TL-PO-12-345")
+  // by its tag — whatever else is in the history
+  assert.equal(matchWithdrawal([w({ id: "other", address: "0xother", amount: 5 }), w({ id: "mine", remark: "TL-PO-12-345", amount: 999 })], want)?.id, "mine")
+  // without the tag: the same address and amount, made after the attempt began
+  assert.equal(matchWithdrawal([w({ id: "mine" })], want)?.id, "mine")
+  assert.equal(matchWithdrawal([w({ address: APTOS.toUpperCase().replace("0X", "0x") })], want), null)
+  assert.equal(matchWithdrawal([w({ address: APTOS.toUpperCase().replace("0X", "0x") })], { ...want, caseInsensitive: true })?.id, "w1")
+  // not: another amount, another address, or one made before this attempt
+  for (const other of [{ amount: 120.01 }, { address: "0x" + "b".repeat(64) }, { createdAt: 1_000_000 - 61_000 }, { remark: "TL-PO-12-344", amount: 5 }]) assert.equal(matchWithdrawal([w(other)], want), null, JSON.stringify(other))
+  assert.equal(matchWithdrawal([], want), null)
+})
+
+test("an exchange attempt is repeated only once it is proven it created nothing", () => {
+  const expiresAt = Date.parse("2026-10-07T12:01:00Z")
+  const dead = (lookedUpAt: number, found = false) => exchangeRequestProvablyDead({ expiresAt, lookedUpAt, found })
+  assert.equal(dead(expiresAt - 30_000), false) // the request could still be accepted
+  assert.equal(dead(expiresAt + EXCHANGE_DEAD_MARGIN_MS), false) // inside the margin
+  assert.equal(dead(expiresAt + EXCHANGE_DEAD_MARGIN_MS + 1), true)
+  assert.equal(dead(expiresAt + 3_600_000, true), false) // found is never dead
+})
+
+test("what is checked before the exchange is asked to send", () => {
+  const ok = { asset: "USDT", network: "Aptos", amount: 120, available: 500, fee: 0.5, min: 1, enabled: true, priceUsd: 1, maxFeeUsd: 5 }
+  assert.equal(exchangeSendProblem(ok), null)
+  assert.equal(exchangeSendProblem({ ...ok, available: 120.5 }), null) // exactly the amount plus the fee
+  assert.deepEqual(exchangeSendProblem({ ...ok, available: 120.49 }), { kind: "funds", reason: "The exchange account has 120.49 USDT available; this payout needs 120 plus a 0.5 USDT fee." })
+  assert.deepEqual([exchangeSendProblem({ ...ok, enabled: false })?.kind, exchangeSendProblem({ ...ok, enabled: false })?.reason.includes("switched off")], ["funds", true])
+  assert.equal(exchangeSendProblem({ ...ok, amount: 0.5 })?.kind, "rejected") // below the minimum: waiting doesn't fix it
+  assert.equal(exchangeSendProblem({ ...ok, amount: 0 })?.kind, "rejected")
+  // the fee is judged in dollars, whatever the asset
+  assert.match(exchangeSendProblem({ ...ok, fee: 5.5 })!.reason, /above the \$5\.00 limit/)
+  const ltc = { ...ok, asset: "LTC", network: "Litecoin", amount: 1.5, available: 2, fee: 0.006, min: 0.012, priceUsd: 80 }
+  assert.equal(exchangeSendProblem(ltc), null) // 0.006 LTC ≈ $0.48
+  assert.equal(exchangeSendProblem({ ...ltc, priceUsd: 1000 })?.kind, "funds") // ≈ $6
+  assert.match(exchangeSendProblem({ ...ltc, available: 1.5 })!.reason, /1\.5 LTC available; this payout needs 1\.5 plus a 0\.006 LTC fee/)
+
+  // dollars → the asset, never rounded up
+  assert.equal(assetAmount(120, 1, 6), 120)
+  assert.equal(assetAmount(120, 80, 8), 1.5)
+  assert.equal(assetAmount(100, 68.15, 8), 1.46735143) // 1.467351430667…
+  assert.equal(assetAmount(100, 3, 2), 33.33)
+  assert.equal(assetAmount(100, 0, 8), 0)
+  assert.equal(assetAmount(-5, 80, 8), 0)
+})
+
+test("admin actions: a payout only the exchange can send has no by-hand route", () => {
+  const act = (status: string, over: Record<string, unknown> = {}) => adminPayoutActions({ status, crypto: true, automated: true, hasHash: false, verifiable: false, ...over })
+  // waiting for approval: approving is what sends it
+  assert.deepEqual(act("pending", { hot: true }), ["approve", "reject", "hold", "cancel"])
+  assert.deepEqual(act("queued", { hot: true }), ["retry", "hold", "cancel"])
+  for (const s of ["processing", "submitted", "confirming"]) assert.deepEqual(act(s, { hot: true }), ["check"], s)
+  assert.deepEqual(act("retry_required", { hot: true }), ["retry", "hold", "cancel", "fail"])
+  assert.deepEqual(act("paid", { hot: true }), [])
+  for (const s of ["pending", "queued", "processing", "submitted", "retry_required"]) assert.ok(!act(s).includes("submit_tx") && !act(s).includes("mark_paid"), s)
+  // USDT on TRON keeps its by-hand route, and can be handed to the exchange
+  assert.deepEqual(adminPayoutActions({ status: "queued", crypto: true, automated: false, hasHash: false, canAutoSend: true, verifiable: true }), ["start", "send_auto", "submit_tx", "hold", "cancel", "fail"])
 })

@@ -1,4 +1,5 @@
 import { round2 } from "./engine"
+import { isCryptoMethod } from "./crypto"
 import { PAYOUT_METHOD_TYPES, type PayoutMethodType } from "./types"
 
 // The payout rules as pure functions: the status machine, the settings an
@@ -84,24 +85,30 @@ export const PAYOUT_STATUS_LABELS: Record<PayoutStatus, string> = {
 // provider's) confirmation. The UI shows exactly these; the server enforces them.
 export type AdminPayoutAction = "approve" | "reject" | "hold" | "release" | "cancel" | "start" | "mark_paid" | "submit_tx" | "check" | "fail" | "retry" | "reverse" | "send_auto"
 
-// `hot` = the payout is being sent automatically from the payout wallet.
-// `canAutoSend` = the payout wallet is configured, so a crypto payout an admin
-// is about to pay by hand can be handed to it instead.
-export function adminPayoutActions(p: { status: string; crypto: boolean; automated: boolean; hasHash: boolean; hot?: boolean; canAutoSend?: boolean }): AdminPayoutAction[] {
+// `hot` = the payout is being sent automatically (from the payout wallet or
+// the exchange account).
+// `canAutoSend` = an automatic sender is configured, so a crypto payout an
+// admin is about to pay by hand can be handed to it instead.
+// `verifiable` = a transaction sent by hand can be checked on-chain here, so
+// "pay by hand and submit the hash" is on offer (USDT on TRON; defaults to
+// `crypto`). The others can only be sent by the exchange.
+export function adminPayoutActions(p: { status: string; crypto: boolean; automated: boolean; hasHash: boolean; hot?: boolean; canAutoSend?: boolean; verifiable?: boolean }): AdminPayoutAction[] {
+  const byHand = p.verifiable ?? p.crypto
   if (p.hot) {
+    const hand = byHand ? (["submit_tx"] as AdminPayoutAction[]) : []
     switch (p.status as PayoutStatus) {
       case "pending":
         return ["approve", "reject", "hold", "cancel"]
       case "queued":
         // nothing has been signed for it: it can still be stopped, or paid by hand
-        return ["retry", "submit_tx", "hold", "cancel"]
+        return ["retry", ...hand, "hold", "cancel"]
       case "processing":
       case "submitted":
       case "confirming":
         // a signed transaction may be on its way: only the chain may decide now
         return ["check"]
       case "retry_required":
-        return ["retry", "submit_tx", "hold", "cancel", "fail"]
+        return ["retry", ...hand, "hold", "cancel", "fail"]
       case "on_hold":
         return ["release", "reject", "cancel"]
       default:
@@ -109,7 +116,7 @@ export function adminPayoutActions(p: { status: string; crypto: boolean; automat
     }
   }
   const auto = p.crypto && p.canAutoSend ? (["send_auto"] as AdminPayoutAction[]) : []
-  const sendable = p.crypto ? ([...auto, "submit_tx"] as AdminPayoutAction[]) : p.automated ? [] : (["mark_paid"] as AdminPayoutAction[])
+  const sendable = p.crypto ? ([...auto, ...(byHand ? ["submit_tx"] : [])] as AdminPayoutAction[]) : p.automated ? [] : (["mark_paid"] as AdminPayoutAction[])
   switch (p.status as PayoutStatus) {
     case "pending":
       return ["approve", "reject", "hold", "cancel"]
@@ -119,7 +126,7 @@ export function adminPayoutActions(p: { status: string; crypto: boolean; automat
       return [...sendable, "fail"]
     case "submitted":
     case "confirming":
-      return p.crypto ? ["check", ...(p.status === "submitted" ? (["submit_tx"] as AdminPayoutAction[]) : []), "fail"] : ["check", "fail"]
+      return p.crypto ? ["check", ...(p.status === "submitted" && byHand ? (["submit_tx"] as AdminPayoutAction[]) : []), "fail"] : ["check", "fail"]
     case "retry_required":
       return ["retry", ...sendable, "hold", "cancel", "fail"]
     case "on_hold":
@@ -158,13 +165,14 @@ export type PayoutSettings = {
   // account already had one. 0 switches the hold off.
   methodHoldHours: number
   methods: PayoutMethodType[] // offered to affiliates
-  // USDT (TRC-20) sent automatically from the payout wallet, with no approval
-  // step, for payouts inside these caps. Everything above them, and anything
-  // that looks unusual, still waits for a person.
+  // Crypto sent automatically (from the exchange account, or the payout
+  // wallet), with no approval step, for payouts inside these caps. Everything
+  // above them, and anything that looks unusual, still waits for a person.
   cryptoAutoSend: boolean
   cryptoAutoMax: number // per payout, USD
   cryptoAutoDaily: number // total sent automatically per UTC day, USD
-  cryptoFeeLimitTrx: number // the most TRX one transfer may burn
+  cryptoFeeLimitTrx: number // payout wallet: the most TRX one transfer may burn
+  cryptoMaxFeeUsd: number // exchange: the highest withdrawal fee worth paying, USD
 }
 
 const noFee = (): FeeRule => ({ fixed: 0, percent: 0 })
@@ -178,13 +186,14 @@ export const DEFAULT_PAYOUT_SETTINGS: PayoutSettings = {
   weeklyLimit: null,
   monthlyLimit: null,
   feePolicy: "platform",
-  fees: { paypal: noFee(), wise: noFee(), bank: noFee(), stripe: noFee(), crypto_trc20: noFee() },
+  fees: { paypal: noFee(), wise: noFee(), bank: noFee(), stripe: noFee(), crypto_trc20: noFee(), crypto_aptos: noFee(), crypto_ltc: noFee() },
   methodHoldHours: 24,
   methods: ["paypal", "wise", "bank", "crypto_trc20"],
   cryptoAutoSend: false,
   cryptoAutoMax: 500,
   cryptoAutoDaily: 2000,
   cryptoFeeLimitTrx: 40,
+  cryptoMaxFeeUsd: 5,
 }
 
 const clamp = (v: unknown, fallback: number, min: number, max: number) => {
@@ -223,6 +232,7 @@ export function normalizePayoutSettings(raw: unknown): PayoutSettings {
     cryptoAutoMax: round2(clamp(r.cryptoAutoMax, d.cryptoAutoMax, 1, 100_000)),
     cryptoAutoDaily: round2(clamp(r.cryptoAutoDaily, d.cryptoAutoDaily, 1, 1_000_000)),
     cryptoFeeLimitTrx: Math.round(clamp(r.cryptoFeeLimitTrx, d.cryptoFeeLimitTrx, 5, 500)),
+    cryptoMaxFeeUsd: round2(clamp(r.cryptoMaxFeeUsd, d.cryptoMaxFeeUsd, 0.5, 100)),
   }
 }
 
@@ -237,7 +247,7 @@ export function quoteFee(amount: number, type: string, settings: PayoutSettings)
   if (settings.feePolicy !== "affiliate" || !rule || !(amount > 0)) return { amount: round2(amount), fee: 0, net: round2(amount), estimated: false }
   const fee = Math.min(round2(rule.fixed + (amount * rule.percent) / 100), round2(amount))
   // A network fee isn't known to the cent until the transaction is built.
-  return { amount: round2(amount), fee, net: round2(amount - fee), estimated: type === "crypto_trc20" && fee > 0 }
+  return { amount: round2(amount), fee, net: round2(amount - fee), estimated: isCryptoMethod(type) && fee > 0 }
 }
 
 // -------------------------------------------------------------------- limits
@@ -423,10 +433,12 @@ export function decideAutoPayout(input: {
 
 // ------------------------------------------------- automatic crypto sending
 
-// Whether a USDT payout may skip approval and be sent straight from the payout
-// wallet. Returns the reason it may not (it then follows the normal approval
-// path instead — it isn't refused), or null. Each "no" is a control on the one
-// thing that makes a hot wallet dangerous: money leaving with nobody looking.
+// Whether a crypto payout may skip approval and be sent straight away (from
+// the exchange account or the payout wallet). Returns the reason it may not (it
+// then follows the normal approval path instead — it isn't refused), or null.
+// Each "no" is a control on the one thing that makes automatic sending
+// dangerous: money leaving with nobody looking. `walletReady` = a sender for
+// this payout's network is configured.
 export function autoSendProblem(input: {
   settings: PayoutSettings
   walletReady: boolean
@@ -437,9 +449,9 @@ export function autoSendProblem(input: {
   affiliate: AffiliateState
 }): string | null {
   const { settings } = input
-  if (!settings.cryptoAutoSend) return "Automatic USDT sending is switched off."
+  if (!settings.cryptoAutoSend) return "Automatic crypto sending is switched off."
   if (settings.paused) return "All payouts are paused."
-  if (!input.walletReady) return "The payout wallet isn't configured."
+  if (!input.walletReady) return "Nothing is configured to send this payout automatically."
   if (input.affiliate.status !== "approved" || input.affiliate.fraudLock || input.affiliate.payoutHold) return "The affiliate's account isn't in good standing."
   if (input.openRiskSignals > 0) return "A risk signal on this affiliate is waiting for review."
   // Even a first wallet has to have been on file for the hold period: a
@@ -469,6 +481,44 @@ export function sendFeeProblem(input: { energyNeeded: number; energyAvailable: n
   if (feeSun > input.feeLimitSun) return { feeSun, problem: `The network fee would be about ${trx(feeSun)} TRX, above the ${trx(input.feeLimitSun)} TRX limit.` }
   if (input.trxBalanceSun < feeSun) return { feeSun, problem: `The payout wallet needs about ${trx(feeSun)} TRX for the network fee and has ${trx(input.trxBalanceSun)}.` }
   return { feeSun, problem: null }
+}
+
+// ------------------------------------------------- sending from the exchange
+
+// A request to the exchange is only valid for a moment after it is signed (the
+// exchange rejects one whose timestamp is more than a few seconds old). So a
+// request whose answer was lost either created a withdrawal within this window
+// — which then shows in the account's history — or never will.
+export const EXCHANGE_REQUEST_WINDOW_MS = 60_000
+export const EXCHANGE_DEAD_MARGIN_MS = 120_000
+
+// True only when it is PROVEN that an attempt never became a withdrawal: its
+// window (plus a margin) has passed, and a history lookup made after that
+// found nothing. Until then the payout is never requested again.
+export function exchangeRequestProvablyDead(input: { expiresAt: number; lookedUpAt: number; found: boolean }): boolean {
+  return !input.found && input.lookedUpAt > input.expiresAt + EXCHANGE_DEAD_MARGIN_MS
+}
+
+// How much of the asset a payout of `usd` is, at `priceUsd` per unit — rounded
+// DOWN to what the network can carry, so a payout is never rounded up.
+export function assetAmount(usd: number, priceUsd: number, precision: number): number {
+  if (!(usd > 0) || !(priceUsd > 0)) return 0
+  const scale = 10 ** Math.max(0, Math.min(8, Math.trunc(precision)))
+  return Math.floor((usd / priceUsd) * scale + 1e-7) / scale
+}
+
+// Checked before the exchange is asked to send anything.
+//   funds     it can't be sent right now, and waiting (or a top-up) fixes it
+//   rejected  it can't be sent as it is: a person decides
+export function exchangeSendProblem(input: { asset: string; network: string; amount: number; available: number; fee: number; min: number; enabled: boolean; priceUsd: number; maxFeeUsd: number }): { kind: "funds" | "rejected"; reason: string } | null {
+  const show = (n: number) => n.toFixed(8).replace(/\.?0+$/, "")
+  if (!input.enabled) return { kind: "funds", reason: `The exchange has ${input.asset} withdrawals on ${input.network} switched off right now.` }
+  if (!(input.amount > 0)) return { kind: "rejected", reason: "The payout amount couldn't be converted." }
+  if (input.amount < input.min) return { kind: "rejected", reason: `${show(input.amount)} ${input.asset} is below the exchange's minimum withdrawal of ${show(input.min)} ${input.asset} on ${input.network}.` }
+  const feeUsd = input.fee * input.priceUsd
+  if (feeUsd > input.maxFeeUsd + 0.001) return { kind: "funds", reason: `The exchange's withdrawal fee on ${input.network} is ${show(input.fee)} ${input.asset} (about $${feeUsd.toFixed(2)}), above the $${input.maxFeeUsd.toFixed(2)} limit.` }
+  if (input.available + 1e-9 < input.amount + input.fee) return { kind: "funds", reason: `The exchange account has ${show(input.available)} ${input.asset} available; this payout needs ${show(input.amount)} plus a ${show(input.fee)} ${input.asset} fee.` }
+  return null
 }
 
 // After this many automatic attempts a person takes over.

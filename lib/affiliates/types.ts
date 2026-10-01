@@ -22,9 +22,9 @@ export const RESOURCE_CATEGORY_LABELS: Record<string, string> = { brand: "Brand 
 export const RESOURCE_CATEGORIES =["brand", "social", "creative", "product", "video", "copy"] as const
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
-export const PAYOUT_METHOD_TYPES = ["paypal", "wise", "bank", "stripe", "crypto_trc20"] as const
+export const PAYOUT_METHOD_TYPES = ["paypal", "wise", "bank", "stripe", "crypto_trc20", "crypto_aptos", "crypto_ltc"] as const
 export type PayoutMethodType = (typeof PAYOUT_METHOD_TYPES)[number]
-export const PAYOUT_METHOD_LABELS: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "Bank transfer", stripe: "Stripe Connect", crypto_trc20: "Crypto — USDT (TRC-20)" }
+export const PAYOUT_METHOD_LABELS: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "Bank transfer", stripe: "Stripe Connect", crypto_trc20: "Crypto — USDT (TRC-20)", crypto_aptos: "Crypto — USDT (Aptos)", crypto_ltc: "Crypto — Litecoin (LTC)" }
 // What the method picker says under each name.
 export const PAYOUT_METHOD_BLURBS: Record<PayoutMethodType, { tagline: string; timing: string }> = {
   paypal: { tagline: "Fast and secure payments", timing: "2–5 business days" },
@@ -32,10 +32,12 @@ export const PAYOUT_METHOD_BLURBS: Record<PayoutMethodType, { tagline: string; t
   bank: { tagline: "Direct to your bank account", timing: "3–7 business days" },
   stripe: { tagline: "For eligible countries", timing: "2–5 business days" },
   crypto_trc20: { tagline: "USDT on the TRON network", timing: "TRON / TRC-20" },
+  crypto_aptos: { tagline: "USDT on the Aptos network", timing: "Aptos" },
+  crypto_ltc: { tagline: "Litecoin, at the market price", timing: "Litecoin / LTC" },
 }
 export const methodLabel = (type: string) => PAYOUT_METHOD_LABELS[type as PayoutMethodType] ?? type
 // "PayPal, Wise, bank transfer or USDT" — the methods actually on offer, for copy.
-const SHORT: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "bank transfer", stripe: "Stripe", crypto_trc20: "USDT (TRC-20)" }
+const SHORT: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "bank transfer", stripe: "Stripe", crypto_trc20: "USDT (TRC-20)", crypto_aptos: "USDT (Aptos)", crypto_ltc: "Litecoin" }
 export function methodList(types: readonly string[]): string {
   const names = types.map((t) => SHORT[t as PayoutMethodType]).filter(Boolean)
   if (names.length === 0) return "the payout methods on offer"

@@ -7,8 +7,9 @@ import { payoutDetail } from "@/lib/affiliates/admin-queries"
 import { PAYOUT_STATUS_LABELS, type PayoutStatus } from "@/lib/affiliates/payout-engine"
 import { payoutEvents, payoutTransactions, trackPayout } from "@/lib/affiliates/payouts"
 import { getPayoutSettings } from "@/lib/affiliates/program"
-import { HOT_PROVIDER, hotWalletReady, providerByName } from "@/lib/affiliates/providers"
-import { explorerTxUrl, maskTxHash } from "@/lib/affiliates/tron"
+import { EXCHANGE_PROVIDER, autoSenderFor, isAutoSender, providerByName } from "@/lib/affiliates/providers"
+import { cryptoSpec, cryptoSpecByNetwork, explorerTxUrl } from "@/lib/affiliates/crypto"
+import { maskTxHash } from "@/lib/affiliates/tron"
 import { methodLabel, money } from "@/lib/affiliates/types"
 import { AdminPageHeader, Panel, fmtDateTime } from "@/components/admin/ui"
 import { FieldRow, StatusBadge, TableShell, THead, tdClass, thClass } from "@/components/affiliate/ui"
@@ -40,9 +41,12 @@ const EVENT_LABELS: Record<string, string> = {
   "payout.requeued": "Put back in the queue",
   "payout.auto_waiting": "Waiting on the payout wallet",
   "payout.auto_send_off": "Automatic sending switched off — waits to be sent by hand",
-  "payout.send_auto": "Handed to the payout wallet",
+  "payout.send_auto": "Handed to the automatic sender",
+  "payout.withdrawal_prepared": "Withdrawal prepared",
+  "payout.withdrawal_requested": "Withdrawal requested from the exchange",
+  "payout.withdrawal_found": "Withdrawal found in the exchange account",
 }
-const PROVIDERS: Record<string, string> = { manual: "Manual (sent by hand)", tron_manual: "Manual transfer, verified on the TRON network", tron_hot: "Payout wallet (automatic), verified on the TRON network", stripe: "Stripe Connect" }
+const PROVIDERS: Record<string, string> = { manual: "Manual (sent by hand)", tron_manual: "Manual transfer, verified on the TRON network", tron_hot: "Payout wallet (automatic), verified on the TRON network", kucoin: "KuCoin account (withdrawal by API)", stripe: "Stripe Connect" }
 const ACTORS: Record<string, string> = { affiliate: "Affiliate", admin: "Admin", system: "System" }
 
 export default async function AdminAffiliatePayoutDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -57,7 +61,10 @@ export default async function AdminAffiliatePayoutDetailPage({ params }: { param
   const name = `${p.firstName} ${p.lastName}`.trim()
   const link = explorerTxUrl(p.network, p.transactionHash)
   const crypto = !!p.asset
-  const hot = p.provider === HOT_PROVIDER
+  const hot = isAutoSender(p.provider)
+  const viaExchange = p.provider === EXCHANGE_PROVIDER
+  const coin = cryptoSpec(p.methodType)
+  const candidate = autoSenderFor(p.methodType)
 
   return (
     <div>
@@ -153,17 +160,23 @@ export default async function AdminAffiliatePayoutDetailPage({ params }: { param
             {canManage ? (
               <div className="flex flex-col gap-3">
                 <div className="[&>div]:justify-start">
-                  <PayoutAdminActions paused={settings.paused} canAutoSend={hotWalletReady()} payout={{ id: p.id, status: p.status, methodType: p.methodType, amount: p.amount, net: p.net, fee: p.fee, asset: p.asset, name, hasHash: !!p.transactionHash, automated: providerByName(p.provider).automated, hot }} />
+                  <PayoutAdminActions paused={settings.paused} canAutoSend payout={{ id: p.id, status: p.status, methodType: p.methodType, amount: p.amount, net: p.net, fee: p.fee, asset: p.asset, name, hasHash: !!p.transactionHash, automated: providerByName(p.provider).automated, hot, via: hot ? (viaExchange ? "exchange" : "wallet") : candidate === EXCHANGE_PROVIDER ? "exchange" : candidate ? "wallet" : null }} />
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {["paid", "failed", "cancelled", "rejected", "reversed"].includes(p.status) && !(p.status === "paid" && !crypto)
                     ? "This payout is finished. Nothing more can be done to it."
                     : hot
-                      ? ["processing", "submitted", "confirming"].includes(p.status)
-                        ? "The payout wallet has signed a transaction for this payout. Only the TRON network decides now: it completes when the transfer is irreversible, or comes back to be sent again once that transaction can provably no longer be included."
-                        : "This payout is sent from the payout wallet. A new transfer is only ever signed when no earlier one can still be included."
-                      : crypto
-                        ? "A crypto payout is completed by the TRON network, not by hand: submit the transaction hash and it finishes once a matching USDT transfer is irreversible."
+                      ? viaExchange
+                        ? ["processing", "submitted", "confirming"].includes(p.status)
+                          ? `KuCoin has been asked to withdraw this payout. It completes when KuCoin reports the withdrawal as sent${coin?.verifiable ? " and the TRON network confirms the transfer" : ""}, or comes back to be sent again once it is proven the request never reached KuCoin.`
+                          : "This payout is sent by the KuCoin account. A new withdrawal is only ever requested when no earlier one for it can exist."
+                        : ["processing", "submitted", "confirming"].includes(p.status)
+                          ? "The payout wallet has signed a transaction for this payout. Only the TRON network decides now: it completes when the transfer is irreversible, or comes back to be sent again once that transaction can provably no longer be included."
+                          : "This payout is sent from the payout wallet. A new transfer is only ever signed when no earlier one can still be included."
+                      : crypto && !coin?.verifiable
+                        ? `A ${coin?.assetName ?? "crypto"} payout on ${cryptoSpecByNetwork(p.network)?.networkLabel ?? "this network"} is sent by the KuCoin account once it is approved, and completes when KuCoin confirms the withdrawal.`
+                        : crypto
+                          ? "A crypto payout is completed by the TRON network, not by hand: submit the transaction hash and it finishes once a matching USDT transfer is irreversible."
                       : "Send the money, then record the result. Failing, rejecting or cancelling puts the amount back in the affiliate's available balance."}
                 </p>
               </div>

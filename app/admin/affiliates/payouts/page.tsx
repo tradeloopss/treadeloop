@@ -6,9 +6,10 @@ import { payoutsPage } from "@/lib/affiliates/admin-queries"
 import { PAYOUT_STATUS_LABELS, type PayoutGroup, type PayoutStatus } from "@/lib/affiliates/payout-engine"
 import { trackPayouts } from "@/lib/affiliates/payouts"
 import { getPayoutSettings } from "@/lib/affiliates/program"
-import { HOT_PROVIDER, hotWalletReady, providerByName } from "@/lib/affiliates/providers"
+import { EXCHANGE_PROVIDER, autoSenderFor, isAutoSender, providerByName } from "@/lib/affiliates/providers"
 import { PAGE_SIZE } from "@/lib/affiliates/queries"
-import { explorerTxUrl, maskTxHash } from "@/lib/affiliates/tron"
+import { explorerTxUrl } from "@/lib/affiliates/crypto"
+import { maskTxHash } from "@/lib/affiliates/tron"
 import { PAYOUT_METHOD_LABELS, PAYOUT_METHOD_TYPES, methodLabel, money } from "@/lib/affiliates/types"
 import { AdminPageHeader, FilterSelect, Pager } from "@/components/admin/ui"
 import { Empty, StatusBadge, TableShell, THead, fmtDay, linkButtonClass, tdClass, thClass } from "@/components/affiliate/ui"
@@ -49,7 +50,10 @@ export default async function AdminAffiliatePayoutsPage({ searchParams }: { sear
   }
   const [page, settings] = await Promise.all([payoutsPage(filters), getPayoutSettings()])
   const params = { tab, q: filters.q, method: filters.method, mode: filters.mode, from: sp.from, to: sp.to, min: sp.min, max: sp.max }
-  const walletReady = hotWalletReady()
+  const via = (type: string) => {
+    const sender = autoSenderFor(type)
+    return sender === EXCHANGE_PROVIDER ? ("exchange" as const) : sender ? ("wallet" as const) : null
+  }
   const filtered = !!(filters.q || filters.method || filters.mode || filters.from || filters.to || filters.min != null || filters.max != null)
 
   return (
@@ -177,15 +181,15 @@ export default async function AdminAffiliatePayoutsPage({ searchParams }: { sear
                             <span className="mt-1 block font-mono text-xs text-muted-foreground">{maskTxHash(p.transactionHash)}</span>
                           ))}
                         {p.failureReason && ["failed", "rejected", "reversed", "retry_required"].includes(p.status) && <span className="mt-1 block max-w-56 text-xs text-[var(--loss)]">{p.failureReason}</span>}
-                        {p.provider === HOT_PROVIDER && p.status === "queued" && p.failureReason && <span className="mt-1 block max-w-56 text-xs text-[var(--chart-4)]">Waiting: {p.failureReason}</span>}
+                        {isAutoSender(p.provider) && p.status === "queued" && p.failureReason && <span className="mt-1 block max-w-56 text-xs text-[var(--chart-4)]">Waiting: {p.failureReason}</span>}
                       </td>
                       <td className={`${tdClass} whitespace-nowrap text-muted-foreground`}>{fmtDay(p.requestedAt)}</td>
                       <td className={`${tdClass} whitespace-nowrap text-muted-foreground`}>
                         {p.mode === "automatic" ? "Automatic" : "Requested"}
-                        {p.provider === HOT_PROVIDER && <span className="block text-xs">Sent by wallet</span>}
+                        {isAutoSender(p.provider) && <span className="block text-xs">{p.provider === EXCHANGE_PROVIDER ? "Sent by KuCoin" : "Sent by wallet"}</span>}
                       </td>
                       <td className={tdClass}>
-                        {canManage && <PayoutAdminActions size="xs" paused={settings.paused} canAutoSend={walletReady} payout={{ id: p.id, status: p.status, methodType: p.methodType, amount: p.amount, net: p.net, fee: p.fee, asset: p.asset, name, hasHash: !!p.transactionHash, automated: providerByName(p.provider).automated, hot: p.provider === HOT_PROVIDER }} />}
+                        {canManage && <PayoutAdminActions size="xs" paused={settings.paused} canAutoSend payout={{ id: p.id, status: p.status, methodType: p.methodType, amount: p.amount, net: p.net, fee: p.fee, asset: p.asset, name, hasHash: !!p.transactionHash, automated: providerByName(p.provider).automated, hot: isAutoSender(p.provider), via: isAutoSender(p.provider) ? (p.provider === EXCHANGE_PROVIDER ? "exchange" : "wallet") : via(p.methodType) }} />}
                       </td>
                     </tr>
                   )
