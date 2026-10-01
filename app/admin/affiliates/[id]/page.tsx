@@ -6,10 +6,13 @@ import { affiliateDetail } from "@/lib/affiliates/admin-queries"
 import { countryName } from "@/lib/affiliates/countries"
 import { resolveRule } from "@/lib/affiliates/engine"
 import { FRAUD_LABELS } from "@/lib/affiliates/fraud"
-import { PAYOUT_METHOD_LABELS, SOCIAL_KEYS, SOCIAL_LABELS, count, money, signedMoney, type PayoutMethodType } from "@/lib/affiliates/types"
+import { AUTO_SKIP_LABELS, PAYOUT_STATUS_LABELS, effectiveLimits, type PayoutStatus } from "@/lib/affiliates/payout-engine"
+import { autoPayoutPreview } from "@/lib/affiliates/payouts"
+import { SOCIAL_KEYS, SOCIAL_LABELS, count, methodLabel, money, signedMoney } from "@/lib/affiliates/types"
 import { AdminPageHeader, Panel, fmtAgo } from "@/components/admin/ui"
 import { Empty, FieldRow, Kpi, KpiGrid, LEDGER_TYPE_LABELS, StatusBadge, TableShell, THead, fmtDay, tdClass, thClass } from "@/components/affiliate/ui"
 import { AdjustDialog, CodeEditor, CouponDisableButton, FlagToggles, LedgerRowActions, SignalActions, StandingActions, TierSelect } from "@/components/admin/affiliates/actions"
+import { MethodAdminActions, PayoutControls } from "@/components/admin/affiliates/payout-admin"
 import { RuleForm, RulesTable } from "@/components/admin/affiliates/program-form"
 
 const RULE_LABELS: Record<string, string> = { affiliate: "a custom rule", campaign: "a campaign rule", coupon: "a coupon rule", tier: "their tier", default: "the program default" }
@@ -20,7 +23,7 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
   const canManage = roleCan(admin.role, { affiliates: ["manage"] })
   const id = Number((await params).id)
   if (!Number.isInteger(id) || id <= 0) notFound()
-  const d = await affiliateDetail(id)
+  const [d, preview] = await Promise.all([affiliateDetail(id), autoPayoutPreview(id)])
   if (!d) notFound()
   const a = d.affiliate
   const name = `${a.firstName} ${a.lastName}`.trim()
@@ -118,6 +121,62 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
             )}
           </Panel>
         </div>
+
+        {decided && preview && (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Panel
+              title="Payout Controls"
+              description={preview.decision.ok ? `The next automatic run would pay ${money(preview.decision.amount)}.` : `Automatic payout: ${AUTO_SKIP_LABELS[preview.decision.code].toLowerCase()}.`}
+            >
+              {canManage ? (
+                <PayoutControls
+                  affiliateId={a.id}
+                  name={name}
+                  controls={{ autoPayoutAllowed: a.autoPayoutAllowed, manualPayoutAllowed: a.manualPayoutAllowed, autoPayout: a.autoPayout, minOverride: a.minPayoutOverride == null ? null : Number(a.minPayoutOverride), maxOverride: a.maxPayoutOverride == null ? null : Number(a.maxPayoutOverride) }}
+                  inherited={effectiveLimits({ programMin: d.program.minPayout, settings: preview.settings })}
+                />
+              ) : (
+                <div className="divide-y text-sm">
+                  <FieldRow label="Automatic payouts">{a.autoPayoutAllowed ? (a.autoPayout ? "On" : "Allowed, not switched on") : "Disabled by an admin"}</FieldRow>
+                  <FieldRow label="Manual payout requests">{a.manualPayoutAllowed ? "On" : "Off"}</FieldRow>
+                </div>
+              )}
+              <div className="mt-4 divide-y border-t text-sm">
+                <FieldRow label="Effective minimum">{money(preview.limits.min)}{a.minPayoutOverride == null ? " (inherited)" : " (custom)"}</FieldRow>
+                <FieldRow label="Effective maximum">{preview.limits.max == null ? "None" : money(preview.limits.max)}{a.maxPayoutOverride == null ? " (inherited)" : " (custom)"}</FieldRow>
+                <FieldRow label="Their threshold">{money(preview.threshold)}</FieldRow>
+                <FieldRow label="Payout hold">{a.payoutHold ? "Active" : "None"}{a.fraudLock ? " · fraud lock" : ""}</FieldRow>
+              </div>
+            </Panel>
+
+            <Panel title="Payout methods" description="Masked. The full account is shown, and logged, only when paying a payout.">
+              {d.methods.filter((m) => m.status !== "removed").length === 0 ? (
+                <p className="text-sm text-muted-foreground">No payout method on file.</p>
+              ) : (
+                <ul className="divide-y text-sm">
+                  {d.methods
+                    .filter((m) => m.status !== "removed")
+                    .map((m) => (
+                      <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                        <span className="min-w-0">
+                          {m.nickname || methodLabel(m.type)}
+                          {m.isDefault && <span className="ms-2 rounded-full bg-primary/12 px-2 py-0.5 text-xs font-medium text-primary">Default</span>}
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {methodLabel(m.type)} · {m.label}
+                          </span>
+                          {m.holdUntil && m.holdUntil > new Date() && <span className="block text-xs text-[var(--chart-4)]">Security hold until {fmtDay(m.holdUntil)}</span>}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <StatusBadge status={m.status} />
+                          {canManage && <MethodAdminActions id={m.id} status={m.status} name={`${methodLabel(m.type)} ${m.label}`} />}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+        )}
 
         {decided && (
           <section className="flex flex-col gap-3">
@@ -237,11 +296,16 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
                   {d.payouts.map((p) => (
                     <li key={p.id} className="flex items-center justify-between gap-3 py-2">
                       <span>
-                        {PAYOUT_METHOD_LABELS[p.methodType as PayoutMethodType] ?? p.methodType} <span className="font-mono text-xs text-muted-foreground">{p.methodLabel}</span>
-                        <span className="block text-xs text-muted-foreground">{fmtDay(p.requestedAt)}</span>
+                        <Link href={`/admin/affiliates/payouts/${p.id}`} className="font-mono text-xs text-primary hover:underline">
+                          PO-{p.id}
+                        </Link>{" "}
+                        {methodLabel(p.methodType)} <span className="font-mono text-xs text-muted-foreground">{p.methodLabel}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {fmtDay(p.requestedAt)} · {p.mode === "automatic" ? "automatic" : "requested"}
+                        </span>
                       </span>
                       <span className="flex items-center gap-2">
-                        <StatusBadge status={p.status} />
+                        <StatusBadge status={p.status} label={PAYOUT_STATUS_LABELS[p.status as PayoutStatus]} />
                         <span className="tabular-nums font-medium">{money(p.amount)}</span>
                       </span>
                     </li>

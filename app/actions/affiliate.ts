@@ -10,10 +10,9 @@ import { completeOnboarding, submitApplication, updateNotificationPrefs, updateP
 import { claimAttribution } from "@/lib/affiliates/attribution"
 import { createCampaign, createLink, setCampaignStatus, setLinkStatus, updateCampaign, type CampaignInput } from "@/lib/affiliates/campaigns"
 import { createCoupon, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
-import { addPayoutMethod, removePayoutMethod, requestPayout, setDefaultMethod, setPayoutStatus } from "@/lib/affiliates/payouts"
+import { addPayoutMethod, cancelOwnPayout, removePayoutMethod, renameMethod, requestPayout, setAutoPayout, setDefaultMethod, setMethodEnabled, startStripeOnboarding, type Actor } from "@/lib/affiliates/payouts"
 import { referralDetail, type ReferralDetail } from "@/lib/affiliates/queries"
 import { ATTRIBUTION_COOKIE, attributionCookieDomain } from "@/lib/affiliates/token"
-import { PAYOUT_METHOD_TYPES, type PayoutMethodType } from "@/lib/affiliates/types"
 
 // Everything an affiliate (or applicant) can do. The acting affiliate always
 // comes from the session (assertAffiliate) — never from an argument — and the
@@ -138,29 +137,76 @@ export async function loadReferral(publicId: string): Promise<{ ok: true; referr
 }
 
 // --- Payouts -------------------------------------------------------------------
+// Anything that changes where money goes, or moves it, is refused inside an
+// admin's "log in as user" session: support can look, not redirect a payout.
 
-export async function savePayoutMethod(type: string, details: Record<string, string>): Promise<ActionResult> {
+async function payoutActor(): Promise<{ affiliateId: number; actor: Actor; affiliate: Awaited<ReturnType<typeof assertAffiliate>>["affiliate"] }> {
+  const { affiliate, user } = await assertAffiliate()
+  if (user.impersonating) throw new Error("Payout settings can't be changed while logged in as another user.")
+  return { affiliateId: affiliate.id, actor: { type: "affiliate", id: user.id }, affiliate }
+}
+
+export async function savePayoutMethod(type: string, details: Record<string, unknown>): Promise<ActionResult> {
   return run(async () => {
-    const { affiliate } = await assertAffiliate()
-    if (!(PAYOUT_METHOD_TYPES as readonly string[]).includes(type)) throw new Error("Choose a payout method.")
-    await addPayoutMethod(affiliate.id, type as PayoutMethodType, details ?? {})
-    return "Payout method added."
+    const { affiliateId, actor } = await payoutActor()
+    const { holdUntil } = await addPayoutMethod(affiliateId, String(type), details ?? {}, actor)
+    return holdUntil ? "Payout method added. For your security it can be paid to after a short hold." : "Payout method added."
+  })
+}
+
+export async function renamePayoutMethod(id: number, nickname: string): Promise<ActionResult> {
+  return run(async () => {
+    const { affiliateId, actor } = await payoutActor()
+    await renameMethod(affiliateId, Number(id), String(nickname ?? ""), actor)
+    return "Saved."
   })
 }
 
 export async function deletePayoutMethod(id: number): Promise<ActionResult> {
   return run(async () => {
-    const { affiliate } = await assertAffiliate()
-    await removePayoutMethod(affiliate.id, Number(id))
+    const { affiliateId, actor } = await payoutActor()
+    await removePayoutMethod(affiliateId, Number(id), actor)
     return "Payout method removed."
   })
 }
 
 export async function makeDefaultPayoutMethod(id: number): Promise<ActionResult> {
   return run(async () => {
-    const { affiliate } = await assertAffiliate()
-    await setDefaultMethod(affiliate.id, Number(id))
+    const { affiliateId, actor } = await payoutActor()
+    await setDefaultMethod(affiliateId, Number(id), actor)
     return "Default payout method updated."
+  })
+}
+
+export async function togglePayoutMethod(id: number, enabled: boolean): Promise<ActionResult> {
+  return run(async () => {
+    const { affiliateId, actor } = await payoutActor()
+    await setMethodEnabled(affiliateId, Number(id), enabled === true, actor)
+    return enabled ? "Payout method enabled." : "Payout method disabled."
+  })
+}
+
+// Stripe collects the bank details on its own pages; this returns the link there.
+export async function connectStripe(): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    const { affiliate, actor } = await payoutActor()
+    const base = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")
+    if (!base.startsWith("https://")) throw new Error("Stripe onboarding needs the app's public https address to be configured.")
+    const url = await startStripeOnboarding({ id: affiliate.id, email: affiliate.email, country: affiliate.country }, `${base}/affiliate/payouts?stripe=return`, actor)
+    revalidatePath("/affiliate", "layout")
+    return { ok: true, url }
+  } catch (err) {
+    return { ok: false, error: describe(err) }
+  }
+}
+
+// The affiliate's own automatic-payout switch and threshold. The worker also
+// requires the program-wide switch and the admin's per-affiliate one.
+export async function saveAutoPayout(input: { enabled: boolean; threshold: number | null }): Promise<ActionResult> {
+  return run(async () => {
+    const { affiliateId, actor } = await payoutActor()
+    await setAutoPayout(affiliateId, { enabled: input.enabled === true, threshold: input.threshold == null || (input.threshold as unknown) === "" ? null : Number(input.threshold) }, actor)
+    return input.enabled ? "Automatic payouts are on." : "Automatic payouts are off."
   })
 }
 
@@ -168,19 +214,17 @@ export async function makeDefaultPayoutMethod(id: number): Promise<ActionResult>
 // with the same key returns the payout that was already created.
 export async function submitPayoutRequest(input: { amount: number; methodId: number; key: string }): Promise<ActionResult> {
   return run(async () => {
-    const { affiliate, user } = await assertAffiliate()
-    if (user.impersonating) throw new Error("Payouts can't be requested while logged in as another user.")
-    const result = await requestPayout({ affiliateId: affiliate.id, amount: Number(input.amount), methodId: Number(input.methodId), idempotencyKey: String(input.key) })
+    const { affiliateId, actor } = await payoutActor()
+    const result = await requestPayout({ affiliateId, amount: Number(input.amount), methodId: Number(input.methodId), idempotencyKey: String(input.key), actor })
     return result.created ? "Payout requested." : "That payout was already requested."
   })
 }
 
 export async function cancelPayoutRequest(id: number): Promise<ActionResult> {
   return run(async () => {
-    const { affiliate } = await assertAffiliate()
-    // Only while it is still waiting: setPayoutStatus refuses anything else,
-    // and the affiliateId scope refuses anyone else's payout.
-    await setPayoutStatus({ payoutId: Number(id), to: "cancelled", by: null, affiliateId: affiliate.id })
+    const { affiliateId, actor } = await payoutActor()
+    // Only while it is still waiting for approval, and only their own.
+    await cancelOwnPayout(affiliateId, Number(id), actor.id)
     return "Payout cancelled. The amount is back in your available balance."
   })
 }

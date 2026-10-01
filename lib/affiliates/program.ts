@@ -4,6 +4,7 @@ import { affiliateReferrals, affiliateRules, affiliateTiers, affiliates } from "
 import { getAppSetting, setAppSetting } from "@/lib/app-settings"
 import { normalizeProgram, type ProgramSettings } from "./types"
 import { resolveRule, type ResolvedRule, type RuleRow, type TierRow } from "./engine"
+import { normalizePayoutSettings, type PayoutSettings } from "./payout-engine"
 
 // Program-level configuration and the rows the rule engine needs.
 
@@ -21,6 +22,23 @@ export async function getProgram(): Promise<ProgramSettings> {
 export async function saveProgram(next: unknown): Promise<ProgramSettings> {
   const clean = normalizeProgram(next)
   await setAppSetting(KEY, clean)
+  return clean
+}
+
+// Payout controls (automatic payouts, the emergency pause, approval mode,
+// limits, fees) — a separate setting from the commission rules, so pausing
+// payouts never rewrites what the program pays.
+const PAYOUT_KEY = "affiliate_payouts"
+
+export async function getPayoutSettings(): Promise<PayoutSettings> {
+  // No catch here on purpose: if the settings can't be read, the payout code
+  // must fail rather than fall back to defaults that would lift a pause.
+  return normalizePayoutSettings(await getAppSetting(PAYOUT_KEY))
+}
+
+export async function savePayoutSettings(next: unknown): Promise<PayoutSettings> {
+  const clean = normalizePayoutSettings(next)
+  await setAppSetting(PAYOUT_KEY, clean)
   return clean
 }
 

@@ -1,14 +1,15 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { saveNotificationPrefs, saveProfile } from "@/app/actions/affiliate"
-import { NOTIFICATION_PREFS, SOCIAL_KEYS, SOCIAL_LABELS } from "@/lib/affiliates/types"
+import { NOTIFICATION_PREFS, SOCIAL_KEYS, SOCIAL_LABELS, methodLabel } from "@/lib/affiliates/types"
 import { CopyField } from "./copy"
-import { PayoutMethods, type MethodView } from "./payouts"
-import { FieldRow, selectClass } from "./ui"
+import { MethodMark } from "./payout-method-dialog"
+import { FieldRow, StatusBadge, selectClass } from "./ui"
 import { useAction } from "./use-action"
 
 export type SettingsProfile = { firstName: string; lastName: string; email: string; country: string; website: string; socials: Record<string, string> }
@@ -116,7 +117,8 @@ export function AffiliateSettings({
   profile: SettingsProfile
   countries: { code: string; name: string }[]
   prefs: Record<string, boolean>
-  methods: MethodView[]
+  // Masked labels only; methods are managed on the Payouts page.
+  methods: { id: number; type: string; label: string; nickname: string | null; status: string; isDefault: boolean }[]
   // The Security tab is rendered by the page (it reuses the app's own
   // two-step verification panel).
   security: React.ReactNode
@@ -141,7 +143,34 @@ export function AffiliateSettings({
       </TabsContent>
 
       <TabsContent value="payouts" className="max-w-3xl">
-        <PayoutMethods methods={methods} />
+        <section className="rounded-xl border bg-card">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
+            <div>
+              <h2 className="text-sm font-semibold">Payout methods</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">Where your earnings are sent. Adding, removing and automatic payouts live on the Payouts page.</p>
+            </div>
+            <Link href="/affiliate/payouts" className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+              Manage payout methods
+            </Link>
+          </div>
+          {methods.length === 0 ? (
+            <p className="px-5 py-6 text-sm text-muted-foreground">No payout methods yet. Add one to start receiving your affiliate earnings.</p>
+          ) : (
+            <ul className="divide-y">
+              {methods.map((m) => (
+                <li key={m.id} className="flex items-center gap-3 px-5 py-3">
+                  <MethodMark type={m.type} className="size-8" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{m.nickname || methodLabel(m.type)}</p>
+                    <p className="truncate font-mono text-xs text-muted-foreground">{m.label}</p>
+                  </div>
+                  {m.isDefault && <span className="rounded-full bg-primary/12 px-2 py-0.5 text-xs font-medium text-primary">Default</span>}
+                  <StatusBadge status={m.status} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </TabsContent>
 
       <TabsContent value="account" className="max-w-2xl">

@@ -8,10 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   adjustBalance,
   approveCommissionEarly,
-  changePayoutStatus,
   disableAffiliateCoupon,
   resolveSignal,
-  revealPayoutAccount,
   reverseCommissionManually,
   reviewApplication,
   setAffiliateCode,
@@ -21,7 +19,6 @@ import {
 } from "@/app/actions/admin-affiliates"
 import { money } from "@/lib/affiliates/types"
 import { ConfirmButton } from "@/components/affiliate/confirm"
-import { CopyButton } from "@/components/affiliate/copy"
 import { selectClass } from "@/components/affiliate/ui"
 import { useAction } from "@/components/affiliate/use-action"
 
@@ -242,111 +239,6 @@ export function CouponDisableButton({ id, code }: { id: number; code: string }) 
     <ConfirmButton size="xs" variant="destructive" destructive title={`Disable ${code}?`} description="The code stops working at checkout. Customers who already used it stay credited." confirmLabel="Disable" action={() => disableAffiliateCoupon(id)}>
       Disable
     </ConfirmButton>
-  )
-}
-
-// --- Payouts ------------------------------------------------------------------
-
-const DETAIL_LABELS: Record<string, string> = { email: "Email", holder: "Account holder", bankName: "Bank", account: "IBAN / account", swift: "SWIFT / BIC", country: "Country" }
-
-export function PayoutActions({ id, status, amount, name, canManage }: { id: number; status: string; amount: number; name: string; canManage: boolean }) {
-  const [open, setOpen] = useState(false)
-  const [account, setAccount] = useState<{ type: string; details: Record<string, string> } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [ref, setRef] = useState("")
-  const { pending, run } = useAction()
-  if (!canManage) return null
-  const live = status === "pending" || status === "processing"
-
-  async function reveal() {
-    setOpen(true)
-    setAccount(null)
-    setError(null)
-    setLoading(true)
-    const res = await revealPayoutAccount(id)
-    setLoading(false)
-    if (res.ok) setAccount({ type: res.type, details: res.details })
-    else setError(res.error)
-  }
-
-  return (
-    <div className="flex flex-wrap justify-end gap-1.5">
-      <Button variant="outline" size="sm" onClick={reveal}>
-        {live ? "Pay…" : "Account"}
-      </Button>
-      {status === "pending" && (
-        <ConfirmButton title="Mark as processing?" description={`Tells ${name} their ${money(amount)} payout is on its way. They can no longer cancel it.`} confirmLabel="Mark processing" action={() => changePayoutStatus({ payoutId: id, to: "processing" })}>
-          Processing
-        </ConfirmButton>
-      )}
-      {live && (
-        <ConfirmButton
-          variant="destructive"
-          destructive
-          title="Mark this payout as failed?"
-          description={`${money(amount)} goes back to ${name}'s available balance, and they're emailed the reason.`}
-          confirmLabel="Mark failed"
-          reason={{ label: "What went wrong (the affiliate sees this)", required: true, placeholder: "e.g. PayPal rejected the transfer — the account can't receive payments." }}
-          action={(reason) => changePayoutStatus({ payoutId: id, to: "failed", reason })}
-        >
-          Failed
-        </ConfirmButton>
-      )}
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {live ? "Pay" : "Payout to"} {name} — {money(amount)}
-            </DialogTitle>
-            <DialogDescription>Viewing these account details is recorded in the audit log.</DialogDescription>
-          </DialogHeader>
-          {loading && <div role="status" aria-label="Loading" className="h-24 animate-pulse rounded-lg bg-muted" />}
-          {error && <p className="rounded-lg bg-[var(--loss)]/10 px-3 py-2 text-sm text-[var(--loss)]">{error}</p>}
-          {account && (
-            <dl className="divide-y rounded-lg border">
-              <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                <dt className="text-muted-foreground">Method</dt>
-                <dd className="font-medium capitalize">{account.type}</dd>
-              </div>
-              {Object.entries(account.details).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <dt className="text-muted-foreground">{DETAIL_LABELS[k] ?? k}</dt>
-                  <dd className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-mono text-xs">{v}</span>
-                    <CopyButton value={v} iconOnly label={`Copy ${DETAIL_LABELS[k] ?? k}`} />
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {live && account && (
-            <form
-              className="grid gap-3"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (!window.confirm(`Confirm you have sent ${money(amount)} to ${name}. This marks the payout as paid and can't be undone.`)) return
-                run(() => changePayoutStatus({ payoutId: id, to: "paid", providerRef: ref }), () => setOpen(false))
-              }}
-            >
-              <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-                Transaction reference (optional)
-                <Input value={ref} onChange={(e) => setRef(e.target.value)} maxLength={120} placeholder="PayPal / Wise / bank transfer ID" />
-              </label>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-                  Close
-                </Button>
-                <Button type="submit" disabled={pending}>
-                  {pending ? "Saving…" : "I've sent it — mark as paid"}
-                </Button>
-              </DialogFooter>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
   )
 }
 

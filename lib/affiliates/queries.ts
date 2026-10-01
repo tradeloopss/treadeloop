@@ -1,5 +1,5 @@
 import { cache } from "react"
-import { and, desc, eq, gte, ilike, inArray, isNull, lt, sql, type SQL } from "drizzle-orm"
+import { and, desc, eq, gte, ilike, inArray, isNull, lt, ne, sql, type SQL } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { db } from "@/lib/db"
 import {
@@ -393,15 +393,42 @@ export type MonthlyReport = Awaited<ReturnType<typeof monthlyReport>>
 
 export async function payoutsFor(affiliateId: number) {
   const rows = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.affiliateId, affiliateId)).orderBy(desc(affiliatePayouts.requestedAt)).limit(100)
-  return rows.map((p) => ({ id: p.id, amount: n(p.amount), currency: p.currency, methodType: p.methodType, methodLabel: p.methodLabel, status: p.status, failureReason: p.failureReason, requestedAt: p.requestedAt, processedAt: p.processedAt }))
+  return rows.map((p) => ({
+    id: p.id,
+    amount: n(p.amount),
+    fee: n(p.fee),
+    net: n(p.netAmount ?? p.amount),
+    currency: p.currency,
+    methodType: p.methodType,
+    methodLabel: p.methodLabel,
+    status: p.status,
+    mode: p.mode,
+    network: p.network,
+    asset: p.asset,
+    transactionHash: p.transactionHash,
+    failureReason: p.failureReason,
+    requestedAt: p.requestedAt,
+    completedAt: p.completedAt ?? (p.status === "paid" ? p.processedAt : null),
+  }))
 }
 
-// Masked labels only — the encrypted details never leave the server.
+// Masked labels and display-safe facts only — the encrypted details never
+// leave the server.
 export async function payoutMethodsFor(affiliateId: number) {
   return db
-    .select({ id: affiliatePayoutMethods.id, type: affiliatePayoutMethods.type, label: affiliatePayoutMethods.label, isDefault: affiliatePayoutMethods.isDefault, createdAt: affiliatePayoutMethods.createdAt })
+    .select({
+      id: affiliatePayoutMethods.id,
+      type: affiliatePayoutMethods.type,
+      label: affiliatePayoutMethods.label,
+      nickname: affiliatePayoutMethods.nickname,
+      metadata: affiliatePayoutMethods.metadata,
+      status: affiliatePayoutMethods.status,
+      isDefault: affiliatePayoutMethods.isDefault,
+      holdUntil: affiliatePayoutMethods.holdUntil,
+      createdAt: affiliatePayoutMethods.createdAt,
+    })
     .from(affiliatePayoutMethods)
-    .where(and(eq(affiliatePayoutMethods.affiliateId, affiliateId), eq(affiliatePayoutMethods.status, "active")))
+    .where(and(eq(affiliatePayoutMethods.affiliateId, affiliateId), ne(affiliatePayoutMethods.status, "removed")))
     .orderBy(desc(affiliatePayoutMethods.isDefault), affiliatePayoutMethods.id)
 }
 

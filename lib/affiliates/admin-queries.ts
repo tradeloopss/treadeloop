@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm"
+import { and, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import {
   affiliateAnnouncements,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/db/schema"
 import { ledgerBalances, round2, tierFor, type Balances } from "./engine"
 import { getProgram, loadTiers } from "./program"
+import { PAYOUT_GROUPS, PAYOUT_IN_FLIGHT, type PayoutGroup } from "./payout-engine"
 import { EARNED, PAGE_SIZE, ledgerWhere, performance, type LedgerFilters } from "./queries"
 import { rangeStart, type Range } from "./types"
 import { EXPORT_LIMIT } from "./csv"
@@ -49,7 +50,7 @@ export async function programOverview(range: Range) {
     performance(null, range, since),
     db.select({ status: affiliates.status, v: sql<number>`count(*)::int` }).from(affiliates).groupBy(affiliates.status),
     balancesByAffiliate(null),
-    db.select({ count: sql<number>`count(*)::int`, total: sql<string>`coalesce(sum(${affiliatePayouts.amount}), 0)` }).from(affiliatePayouts).where(inArray(affiliatePayouts.status, ["pending", "processing"])),
+    db.select({ count: sql<number>`count(*)::int`, total: sql<string>`coalesce(sum(${affiliatePayouts.amount}), 0)` }).from(affiliatePayouts).where(inArray(affiliatePayouts.status, PAYOUT_IN_FLIGHT)),
     db.select({ v: sql<number>`count(*)::int` }).from(affiliateFraudSignals).where(inArray(affiliateFraudSignals.status, ["open", "reviewing"])),
     db
       .select({ id: affiliates.id, firstName: affiliates.firstName, lastName: affiliates.lastName, code: affiliates.code, commission: sql<string>`coalesce(sum(${affiliateCommissions.amount}), 0)` })
@@ -146,7 +147,11 @@ export async function affiliateDetail(id: number) {
       .orderBy(desc(affiliateCommissions.createdAt), desc(affiliateCommissions.id))
       .limit(40),
     db.select().from(affiliatePayouts).where(eq(affiliatePayouts.affiliateId, id)).orderBy(desc(affiliatePayouts.requestedAt)).limit(20),
-    db.select({ id: affiliatePayoutMethods.id, type: affiliatePayoutMethods.type, label: affiliatePayoutMethods.label, isDefault: affiliatePayoutMethods.isDefault, status: affiliatePayoutMethods.status }).from(affiliatePayoutMethods).where(eq(affiliatePayoutMethods.affiliateId, id)),
+    db
+      .select({ id: affiliatePayoutMethods.id, type: affiliatePayoutMethods.type, label: affiliatePayoutMethods.label, nickname: affiliatePayoutMethods.nickname, metadata: affiliatePayoutMethods.metadata, isDefault: affiliatePayoutMethods.isDefault, status: affiliatePayoutMethods.status, holdUntil: affiliatePayoutMethods.holdUntil, createdAt: affiliatePayoutMethods.createdAt })
+      .from(affiliatePayoutMethods)
+      .where(eq(affiliatePayoutMethods.affiliateId, id))
+      .orderBy(desc(affiliatePayoutMethods.isDefault), affiliatePayoutMethods.id),
     db.select().from(affiliateFraudSignals).where(eq(affiliateFraudSignals.affiliateId, id)).orderBy(desc(affiliateFraudSignals.createdAt)).limit(20),
     getProgram(),
   ])
@@ -171,40 +176,83 @@ export async function affiliateDetail(id: number) {
 }
 export type AffiliateDetail = NonNullable<Awaited<ReturnType<typeof affiliateDetail>>>
 
-export async function payoutsPage(f: { status?: string; page?: number }, pageSize = PAGE_SIZE) {
-  const where = f.status === "open" ? inArray(affiliatePayouts.status, ["pending", "processing"]) : f.status ? eq(affiliatePayouts.status, f.status) : undefined
+export type PayoutFilters = { group?: PayoutGroup; q?: string; method?: string; mode?: string; from?: Date | null; to?: Date | null; min?: number | null; max?: number | null; page?: number }
+
+function payoutWhere(f: PayoutFilters) {
+  const q = f.q?.trim().replace(/[%_\\]/g, "")
+  return and(
+    f.group ? inArray(affiliatePayouts.status, PAYOUT_GROUPS[f.group]) : undefined,
+    f.method ? eq(affiliatePayouts.methodType, f.method) : undefined,
+    f.mode === "manual" || f.mode === "automatic" ? eq(affiliatePayouts.mode, f.mode) : undefined,
+    f.from ? gte(affiliatePayouts.requestedAt, f.from) : undefined,
+    f.to ? lt(affiliatePayouts.requestedAt, f.to) : undefined,
+    f.min != null ? gte(affiliatePayouts.amount, String(f.min)) : undefined,
+    f.max != null ? lte(affiliatePayouts.amount, String(f.max)) : undefined,
+    q ? or(ilike(affiliates.email, `%${q}%`), ilike(affiliates.firstName, `%${q}%`), ilike(affiliates.lastName, `%${q}%`), ilike(affiliates.code, `%${q}%`)) : undefined
+  )
+}
+
+const payoutColumns = {
+  id: affiliatePayouts.id,
+  affiliateId: affiliatePayouts.affiliateId,
+  amount: affiliatePayouts.amount,
+  fee: affiliatePayouts.fee,
+  netAmount: affiliatePayouts.netAmount,
+  currency: affiliatePayouts.currency,
+  methodId: affiliatePayouts.methodId,
+  methodType: affiliatePayouts.methodType,
+  methodLabel: affiliatePayouts.methodLabel,
+  provider: affiliatePayouts.provider,
+  status: affiliatePayouts.status,
+  mode: affiliatePayouts.mode,
+  network: affiliatePayouts.network,
+  asset: affiliatePayouts.asset,
+  transactionHash: affiliatePayouts.transactionHash,
+  providerRef: affiliatePayouts.providerRef,
+  failureReason: affiliatePayouts.failureReason,
+  note: affiliatePayouts.note,
+  attempts: affiliatePayouts.attempts,
+  requestedAt: affiliatePayouts.requestedAt,
+  approvedAt: affiliatePayouts.approvedAt,
+  submittedAt: affiliatePayouts.submittedAt,
+  completedAt: affiliatePayouts.completedAt,
+  failedAt: affiliatePayouts.failedAt,
+  processedAt: affiliatePayouts.processedAt,
+  firstName: affiliates.firstName,
+  lastName: affiliates.lastName,
+  email: affiliates.email,
+  affiliateStatus: affiliates.status,
+  payoutHold: affiliates.payoutHold,
+  fraudLock: affiliates.fraudLock,
+}
+
+const payoutRow = <T extends { amount: string; fee: string; netAmount: string | null }>(r: T) => ({ ...r, amount: n(r.amount), fee: n(r.fee), net: n(r.netAmount ?? r.amount) })
+
+export async function payoutsPage(f: PayoutFilters, pageSize = PAGE_SIZE) {
+  const where = payoutWhere(f)
   const page = Math.max(1, f.page ?? 1)
-  const [rows, [total]] = await Promise.all([
+  const [rows, [total], counts] = await Promise.all([
     db
-      .select({
-        id: affiliatePayouts.id,
-        affiliateId: affiliatePayouts.affiliateId,
-        amount: affiliatePayouts.amount,
-        currency: affiliatePayouts.currency,
-        methodId: affiliatePayouts.methodId,
-        methodType: affiliatePayouts.methodType,
-        methodLabel: affiliatePayouts.methodLabel,
-        status: affiliatePayouts.status,
-        providerRef: affiliatePayouts.providerRef,
-        failureReason: affiliatePayouts.failureReason,
-        requestedAt: affiliatePayouts.requestedAt,
-        processedAt: affiliatePayouts.processedAt,
-        firstName: affiliates.firstName,
-        lastName: affiliates.lastName,
-        email: affiliates.email,
-        payoutHold: affiliates.payoutHold,
-        fraudLock: affiliates.fraudLock,
-      })
+      .select(payoutColumns)
       .from(affiliatePayouts)
       .innerJoin(affiliates, eq(affiliates.id, affiliatePayouts.affiliateId))
       .where(where)
       .orderBy(desc(affiliatePayouts.requestedAt))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ v: sql<number>`count(*)::int` }).from(affiliatePayouts).where(where),
+    db.select({ v: sql<number>`count(*)::int`, sum: sql<string>`coalesce(sum(${affiliatePayouts.amount}), 0)` }).from(affiliatePayouts).innerJoin(affiliates, eq(affiliates.id, affiliatePayouts.affiliateId)).where(where),
+    db.select({ status: affiliatePayouts.status, v: sql<number>`count(*)::int` }).from(affiliatePayouts).groupBy(affiliatePayouts.status),
   ])
-  return { rows: rows.map((r) => ({ ...r, amount: n(r.amount) })), total: total?.v ?? 0, page }
+  // How many payouts sit in each tab, whatever the filters.
+  const groups = Object.fromEntries((Object.keys(PAYOUT_GROUPS) as PayoutGroup[]).map((g) => [g, counts.filter((c) => (PAYOUT_GROUPS[g] as string[]).includes(c.status)).reduce((sum, c) => sum + c.v, 0)])) as Record<PayoutGroup, number>
+  return { rows: rows.map(payoutRow), total: total?.v ?? 0, sum: round2(n(total?.sum)), page, groups }
 }
+
+export async function payoutDetail(id: number) {
+  const [row] = await db.select(payoutColumns).from(affiliatePayouts).innerJoin(affiliates, eq(affiliates.id, affiliatePayouts.affiliateId)).where(eq(affiliatePayouts.id, id))
+  return row ? payoutRow(row) : null
+}
+export type PayoutDetail = NonNullable<Awaited<ReturnType<typeof payoutDetail>>>
 
 export async function signalsPage(f: { status?: string; page?: number }, pageSize = PAGE_SIZE) {
   const where = f.status === "open" || !f.status ? inArray(affiliateFraudSignals.status, ["open", "reviewing"]) : f.status === "all" ? undefined : eq(affiliateFraudSignals.status, f.status)
@@ -334,15 +382,15 @@ export async function exportTable(kind: ExportKind, affiliateId: number | null, 
   }
   if (kind === "payouts") {
     const rows = await db
-      .select({ id: affiliatePayouts.id, requestedAt: affiliatePayouts.requestedAt, processedAt: affiliatePayouts.processedAt, amount: affiliatePayouts.amount, currency: affiliatePayouts.currency, methodType: affiliatePayouts.methodType, methodLabel: affiliatePayouts.methodLabel, status: affiliatePayouts.status, providerRef: affiliatePayouts.providerRef, failureReason: affiliatePayouts.failureReason, affiliate: affiliates.email })
+      .select(payoutColumns)
       .from(affiliatePayouts)
       .innerJoin(affiliates, eq(affiliates.id, affiliatePayouts.affiliateId))
       .where(and(admin ? undefined : eq(affiliatePayouts.affiliateId, affiliateId), f.status ? eq(affiliatePayouts.status, f.status) : undefined))
       .orderBy(desc(affiliatePayouts.requestedAt))
       .limit(EXPORT_LIMIT)
     return {
-      header: ["id", "requested", "processed", ...(admin ? ["affiliate"] : []), "amount", "currency", "method", "account", "status", ...(admin ? ["reference"] : []), "failure_reason"],
-      rows: rows.map((r) => [r.id, r.requestedAt, r.processedAt, ...(admin ? [r.affiliate] : []), n(r.amount), r.currency, r.methodType, r.methodLabel, r.status, ...(admin ? [r.providerRef] : []), r.failureReason]),
+      header: ["id", "requested", "completed", ...(admin ? ["affiliate"] : []), "amount", "fee", "net", "currency", "method", "account", "status", "mode", "network", "transaction", ...(admin ? ["reference"] : []), "failure_reason"],
+      rows: rows.map((r) => [r.id, r.requestedAt, r.completedAt, ...(admin ? [r.email] : []), n(r.amount), n(r.fee), n(r.netAmount ?? r.amount), r.currency, r.methodType, r.methodLabel, r.status, r.mode, r.network, r.transactionHash, ...(admin ? [r.providerRef] : []), r.failureReason]),
     }
   }
   const rows = await db

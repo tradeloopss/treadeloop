@@ -36,7 +36,7 @@ export default async function AffiliateSettingsPage() {
           profile={{ firstName: affiliate.firstName, lastName: affiliate.lastName, email: affiliate.email, country: affiliate.country ?? "", website: affiliate.website ?? "", socials: affiliate.socials ?? {} }}
           countries={countryOptions()}
           prefs={Object.fromEntries(NOTIFICATION_PREFS.map((p) => [p.key, prefEnabled(affiliate.notifications, p.key)]))}
-          methods={methods}
+          methods={methods.map((m) => ({ id: m.id, type: m.type, label: m.label, nickname: m.nickname, status: m.status, isDefault: m.isDefault }))}
           account={{
             code: affiliate.code,
             url: buildTrackingUrl({ base: SITE_URL, code: affiliate.code, linkToken: link?.token }),

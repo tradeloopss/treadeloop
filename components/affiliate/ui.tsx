@@ -25,6 +25,14 @@ const STATUS: Record<string, { label: string; className: string }> = {
   reversed: { label: "Reversed", className: "bg-[var(--loss)]/12 text-[var(--loss)]" },
   // payouts
   processing: { label: "Processing", className: "bg-primary/12 text-primary" },
+  queued: { label: "Queued", className: "bg-primary/12 text-primary" },
+  submitted: { label: "Submitted", className: "bg-primary/12 text-primary" },
+  confirming: { label: "Confirming", className: "bg-primary/12 text-primary" },
+  retry_required: { label: "Retry required", className: "bg-[var(--chart-4)]/15 text-[var(--chart-4)]" },
+  on_hold: { label: "On hold", className: "bg-[var(--chart-4)]/15 text-[var(--chart-4)]" },
+  // payout methods
+  pending_verification: { label: "Pending verification", className: "bg-[var(--chart-4)]/15 text-[var(--chart-4)]" },
+  verification_required: { label: "Verification required", className: "bg-[var(--chart-4)]/15 text-[var(--chart-4)]" },
   failed: { label: "Failed", className: "bg-[var(--loss)]/12 text-[var(--loss)]" },
   // affiliates
   review: { label: "In review", className: "bg-primary/12 text-primary" },

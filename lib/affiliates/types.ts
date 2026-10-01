@@ -22,13 +22,30 @@ export const RESOURCE_CATEGORY_LABELS: Record<string, string> = { brand: "Brand 
 export const RESOURCE_CATEGORIES =["brand", "social", "creative", "product", "video", "copy"] as const
 export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number]
 
-export const PAYOUT_METHOD_TYPES = ["paypal", "wise", "bank"] as const
+export const PAYOUT_METHOD_TYPES = ["paypal", "wise", "bank", "stripe", "crypto_trc20"] as const
 export type PayoutMethodType = (typeof PAYOUT_METHOD_TYPES)[number]
-export const PAYOUT_METHOD_LABELS: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "Bank transfer" }
+export const PAYOUT_METHOD_LABELS: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "Bank transfer", stripe: "Stripe Connect", crypto_trc20: "Crypto — USDT (TRC-20)" }
+// What the method picker says under each name.
+export const PAYOUT_METHOD_BLURBS: Record<PayoutMethodType, { tagline: string; timing: string }> = {
+  paypal: { tagline: "Fast and secure payments", timing: "2–5 business days" },
+  wise: { tagline: "Low-fee global transfers", timing: "1–3 business days" },
+  bank: { tagline: "Direct to your bank account", timing: "3–7 business days" },
+  stripe: { tagline: "For eligible countries", timing: "2–5 business days" },
+  crypto_trc20: { tagline: "USDT on the TRON network", timing: "TRON / TRC-20" },
+}
+export const methodLabel = (type: string) => PAYOUT_METHOD_LABELS[type as PayoutMethodType] ?? type
+// "PayPal, Wise, bank transfer or USDT" — the methods actually on offer, for copy.
+const SHORT: Record<PayoutMethodType, string> = { paypal: "PayPal", wise: "Wise", bank: "bank transfer", stripe: "Stripe", crypto_trc20: "USDT (TRC-20)" }
+export function methodList(types: readonly string[]): string {
+  const names = types.map((t) => SHORT[t as PayoutMethodType]).filter(Boolean)
+  if (names.length === 0) return "the payout methods on offer"
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`
+}
+// The currency an account receives in (the payout itself is calculated in USD).
+export const PAYOUT_CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "CHF", "AED", "SAR", "EGP", "INR", "SGD", "JPY", "MXN", "BRL", "ZAR", "TRY", "PLN", "SEK", "NOK", "DKK"] as const
 
 export type LedgerType = "subscription" | "bonus" | "adjustment" | "refund" | "reversal" | "payout"
 export type LedgerStatus = "pending" | "approved" | "available" | "paid" | "reversed" | "refunded" | "cancelled"
-export type PayoutStatus = "pending" | "processing" | "paid" | "failed" | "cancelled"
 export type ReferralStatus = "signup" | "trial" | "active" | "cancelled" | "refunded"
 
 // The program rules an admin controls at /admin/affiliates/rules. Stored as

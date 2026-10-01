@@ -16,6 +16,7 @@ export const FRAUD_LABELS: Record<string, string> = {
   repeated_refunds: "High refund rate",
   chargeback: "Chargeback on a referred payment",
   suspicious_coupon: "Coupon-only conversions",
+  shared_payout_method: "Payout method shared with another affiliate",
 }
 
 // One open signal per affiliate + type + month (dedupeKey), so a recurring

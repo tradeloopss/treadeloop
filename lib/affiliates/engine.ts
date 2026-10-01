@@ -212,41 +212,8 @@ export function planReversal(original: { amount: number; status: string }, share
 }
 
 // ------------------------------------------------------------------ payouts
-
-export function validatePayoutRequest(input: {
-  amount: number
-  available: number
-  minPayout: number
-  hasMethod: boolean
-  affiliateStatus: string
-  payoutHold: boolean
-  fraudLock: boolean
-}): string | null {
-  if (input.affiliateStatus !== "approved") return "Your affiliate account isn't active, so payouts are unavailable."
-  if (input.fraudLock) return "Payouts are paused while your account is under review."
-  if (input.payoutHold) return "Payouts are on hold for your account. Contact affiliate support."
-  if (!input.hasMethod) return "Add a payout method first."
-  if (!Number.isFinite(input.amount) || input.amount <= 0) return "Enter an amount."
-  if (round2(input.amount) !== input.amount) return "Use at most two decimal places."
-  if (input.amount < input.minPayout) return `The minimum payout is $${input.minPayout.toFixed(2)}.`
-  if (input.amount > input.available) return "That's more than your available balance."
-  return null
-}
-
-// A payout only moves forward: requested → processing → paid, or out through
-// failed / cancelled. Terminal states never change again.
-const PAYOUT_NEXT: Record<string, string[]> = {
-  pending: ["processing", "paid", "failed", "cancelled"],
-  processing: ["paid", "failed"],
-  paid: [],
-  failed: [],
-  cancelled: [],
-}
-export const payoutTransitionAllowed = (from: string, to: string) => (PAYOUT_NEXT[from] ?? []).includes(to)
-
-// The status of a payout's ledger row. A failed or cancelled payout stops
-// counting, which is what returns the money to the available balance.
-export const payoutLedgerStatus = (payoutStatus: string) => (payoutStatus === "failed" || payoutStatus === "cancelled" ? "cancelled" : payoutStatus)
+// (The payout status machine, limits and the automatic-payout decision live in
+// payout-engine.ts.)
 
 // Which cleared commissions a paid payout settles: oldest first, whole rows
 // only, never more than the payout. Purely a label ("paid") plus the payout

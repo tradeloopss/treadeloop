@@ -12,7 +12,8 @@ export default async function AdminAffiliatesLayout({ children }: { children: Re
   const one = sql<number>`count(*)::int`
   const [[apps], [payouts], [signals]] = await Promise.all([
     db.select({ v: one }).from(affiliates).where(inArray(affiliates.status, ["pending", "review"])),
-    db.select({ v: one }).from(affiliatePayouts).where(inArray(affiliatePayouts.status, ["pending", "processing"])),
+    // Payouts waiting on a person: to approve, to send, or to retry.
+    db.select({ v: one }).from(affiliatePayouts).where(inArray(affiliatePayouts.status, ["pending", "queued", "retry_required"])),
     db.select({ v: one }).from(affiliateFraudSignals).where(inArray(affiliateFraudSignals.status, ["open", "reviewing"])),
   ])
   return (
@@ -22,6 +23,7 @@ export default async function AdminAffiliatesLayout({ children }: { children: Re
           { href: "/admin/affiliates", label: "Overview" },
           { href: "/admin/affiliates/applications", label: "Applications", badge: apps?.v || undefined },
           { href: "/admin/affiliates/payouts", label: "Payouts", badge: payouts?.v || undefined },
+          { href: "/admin/affiliates/payout-settings", label: "Payout settings" },
           { href: "/admin/affiliates/rules", label: "Commission rules" },
           { href: "/admin/affiliates/tiers", label: "Tiers" },
           { href: "/admin/affiliates/fraud", label: "Risk", badge: signals?.v || undefined },

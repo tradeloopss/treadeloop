@@ -1490,6 +1490,15 @@ export const affiliates = pgTable(
     payoutHold: boolean("payoutHold").notNull().default(false),
     fraudLock: boolean("fraudLock").notNull().default(false),
     payoutCurrency: text("payoutCurrency").notNull().default("usd"),
+    // Automatic payouts need BOTH: the affiliate switched them on (autoPayout)
+    // and an admin has not switched them off for this affiliate
+    // (autoPayoutAllowed). The payout worker re-reads both under a row lock.
+    autoPayout: boolean("autoPayout").notNull().default(false),
+    autoPayoutAllowed: boolean("autoPayoutAllowed").notNull().default(true),
+    manualPayoutAllowed: boolean("manualPayoutAllowed").notNull().default(true),
+    autoPayoutThreshold: numeric("autoPayoutThreshold"), // the affiliate's own threshold; null = the minimum
+    minPayoutOverride: numeric("minPayoutOverride"), // admin: custom minimum; null = inherited
+    maxPayoutOverride: numeric("maxPayoutOverride"), // admin: custom maximum; null = inherited
     notifications: jsonb("notifications").$type<Record<string, boolean>>(),
     rejectionReason: text("rejectionReason"),
     reviewedBy: text("reviewedBy"),
@@ -1702,12 +1711,24 @@ export const affiliatePayoutMethods = pgTable(
   {
     id: serial("id").primaryKey(),
     affiliateId: integer("affiliateId").notNull(),
-    type: text("type").notNull(), // paypal | wise | bank
+    type: text("type").notNull(), // paypal | wise | bank | stripe | crypto_trc20
     label: text("label").notNull(), // masked, safe to display
+    nickname: text("nickname"), // the affiliate's own name for it ("Main USDT wallet")
     details: text("details").notNull(), // AES-256-GCM encrypted JSON (lib/crypto)
+    // Display-safe facts only: country, currency, account type, network, asset,
+    // Stripe onboarding state. Nothing that could move money.
+    metadata: jsonb("metadata").$type<Record<string, string>>(),
+    // HMAC of the destination, to spot the same account/wallet being re-added.
+    fingerprint: text("fingerprint"),
     isDefault: boolean("isDefault").notNull().default(false),
-    status: text("status").notNull().default("active"), // active | removed
+    // active | pending_verification | verification_required | disabled | rejected | removed
+    status: text("status").notNull().default("active"),
+    // A method added to an account that already had one can't be paid to
+    // until this passes (the wallet-change security hold).
+    holdUntil: timestamp("holdUntil"),
+    verifiedAt: timestamp("verifiedAt"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
   },
   (t) => [index("affiliate_payout_methods_affiliate").on(t.affiliateId)]
 )
@@ -1724,15 +1745,84 @@ export const affiliatePayouts = pgTable(
     methodLabel: text("methodLabel").notNull(),
     provider: text("provider").notNull().default("manual"),
     providerRef: text("providerRef"),
-    status: text("status").notNull().default("pending"), // pending | processing | paid | failed | cancelled
+    // pending (awaiting approval) | queued (approved, waiting to be sent) |
+    // processing | submitted | confirming | paid | failed | retry_required |
+    // on_hold | cancelled | rejected | reversed
+    // (lib/affiliates/payout-engine.ts holds the allowed transitions)
+    status: text("status").notNull().default("pending"),
+    mode: text("mode").notNull().default("manual"), // manual (requested) | automatic (worker)
+    fee: numeric("fee").notNull().default("0"),
+    netAmount: numeric("netAmount"), // what the affiliate receives; amount − fee
+    network: text("network"), // TRON, for crypto
+    asset: text("asset"), // USDT, for crypto
+    transactionHash: text("transactionHash"),
     idempotencyKey: text("idempotencyKey").notNull(),
     failureReason: text("failureReason"),
     note: text("note"),
+    heldFrom: text("heldFrom"), // the status a hold was placed from, to return to
+    attempts: integer("attempts").notNull().default(0),
     processedBy: text("processedBy"),
+    approvedBy: text("approvedBy"),
     requestedAt: timestamp("requestedAt").notNull().defaultNow(),
+    approvedAt: timestamp("approvedAt"),
+    submittedAt: timestamp("submittedAt"),
     processedAt: timestamp("processedAt"),
+    completedAt: timestamp("completedAt"),
+    failedAt: timestamp("failedAt"),
+    lastCheckedAt: timestamp("lastCheckedAt"),
   },
-  (t) => [uniqueIndex("affiliate_payouts_idem").on(t.idempotencyKey), index("affiliate_payouts_affiliate").on(t.affiliateId, t.requestedAt), index("affiliate_payouts_status").on(t.status)]
+  (t) => [
+    uniqueIndex("affiliate_payouts_idem").on(t.idempotencyKey),
+    // One on-chain transaction can settle one payout, ever.
+    uniqueIndex("affiliate_payouts_tx").on(t.transactionHash),
+    index("affiliate_payouts_affiliate").on(t.affiliateId, t.requestedAt),
+    index("affiliate_payouts_status").on(t.status),
+  ]
+)
+
+// Every attempt to move the money for a payout: a provider transfer or an
+// on-chain transaction. What the provider / the chain says here is what
+// decides whether a payout is complete — never the browser.
+export const affiliatePayoutTransactions = pgTable(
+  "affiliate_payout_transactions",
+  {
+    id: serial("id").primaryKey(),
+    payoutId: integer("payoutId").notNull(),
+    provider: text("provider").notNull(),
+    providerTransactionId: text("providerTransactionId"),
+    network: text("network"), // TRON
+    asset: text("asset"), // USDT
+    amount: numeric("amount").notNull(),
+    destination: text("destination").notNull(), // masked
+    transactionHash: text("transactionHash"),
+    status: text("status").notNull().default("submitted"), // submitted | confirming | confirmed | failed | not_found
+    failureReason: text("failureReason"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    submittedAt: timestamp("submittedAt"),
+    confirmedAt: timestamp("confirmedAt"),
+  },
+  (t) => [index("affiliate_payout_tx_payout").on(t.payoutId), uniqueIndex("affiliate_payout_tx_hash").on(t.transactionHash)]
+)
+
+// The payout audit trail: who did what to which payout or payout method,
+// with the before/after and the reason. Affiliate, admin and system actions
+// all land here (admin ones are also in admin_audit_log).
+export const affiliatePayoutEvents = pgTable(
+  "affiliate_payout_events",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    payoutId: integer("payoutId"),
+    methodId: integer("methodId"),
+    actorType: text("actorType").notNull(), // affiliate | admin | system
+    actorId: text("actorId"),
+    action: text("action").notNull(),
+    previous: jsonb("previous").$type<Record<string, unknown>>(),
+    next: jsonb("next").$type<Record<string, unknown>>(),
+    reason: text("reason"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_payout_events_affiliate").on(t.affiliateId, t.createdAt), index("affiliate_payout_events_payout").on(t.payoutId)]
 )
 
 // Risk signals for a human to review — never an automatic verdict.

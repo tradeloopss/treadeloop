@@ -10,10 +10,11 @@ import type { Permissions } from "@/lib/admin/access"
 import { decideApplication, validateCode, type Decision } from "@/lib/affiliates/apply"
 import { addLedgerEntry, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
 import { setCouponStatus } from "@/lib/affiliates/coupons"
-import { revealMethodDetails, setPayoutStatus } from "@/lib/affiliates/payouts"
+import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
+import { adminPayoutAction, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
 import { notifyAffiliate } from "@/lib/affiliates/notify"
-import { saveProgram } from "@/lib/affiliates/program"
-import { ANNOUNCEMENT_CATEGORIES, RESOURCE_CATEGORIES, type PayoutStatus } from "@/lib/affiliates/types"
+import { getPayoutSettings, getProgram, saveProgram, savePayoutSettings } from "@/lib/affiliates/program"
+import { ANNOUNCEMENT_CATEGORIES, RESOURCE_CATEGORIES } from "@/lib/affiliates/types"
 
 // Admin side of the affiliate program. Every action re-checks the permission
 // on the server and writes the existing admin audit log.
@@ -256,32 +257,135 @@ export async function reverseCommissionManually(commissionId: number, note: stri
 
 // --- Payouts ---------------------------------------------------------------------
 
-export async function changePayoutStatus(input: { payoutId: number; to: PayoutStatus; reason?: string; providerRef?: string; note?: string }): Promise<ActionResult> {
+const ACTIONS: AdminAction[] = ["approve", "reject", "hold", "release", "cancel", "start", "mark_paid", "fail", "retry", "reverse"]
+const DONE: Record<AdminAction, string> = {
+  approve: "Payout approved.",
+  reject: "Payout rejected. The amount is back in the affiliate's balance.",
+  hold: "Payout placed on hold.",
+  release: "Hold released.",
+  cancel: "Payout cancelled. The amount is back in the affiliate's balance.",
+  start: "Marked as processing.",
+  mark_paid: "Payout marked as paid.",
+  fail: "Payout marked as failed. The amount is back in the affiliate's balance.",
+  retry: "Payout queued again.",
+  reverse: "Payout reversed. The amount is back in the affiliate's balance.",
+}
+
+const adminActor = (admin: { id: string }): Actor => ({ type: "admin", id: admin.id })
+
+// Every admin move on a payout. What is allowed in which state is decided by
+// lib/affiliates/payouts.adminPayoutAction — this only checks the permission
+// and writes the audit log.
+export async function payoutAction(input: { payoutId: number; action: AdminAction; reason?: string; reference?: string }): Promise<ActionResult> {
   return run(async () => {
     const admin = await assertAdmin(MANAGE)
-    if (!["processing", "paid", "failed", "cancelled"].includes(input.to)) throw new Error("Unknown payout status.")
-    const { affiliateId, amount } = await setPayoutStatus({ payoutId: Number(input.payoutId), to: input.to, by: admin.id, reason: input.reason, providerRef: input.providerRef, note: input.note })
-    const aff = await target(affiliateId)
-    await logAdminAction(admin, "affiliate.payout_status", aff.userId, { payoutId: input.payoutId, to: input.to, amount, reason: input.reason || undefined, providerRef: input.providerRef || undefined })
-    return `Payout marked ${input.to}.`
+    if (!ACTIONS.includes(input.action)) throw new Error("Unknown action.")
+    const payout = await adminPayoutAction(Number(input.payoutId), input.action, adminActor(admin), { reason: input.reason, reference: input.reference })
+    const aff = await target(payout.affiliateId)
+    await logAdminAction(admin, `affiliate.payout_${input.action}`, aff.userId, { payoutId: payout.id, amount: Number(payout.amount), status: payout.status, reason: input.reason || undefined, reference: input.reference || undefined })
+    return payout.status === "retry_required" ? `The provider couldn't send it: ${payout.failureReason ?? "unknown error"}` : DONE[input.action]
+  })
+}
+
+// The hash of the USDT transfer an admin sent. The chain decides what happens
+// next — see submitCryptoTransaction.
+export async function submitPayoutTransaction(payoutId: number, hash: string): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const payout = await submitCryptoTransaction(Number(payoutId), String(hash ?? ""), adminActor(admin))
+    const aff = await target(payout.affiliateId)
+    await logAdminAction(admin, "affiliate.payout_transaction", aff.userId, { payoutId: payout.id, transactionHash: payout.transactionHash, status: payout.status })
+    return payout.status === "paid" ? "Confirmed on-chain. Payout completed." : payout.status === "confirming" ? "Found on-chain — waiting for final confirmation." : "Transaction recorded. It isn't visible on the network yet; it will be checked again automatically."
+  })
+}
+
+export async function checkPayout(payoutId: number): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const payout = await trackPayout(Number(payoutId), adminActor(admin))
+    if (!payout) throw new Error("That payout no longer exists.")
+    return payout.status === "paid" ? "Confirmed on-chain. Payout completed." : payout.status === "retry_required" ? `Needs attention: ${payout.failureReason ?? ""}` : `Still ${payout.status}.`
   })
 }
 
 // The decrypted account a payout should be sent to. Shown on demand only, and
 // every look is in the audit log.
-export async function revealPayoutAccount(payoutId: number): Promise<{ ok: true; type: string; details: Record<string, string> } | { ok: false; error: string }> {
+export async function revealPayoutAccount(payoutId: number): Promise<{ ok: true; type: string; details: Record<string, string>; metadata: Record<string, string>; net: number; asset: string | null } | { ok: false; error: string }> {
   try {
     const admin = await assertAdmin(MANAGE)
-    const [payout] = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, Number(payoutId)))
-    if (!payout?.methodId) throw new Error("That payout has no account on file.")
-    const account = await revealMethodDetails(payout.methodId)
+    const [payout] = await db.select({ id: affiliatePayouts.id, affiliateId: affiliatePayouts.affiliateId }).from(affiliatePayouts).where(eq(affiliatePayouts.id, Number(payoutId)))
+    if (!payout) throw new Error("That payout no longer exists.")
+    const account = await revealPayoutDestination(payout.id)
     if (!account) throw new Error("The account details couldn't be read.")
     const aff = await target(payout.affiliateId)
     await logAdminAction(admin, "affiliate.payout_reveal", aff.userId, { payoutId: payout.id })
-    return { ok: true, ...account }
+    return { ok: true, type: account.type, details: account.details, metadata: account.metadata, net: account.net, asset: account.asset }
   } catch (err) {
     return { ok: false, error: describe(err) }
   }
+}
+
+// Program-wide payout settings (not the pause — that has its own action so it
+// can't be flipped by accident while editing a limit).
+export async function savePayoutConfig(input: Record<string, unknown>): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const before = await getPayoutSettings()
+    const minPayout = Number(input.minPayout)
+    if (!Number.isFinite(minPayout) || minPayout < 1) throw new Error("The minimum payout must be at least $1.")
+    if (input.maxPayout != null && input.maxPayout !== "" && Number(input.maxPayout) < minPayout) throw new Error("The maximum payout can't be below the minimum.")
+    const saved = await savePayoutSettings({ ...input, paused: before.paused })
+    const program = await getProgram()
+    if (program.minPayout !== minPayout) await saveProgram({ ...program, minPayout })
+    await logAdminAction(admin, saved.autoPayouts !== before.autoPayouts ? (saved.autoPayouts ? "affiliate.auto_payouts_on" : "affiliate.auto_payouts_off") : "affiliate.payout_settings", null, { previous: { ...before, minPayout: program.minPayout }, next: { ...saved, minPayout } })
+    return saved.autoPayouts !== before.autoPayouts ? (saved.autoPayouts ? "Saved. Automatic payouts are ON — each payout still passes every eligibility check." : "Saved. Automatic payouts are OFF. Balances and each affiliate's own setting are unchanged.") : "Payout settings saved."
+  })
+}
+
+// PAUSE ALL PAYOUTS. Stops new payouts being created or sent; payouts already
+// submitted keep being tracked, and nothing is cancelled.
+export async function setPayoutPause(paused: boolean, reason = ""): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const before = await getPayoutSettings()
+    await savePayoutSettings({ ...before, paused: paused === true })
+    await logAdminAction(admin, paused ? "affiliate.payout_pause" : "affiliate.payout_resume", null, { reason: reason || undefined })
+    return paused ? "All payouts are paused. Nothing new will be sent until you resume." : "Payouts resumed. Nothing is sent in bulk — each payout goes through the normal checks."
+  })
+}
+
+export async function runAutoPayoutsNow(): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const result = await runAutoPayouts()
+    await logAdminAction(admin, "affiliate.auto_payouts_run", null, result)
+    if (result.halted) return result.halted === "paused" ? "Nothing ran: all payouts are paused." : "Nothing ran: automatic payouts are switched off."
+    const skipped = Object.values(result.skipped).reduce((a, b) => a + (b ?? 0), 0)
+    return `${result.created} payout${result.created === 1 ? "" : "s"} created, ${skipped} affiliate${skipped === 1 ? "" : "s"} not eligible${result.errors ? `, ${result.errors} error${result.errors === 1 ? "" : "s"}` : ""}.`
+  })
+}
+
+// Per-affiliate payout controls. Disabling automatic payouts here is what the
+// worker checks, under lock, immediately before it would create a payout.
+export async function setPayoutControls(affiliateId: number, input: { autoPayoutAllowed?: boolean; manualPayoutAllowed?: boolean; minPayoutOverride?: number | null; maxPayoutOverride?: number | null }, reason = ""): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const result = await setAffiliatePayoutControls(Number(affiliateId), input, adminActor(admin), String(reason ?? ""))
+    const action = typeof input.autoPayoutAllowed === "boolean" ? (input.autoPayoutAllowed ? "affiliate.auto_payout_enable" : "affiliate.auto_payout_disable") : "affiliate.payout_controls"
+    await logAdminAction(admin, action, result.userId, { affiliateId, previous: result.previous, next: result.next, reason: reason || undefined })
+    return typeof input.autoPayoutAllowed === "boolean" ? (input.autoPayoutAllowed ? "Automatic payouts enabled for this affiliate." : "Automatic payouts disabled for this affiliate. Nothing else changed.") : "Payout controls saved."
+  })
+}
+
+export async function setPayoutMethodStatus(methodId: number, status: "active" | "rejected" | "verification_required", reason = ""): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    if (!["active", "rejected", "verification_required"].includes(status)) throw new Error("Unknown status.")
+    const { affiliateId } = await adminSetMethodStatus(Number(methodId), status, adminActor(admin), String(reason ?? ""))
+    const aff = await target(affiliateId)
+    await logAdminAction(admin, "affiliate.payout_method", aff.userId, { methodId, status, reason: reason || undefined })
+    return status === "active" ? "Payout method restored." : status === "rejected" ? "Payout method rejected." : "Marked as needing verification."
+  })
 }
 
 // --- Risk ------------------------------------------------------------------------

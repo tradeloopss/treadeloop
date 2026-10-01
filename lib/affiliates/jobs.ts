@@ -5,7 +5,9 @@ import { getAppSetting, setAppSetting } from "@/lib/app-settings"
 import { emailConfigured, sendEmail } from "@/lib/email"
 import { getWhopClient } from "@/lib/whop"
 import { money as whopMoney, whopAccountId } from "@/lib/admin/whop"
+import { runAutoPayouts } from "./auto-payouts"
 import { handleAffiliateRefund, releaseHolds } from "./commissions"
+import { pruneUnfinishedMethods, trackPayouts } from "./payouts"
 import { evaluateAffiliate } from "./fraud"
 import { prefEnabled } from "./notify"
 import { monthlyReport, type MonthlyReport } from "./queries"
@@ -81,6 +83,21 @@ async function sendMonthlyReports(now: Date): Promise<number> {
   return sent
 }
 
+// The payout half on its own, for a caller that wants it more often than once
+// a day (the sync VPS): transaction tracking and the automatic payout worker.
+export async function runPayoutJob(now = new Date()) {
+  const out: Record<string, unknown> = {}
+  for (const [name, fn] of [["holds", () => releaseHolds({ now })], ["tracking", () => trackPayouts({ olderThanSeconds: 0 })], ["autoPayouts", () => runAutoPayouts(now)]] as const) {
+    try {
+      out[name] = await fn()
+    } catch (e) {
+      out[name] = { error: e instanceof Error ? e.message : String(e) }
+      console.error(`[affiliates] ${name} failed:`, e instanceof Error ? e.message : e)
+    }
+  }
+  return out
+}
+
 export async function runDailyJob(now = new Date()) {
   const out: Record<string, unknown> = {}
   const step = async (name: string, fn: () => Promise<unknown>) => {
@@ -93,6 +110,11 @@ export async function runDailyJob(now = new Date()) {
   }
   await step("holds", () => releaseHolds({ now }))
   await step("refunds", () => reconcileRefunds())
+  // Payouts already sent are followed up first (this never stops, even while
+  // payouts are paused); then new automatic payouts are created.
+  await step("tracking", () => trackPayouts({ olderThanSeconds: 0 }))
+  await step("autoPayouts", () => runAutoPayouts(now))
+  await step("methods", () => pruneUnfinishedMethods())
   await step("risk", () => evaluateActive())
   await step("reports", () => sendMonthlyReports(now))
   await step("prune", () => pruneClicks())

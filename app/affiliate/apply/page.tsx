@@ -5,9 +5,10 @@ import { headers } from "next/headers"
 import { CircleDollarSign, Clock, Link2, MailCheck, ShieldAlert, XCircle } from "lucide-react"
 import { getSessionUser } from "@/lib/affiliates/guard"
 import { countryOptions } from "@/lib/affiliates/countries"
-import { getProgram, loadTiers } from "@/lib/affiliates/program"
+import { getPayoutSettings, getProgram, loadTiers } from "@/lib/affiliates/program"
+import { methodAvailable } from "@/lib/affiliates/providers"
 import { getAffiliateByUser } from "@/lib/affiliates/queries"
-import { money } from "@/lib/affiliates/types"
+import { methodList, money } from "@/lib/affiliates/types"
 import { BrandMark } from "@/components/brand-mark"
 import { ApplyForm } from "@/components/affiliate/apply-form"
 import { ProgramTerms } from "@/components/affiliate/program-terms"
@@ -38,7 +39,8 @@ export default async function AffiliateApplyPage() {
   const affiliate = user ? await getAffiliateByUser(user.id) : null
   if (affiliate?.status === "approved") redirect(affiliate.onboardedAt ? "/affiliate" : "/affiliate/onboarding")
 
-  const [program, tiers] = await Promise.all([getProgram(), loadTiers()])
+  const [program, tiers, payoutSettings] = await Promise.all([getProgram(), loadTiers(), getPayoutSettings()])
+  const payoutMethods = methodList(payoutSettings.methods.filter(methodAvailable))
   const country = (await headers()).get("x-vercel-ip-country") ?? ""
   const activeTiers = tiers.filter((t) => t.enabled).sort((a, b) => a.minCustomers - b.minCustomers)
   const topRate = Math.max(program.defaultRate, ...activeTiers.map((t) => t.ratePercent))
@@ -90,7 +92,7 @@ export default async function AffiliateApplyPage() {
           {[
             { icon: Link2, title: "1. Share your link", body: `Get a personal link and coupon code. Clicks are remembered for ${program.cookieDays} days.` },
             { icon: CircleDollarSign, title: "2. Earn on every payment", body: `${program.defaultRate}% to start, rising with the paying customers you bring in.` },
-            { icon: MailCheck, title: "3. Get paid", body: `Commissions clear after ${program.holdDays} days. Withdraw by PayPal, Wise or bank transfer.` },
+            { icon: MailCheck, title: "3. Get paid", body: `Commissions clear after ${program.holdDays} days. Withdraw by ${payoutMethods}.` },
           ].map((s) => (
             <div key={s.title} className="rounded-xl border bg-card p-5">
               <s.icon className="size-5 text-primary" aria-hidden />

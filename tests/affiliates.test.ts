@@ -18,8 +18,6 @@ import {
   maskEmail,
   monthsBetween,
   normalizeMailbox,
-  payoutLedgerStatus,
-  payoutTransitionAllowed,
   planReversal,
   refundShare,
   resolveRule,
@@ -27,7 +25,6 @@ import {
   settleFifo,
   shouldCountClick,
   tierFor,
-  validatePayoutRequest,
   type LedgerEntry,
   type RuleRow,
   type TierRow,
@@ -35,6 +32,7 @@ import {
 import { DEFAULT_PROGRAM, normalizeProgram, parseRange, rangeStart, type ProgramSettings } from "@/lib/affiliates/types"
 import { attributionCookieDomain, claimable, signAttribution, verifyAttribution } from "@/lib/affiliates/token"
 import { csvCell, toCsv } from "@/lib/affiliates/csv"
+import { payoutLedgerStatus } from "@/lib/affiliates/payout-engine"
 
 const NOW = new Date("2026-06-15T12:00:00Z")
 const DAY = 86_400_000
@@ -295,35 +293,6 @@ test("several reversals can never take back more than the commission, and the la
 })
 
 // ------------------------------------------------------------------ payouts
-
-const payout = (over: Partial<Parameters<typeof validatePayoutRequest>[0]> = {}) =>
-  validatePayoutRequest({ amount: 100, available: 250, minPayout: 50, hasMethod: true, affiliateStatus: "approved", payoutHold: false, fraudLock: false, ...over })
-
-test("payout validation", () => {
-  assert.equal(payout(), null)
-  assert.match(payout({ amount: 250.01 })!, /more than your available/)
-  assert.match(payout({ amount: 49.99 })!, /minimum payout/)
-  assert.match(payout({ amount: 0 })!, /Enter an amount/)
-  assert.match(payout({ amount: -5 })!, /Enter an amount/)
-  assert.match(payout({ amount: Number.NaN })!, /Enter an amount/)
-  assert.match(payout({ amount: 100.005 })!, /two decimal/)
-  assert.match(payout({ hasMethod: false })!, /payout method/)
-  assert.match(payout({ affiliateStatus: "suspended" })!, /isn't active/)
-  assert.match(payout({ payoutHold: true })!, /on hold/)
-  assert.match(payout({ fraudLock: true })!, /under review/)
-  assert.equal(payout({ amount: 250 }), null)
-})
-
-test("payout lifecycle only moves forward", () => {
-  assert.equal(payoutTransitionAllowed("pending", "processing"), true)
-  assert.equal(payoutTransitionAllowed("pending", "cancelled"), true)
-  assert.equal(payoutTransitionAllowed("processing", "paid"), true)
-  assert.equal(payoutTransitionAllowed("processing", "failed"), true)
-  // once it's being sent the affiliate can't cancel it, and terminal states are final
-  assert.equal(payoutTransitionAllowed("processing", "cancelled"), false)
-  for (const done of ["paid", "failed", "cancelled"]) for (const to of ["pending", "processing", "paid", "failed", "cancelled"]) assert.equal(payoutTransitionAllowed(done, to), false)
-  assert.equal(payoutTransitionAllowed("nonsense", "paid"), false)
-})
 
 test("a paid payout settles the oldest cleared commissions, never more than it paid", () => {
   const rows = [{ id: 1, amount: 20 }, { id: 2, amount: 30 }, { id: 3, amount: 40 }]

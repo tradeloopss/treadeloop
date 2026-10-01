@@ -1,8 +1,9 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import { requireAffiliate } from "@/lib/affiliates/guard"
-import { SITE_URL, currentRule, getProgram } from "@/lib/affiliates/program"
-import { money } from "@/lib/affiliates/types"
+import { SITE_URL, currentRule, getPayoutSettings, getProgram } from "@/lib/affiliates/program"
+import { methodAvailable } from "@/lib/affiliates/providers"
+import { methodList, money } from "@/lib/affiliates/types"
 import { BrandMark } from "@/components/brand-mark"
 import { OnboardingForm } from "@/components/affiliate/apply-form"
 
@@ -11,13 +12,13 @@ export const metadata: Metadata = { title: "Set up your affiliate account" }
 export default async function AffiliateOnboardingPage() {
   const { affiliate } = await requireAffiliate({ allowUnonboarded: true })
   if (affiliate.onboardedAt) redirect("/affiliate")
-  const [program, rule] = await Promise.all([getProgram(), currentRule(affiliate.id)])
+  const [program, rule, payoutSettings] = await Promise.all([getProgram(), currentRule(affiliate.id), getPayoutSettings()])
 
   const facts: [string, string][] = [
     ["Your commission", `${rule.ratePercent}% ${program.commissionType === "recurring" ? (rule.durationMonths ? `of every payment for ${rule.durationMonths} months per customer` : "of every payment your referrals make") : "of each referral's first payment"}`],
     ["Tracking window", `${program.cookieDays} days from the click to the sign-up`],
     ["Holding period", `${program.holdDays} days before a commission can be withdrawn`],
-    ["Payouts", `From ${money(program.minPayout)}, by PayPal, Wise or bank transfer`],
+    ["Payouts", `From ${money(program.minPayout)}, by ${methodList(payoutSettings.methods.filter(methodAvailable))}`],
   ]
 
   return (
