@@ -41,6 +41,7 @@ import {
   Wallet,
   CreditCard,
   Gift,
+  Handshake,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -385,6 +386,10 @@ export function DashboardSidebar({
               <DropdownMenuItem render={<Link href="/settings" />}>
                 <Plug className="size-4" />
                 {t("Settings")}
+              </DropdownMenuItem>
+              <DropdownMenuItem render={<Link href="/affiliate" />}>
+                <Handshake className="size-4" />
+                {t("Affiliate program")}
               </DropdownMenuItem>
               {isAdmin && (
                 <DropdownMenuItem render={<Link href="/admin" />}>

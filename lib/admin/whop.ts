@@ -251,6 +251,10 @@ export async function createPromoCode(input: {
   expiresAt: string | null
   // Restrict the code to these plans only (e.g. one user's own checkout plan).
   planIds?: string[]
+  // Restrict the code to one product (a tier), whatever plan is bought on it.
+  productId?: string | null
+  // No cap on redemptions (an affiliate coupon); `stock` is ignored.
+  unlimitedStock?: boolean
 }) {
   const accountId = await whopAccountId()
   return guarded(() =>
@@ -266,6 +270,8 @@ export async function createPromoCode(input: {
       stock: input.stock,
       expires_at: input.expiresAt,
       ...(input.planIds?.length ? { plan_ids: input.planIds } : {}),
+      ...(input.productId ? { product_id: input.productId } : {}),
+      ...(input.unlimitedStock ? { unlimited_stock: true } : {}),
     } as never)
   )
 }

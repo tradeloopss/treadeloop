@@ -7,6 +7,7 @@ import { DirectionProvider } from '@base-ui/react/direction-provider'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
 import { LocaleProvider } from '@/components/locale-provider'
+import { AffiliateTracker } from '@/components/affiliate/tracker'
 import { dirFor } from '@/lib/i18n'
 import { getLocale, getT } from '@/lib/i18n/server'
 import { loadMessages } from '@/lib/i18n/messages'
@@ -68,6 +69,8 @@ export default async function RootLayout({
             <ThemeProvider>
               {children}
               <Toaster richColors position="top-center" dir={dir} />
+              {/* Records ?ref= referral-link visits (no-op on every other page load). */}
+              <AffiliateTracker />
             </ThemeProvider>
           </DirectionProvider>
         </LocaleProvider>

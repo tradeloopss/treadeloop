@@ -1,6 +1,6 @@
 import type React from "react"
 import { redirect } from "next/navigation"
-import { headers } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { and, eq, gt, isNull, or } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -16,6 +16,8 @@ import { ImpersonationBanner } from "@/components/impersonation-banner"
 import { CrispChat } from "@/components/crisp-chat"
 import { seedStarterTemplates } from "@/lib/starter-templates"
 import { recordRequestTiming } from "@/lib/telemetry"
+import { AffiliateClaim } from "@/components/affiliate/tracker"
+import { ATTRIBUTION_COOKIE, attributionSecret, claimable } from "@/lib/affiliates/token"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const startedAt = Date.now()
@@ -60,6 +62,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Pages measure themselves the same way via recordRequestTiming.
   void recordRequestTiming("(app) layout", Date.now() - startedAt)
   const isAdmin = !impersonating && (isAdminRole(session.user.role) || isOwnerEmail(session.user.email))
+  // A new account that arrived through an affiliate link still carries the
+  // signed attribution cookie: let the browser claim it (a server action, so
+  // the cookie can be cleared). A no-database check — the cookie is verified
+  // and compared with when this account was created.
+  const referralToken = impersonating ? undefined : (await cookies()).get(ATTRIBUTION_COOKIE)?.value
+  const claimReferral = !!referralToken && process.env.BETTER_AUTH_SECRET != null && claimable(referralToken, session.user.createdAt, attributionSecret())
 
   return (
     <div className="flex h-svh flex-col overflow-hidden">
@@ -81,6 +89,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       {!impersonating && <CrispChat email={session.user.email} name={session.user.name} />}
       <ThemeColorApplier initial={themeColors} />
+      {claimReferral && <AffiliateClaim />}
     </div>
   )
 }

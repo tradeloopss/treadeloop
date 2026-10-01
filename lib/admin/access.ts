@@ -18,6 +18,9 @@ export const statement = {
   security: ["view", "manage"],
   support: ["view", "reply"],
   cases: ["view", "manage"],
+  // The affiliate program. "manage" covers everything that moves money or
+  // changes someone's standing: approvals, rules, adjustments, payouts.
+  affiliates: ["view", "manage"],
 } as const
 
 export const ac = createAccessControl(statement)
@@ -37,6 +40,7 @@ export const roles = {
     security: ["view", "manage"],
     support: ["view", "reply"],
     cases: ["view", "manage"],
+    affiliates: ["view", "manage"],
   }),
   support: ac.newRole({
     user: ["list", "get", "ban", "impersonate"],
@@ -47,11 +51,13 @@ export const roles = {
     // "manage" = reset a user's 2FA and send password-reset emails.
     security: ["view", "manage"],
     support: ["view", "reply"],
+    affiliates: ["view"],
   }),
   billing: ac.newRole({
     user: ["list", "get"],
     billing: ["view", "manage"],
     analytics: ["view"],
+    affiliates: ["view", "manage"],
   }),
   content: ac.newRole({
     user: ["list"],

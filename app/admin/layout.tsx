@@ -16,6 +16,7 @@ const SECTIONS: (NavItem & { needs: Permissions })[] = [
   { href: "/admin/support", label: "Support", icon: "support", needs: { support: ["view"] } },
   { href: "/admin/billing", label: "Billing & revenue", icon: "billing", needs: { billing: ["view"] } },
   { href: "/admin/cases", label: "Cases Drop", icon: "cases", needs: { cases: ["view"] } },
+  { href: "/admin/affiliates", label: "Affiliates", icon: "affiliates", needs: { affiliates: ["view"] } },
   { href: "/admin/brokers", label: "Broker health", icon: "brokers", needs: { brokers: ["view"] } },
   { href: "/admin/prop-rules", label: "Prop rules", icon: "propRules", needs: { brokers: ["view"] } },
   { href: "/admin/imports", label: "File imports", icon: "imports", needs: { brokers: ["view"] } },

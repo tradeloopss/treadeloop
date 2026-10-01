@@ -5,6 +5,8 @@ import { subscriptions, user } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { tierFromPlanId, type PlanTier } from "@/lib/whop"
 import { findPendingCheckoutByPlan, retireReplacedMembership } from "@/lib/checkout"
+import { money } from "@/lib/admin/whop"
+import { handleAffiliateMembership, handleAffiliatePayment, handleAffiliateRefund } from "@/lib/affiliates/commissions"
 
 function tierFromMetadata(metadata: Record<string, unknown> | null | undefined): PlanTier | "unknown" {
   const value = metadata?.plan
@@ -87,6 +89,60 @@ async function handlePaymentSucceeded(payment: Record<string, any>) {
     })
   }
   await retireReplacedMembership(userId ?? existing?.userId, payment.metadata)
+  await affiliate(() => creditAffiliate(payment, userId ?? existing?.userId ?? null, tier === "unknown" ? (existing?.plan ?? null) : tier, billing ?? existing?.billing ?? null))
+}
+
+// The affiliate program hangs off the same billing events, but it must never
+// be able to break them: whatever it throws is logged and swallowed.
+async function affiliate(fn: () => Promise<void>) {
+  try {
+    await fn()
+  } catch (err) {
+    console.error("[whop webhook] affiliate handler error", err)
+  }
+}
+
+// A payment by a referred customer earns their affiliate a commission
+// (lib/affiliates/commissions.ts). The amount is what was actually charged,
+// net of tax — read from the verified payload, never from the client.
+async function creditAffiliate(payment: Record<string, any>, userId: string | null, plan: string | null, billing: string | null) {
+  if (!payment.id) return
+  const total = money(payment.usd_total) ?? money(payment.total) ?? money(payment.subtotal) ?? 0
+  const amount = Math.max(0, total - (money(payment.tax_amount) ?? 0))
+  if (!(amount > 0)) return
+  await handleAffiliatePayment({
+    userId,
+    paymentId: String(payment.id),
+    amount,
+    currency: payment.usd_total != null ? "usd" : String(payment.currency ?? "usd"),
+    promoCode: payment.promo_code?.code ?? null,
+    promoCodeId: payment.promo_code_id ?? payment.promo_code?.id ?? null,
+    plan,
+    billing,
+    paidAt: payment.paid_at ? new Date(payment.paid_at) : new Date(),
+  })
+}
+
+// refund.created / refund.updated: the commission on the refunded payment is
+// reversed (in full, or by the refunded share).
+async function handleRefund(refund: Record<string, any>) {
+  const paymentId: string | undefined = refund.payment?.id ?? refund.payment_id
+  if (!refund.id || !paymentId || refund.status === "failed" || refund.status === "canceled") return
+  await handleAffiliateRefund({
+    eventId: String(refund.id),
+    paymentId: String(paymentId),
+    refundAmount: money(refund.amount) ?? money(refund.original_amount) ?? 0,
+    paymentTotal: money(refund.payment?.usd_total) ?? money(refund.payment?.total) ?? 0,
+    kind: "refund",
+  })
+}
+
+// dispute.created: a real chargeback (not a pre-dispute inquiry) reverses the
+// whole commission and is flagged for review.
+async function handleDispute(dispute: Record<string, any>) {
+  const paymentId: string | undefined = dispute.payment?.id ?? dispute.payment_id
+  if (!dispute.id || !paymentId || dispute.inquiry === true) return
+  await handleAffiliateRefund({ eventId: String(dispute.id), paymentId: String(paymentId), refundAmount: money(dispute.amount) ?? 0, paymentTotal: money(dispute.payment?.usd_total) ?? money(dispute.payment?.total) ?? 0, kind: "chargeback" })
 }
 
 // membership.activated fires the moment someone starts a free trial, before
@@ -137,6 +193,12 @@ async function handleMembershipChanged(eventName: string, membership: Record<str
     })
   }
   if (eventName === "membership.activated") await retireReplacedMembership(userId ?? existing?.userId, membership.metadata)
+  await affiliate(() =>
+    handleAffiliateMembership({
+      userId: userId ?? existing?.userId,
+      event: eventName !== "membership.activated" ? "cancelled" : status === "trialing" ? "trial" : "active",
+    })
+  )
 }
 
 export async function POST(request: Request) {
@@ -162,6 +224,10 @@ export async function POST(request: Request) {
       await handlePaymentSucceeded(payload)
     } else if (name === "membership.activated" || name === "membership.deactivated") {
       await handleMembershipChanged(name, payload)
+    } else if (name === "refund.created" || name === "refund.updated") {
+      await affiliate(() => handleRefund(payload))
+    } else if (name === "dispute.created") {
+      await affiliate(() => handleDispute(payload))
     }
   } catch (err) {
     // Still ack with 200 — a bug on our side re-processing the same payload

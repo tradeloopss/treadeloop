@@ -1,0 +1,57 @@
+import type { Metadata } from "next"
+import { redirect } from "next/navigation"
+import { requireAffiliate } from "@/lib/affiliates/guard"
+import { SITE_URL, currentRule, getProgram } from "@/lib/affiliates/program"
+import { money } from "@/lib/affiliates/types"
+import { BrandMark } from "@/components/brand-mark"
+import { OnboardingForm } from "@/components/affiliate/apply-form"
+
+export const metadata: Metadata = { title: "Set up your affiliate account" }
+
+export default async function AffiliateOnboardingPage() {
+  const { affiliate } = await requireAffiliate({ allowUnonboarded: true })
+  if (affiliate.onboardedAt) redirect("/affiliate")
+  const [program, rule] = await Promise.all([getProgram(), currentRule(affiliate.id)])
+
+  const facts: [string, string][] = [
+    ["Your commission", `${rule.ratePercent}% ${program.commissionType === "recurring" ? (rule.durationMonths ? `of every payment for ${rule.durationMonths} months per customer` : "of every payment your referrals make") : "of each referral's first payment"}`],
+    ["Tracking window", `${program.cookieDays} days from the click to the sign-up`],
+    ["Holding period", `${program.holdDays} days before a commission can be withdrawn`],
+    ["Payouts", `From ${money(program.minPayout)}, by PayPal, Wise or bank transfer`],
+  ]
+
+  return (
+    <div className="min-h-svh bg-background">
+      <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6 sm:py-16">
+        <div className="flex items-center gap-2">
+          <BrandMark className="size-7" />
+          <span className="font-semibold tracking-tight">TradeLoop</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">Affiliates</span>
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Welcome aboard, {affiliate.firstName}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">You&apos;re approved. One last step: choose your referral code and confirm how the program works.</p>
+        </div>
+
+        <section className="rounded-xl border bg-card">
+          <div className="border-b px-5 py-4">
+            <h2 className="text-sm font-semibold">How it works for you</h2>
+          </div>
+          <dl className="divide-y px-5">
+            {facts.map(([k, v]) => (
+              <div key={k} className="flex items-start justify-between gap-4 py-3 text-sm">
+                <dt className="text-muted-foreground">{k}</dt>
+                <dd className="text-end font-medium">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="border-t px-5 py-3 text-xs text-muted-foreground">No self-referrals, spam, fake sign-ups or bidding on TradeLoop brand keywords. {program.refundReversal ? "Refunded and disputed payments have their commission reversed." : "Disputed payments have their commission reversed."}</p>
+        </section>
+
+        <section className="rounded-xl border bg-card p-5">
+          <OnboardingForm suggested={affiliate.code} siteHost={SITE_URL.replace(/^https?:\/\//, "")} />
+        </section>
+      </main>
+    </div>
+  )
+}

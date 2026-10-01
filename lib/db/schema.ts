@@ -1458,3 +1458,352 @@ export const dropClaims = pgTable(
     index("drop_claims_user").on(t.userId),
   ]
 )
+
+// --- Affiliate / partner program -------------------------------------------
+// People apply to become affiliates, share a referral link, and earn a
+// commission on the subscription payments of the customers they refer. Money
+// is NEVER a mutable balance: every commission, reversal, adjustment and payout
+// is a row in affiliate_commissions (the ledger) and balances are derived from
+// it (lib/affiliates/engine.ts). Program rules live in app_settings
+// ("affiliate_program"); admin actions go to the existing admin_audit_log.
+
+// One per user: the application and, once approved, the affiliate profile.
+export const affiliates = pgTable(
+  "affiliates",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    code: text("code").notNull(), // the ?ref= code
+    // pending | review | approved | rejected | suspended
+    status: text("status").notNull().default("pending"),
+    tierId: integer("tierId"), // manual tier override; null = by paid customers
+    firstName: text("firstName").notNull(),
+    lastName: text("lastName").notNull(),
+    email: text("email").notNull(),
+    country: text("country"),
+    website: text("website"),
+    socials: jsonb("socials").$type<Record<string, string>>(),
+    audienceSize: text("audienceSize"),
+    trafficSource: text("trafficSource"),
+    promotionMethod: text("promotionMethod"),
+    reason: text("reason"),
+    payoutHold: boolean("payoutHold").notNull().default(false),
+    fraudLock: boolean("fraudLock").notNull().default(false),
+    payoutCurrency: text("payoutCurrency").notNull().default("usd"),
+    notifications: jsonb("notifications").$type<Record<string, boolean>>(),
+    rejectionReason: text("rejectionReason"),
+    reviewedBy: text("reviewedBy"),
+    approvedAt: timestamp("approvedAt"),
+    onboardedAt: timestamp("onboardedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("affiliates_user").on(t.userId), uniqueIndex("affiliates_code").on(t.code), index("affiliates_status").on(t.status)]
+)
+
+// Commission tiers by paid customers referred. Admin-configurable.
+export const affiliateTiers = pgTable("affiliate_tiers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  minCustomers: integer("minCustomers").notNull().default(0),
+  ratePercent: numeric("ratePercent").notNull(),
+  sortOrder: integer("sortOrder").notNull().default(0),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+})
+
+// Custom commission rules. Priority (lib/affiliates/engine.resolveRule):
+// affiliate → campaign → coupon → tier → program default.
+export const affiliateRules = pgTable(
+  "affiliate_rules",
+  {
+    id: serial("id").primaryKey(),
+    scope: text("scope").notNull(), // affiliate | campaign | coupon
+    affiliateId: integer("affiliateId").notNull(),
+    campaignId: integer("campaignId"),
+    couponId: integer("couponId"),
+    ratePercent: numeric("ratePercent").notNull(),
+    durationMonths: integer("durationMonths"), // null = use the program duration
+    startsAt: timestamp("startsAt"),
+    endsAt: timestamp("endsAt"),
+    enabled: boolean("enabled").notNull().default(true),
+    note: text("note"),
+    createdBy: text("createdBy"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_rules_affiliate").on(t.affiliateId)]
+)
+
+export const affiliateCampaigns = pgTable(
+  "affiliate_campaigns",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    landingPage: text("landingPage").notNull().default("/"),
+    utmSource: text("utmSource"),
+    utmMedium: text("utmMedium"),
+    utmCampaign: text("utmCampaign"),
+    utmContent: text("utmContent"),
+    status: text("status").notNull().default("active"), // active | archived
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_campaigns_affiliate").on(t.affiliateId)]
+)
+
+// Tracking links: one default per affiliate, plus one (or more) per campaign.
+export const affiliateLinks = pgTable(
+  "affiliate_links",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    campaignId: integer("campaignId"),
+    token: text("token").notNull(), // the &lk= value
+    landingPage: text("landingPage").notNull().default("/"),
+    isDefault: boolean("isDefault").notNull().default(false),
+    status: text("status").notNull().default("active"), // active | disabled
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("affiliate_links_token").on(t.token), index("affiliate_links_affiliate").on(t.affiliateId)]
+)
+
+export const affiliateClicks = pgTable(
+  "affiliate_clicks",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    campaignId: integer("campaignId"),
+    linkId: integer("linkId"),
+    visitorId: text("visitorId").notNull(),
+    ipHash: text("ipHash"), // HMAC of the IP, never the raw address
+    landingPage: text("landingPage"),
+    referrer: text("referrer"),
+    utmSource: text("utmSource"),
+    utmMedium: text("utmMedium"),
+    utmCampaign: text("utmCampaign"),
+    utmContent: text("utmContent"),
+    device: text("device"),
+    country: text("country"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_clicks_affiliate_time").on(t.affiliateId, t.createdAt), index("affiliate_clicks_visitor").on(t.visitorId, t.affiliateId)]
+)
+
+// A referred user. UNIQUE(userId): a customer belongs to one affiliate.
+export const affiliateReferrals = pgTable(
+  "affiliate_referrals",
+  {
+    id: serial("id").primaryKey(),
+    publicId: text("publicId").notNull(), // TL-49281 — shown instead of customer PII
+    affiliateId: integer("affiliateId").notNull(),
+    userId: text("userId").notNull(),
+    campaignId: integer("campaignId"),
+    linkId: integer("linkId"),
+    couponId: integer("couponId"),
+    clickId: integer("clickId"),
+    source: text("source").notNull().default("link"), // link | coupon
+    status: text("status").notNull().default("signup"), // signup | trial | active | cancelled | refunded
+    plan: text("plan"),
+    billing: text("billing"),
+    country: text("country"),
+    device: text("device"),
+    landingPage: text("landingPage"),
+    revenue: numeric("revenue").notNull().default("0"), // gross paid, for lists; money lives in the ledger
+    clickedAt: timestamp("clickedAt"),
+    firstPaymentAt: timestamp("firstPaymentAt"),
+    lastPaymentAt: timestamp("lastPaymentAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("affiliate_referrals_user").on(t.userId), uniqueIndex("affiliate_referrals_public").on(t.publicId), index("affiliate_referrals_affiliate").on(t.affiliateId, t.createdAt)]
+)
+
+// Timeline of what happened to a referral (signup, trial, payment, refund…).
+export const affiliateConversions = pgTable(
+  "affiliate_conversions",
+  {
+    id: serial("id").primaryKey(),
+    referralId: integer("referralId").notNull(),
+    affiliateId: integer("affiliateId").notNull(),
+    type: text("type").notNull(), // signup | trial | subscription | payment | cancelled | refund | chargeback
+    amount: numeric("amount"),
+    paymentId: text("paymentId"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    index("affiliate_conversions_referral").on(t.referralId),
+    index("affiliate_conversions_affiliate_time").on(t.affiliateId, t.createdAt),
+    // One row per (event type, payment/refund id): a webhook delivered twice
+    // can't be counted twice. Rows without a payment id are unconstrained.
+    uniqueIndex("affiliate_conversions_payment").on(t.type, t.paymentId),
+  ]
+)
+
+// THE LEDGER. Signed amounts; nothing is ever deleted or edited in value.
+// type: subscription | bonus | adjustment | refund | reversal | payout
+// status: pending | approved | available | paid | reversed | refunded | cancelled
+// idempotencyKey makes webhook retries and double-submits harmless.
+export const affiliateCommissions = pgTable(
+  "affiliate_commissions",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    referralId: integer("referralId"),
+    type: text("type").notNull(),
+    amount: numeric("amount").notNull(),
+    currency: text("currency").notNull().default("usd"),
+    status: text("status").notNull(),
+    baseAmount: numeric("baseAmount"),
+    ratePercent: numeric("ratePercent"),
+    ruleSource: text("ruleSource"), // affiliate | campaign | coupon | tier | default
+    paymentId: text("paymentId"),
+    idempotencyKey: text("idempotencyKey").notNull(),
+    holdUntil: timestamp("holdUntil"),
+    approvedAt: timestamp("approvedAt"),
+    availableAt: timestamp("availableAt"),
+    paidAt: timestamp("paidAt"),
+    payoutId: integer("payoutId"),
+    reversesId: integer("reversesId"),
+    note: text("note"),
+    createdBy: text("createdBy"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("affiliate_commissions_idem").on(t.idempotencyKey),
+    index("affiliate_commissions_affiliate").on(t.affiliateId, t.createdAt),
+    index("affiliate_commissions_status").on(t.status, t.holdUntil),
+    index("affiliate_commissions_payment").on(t.paymentId),
+  ]
+)
+
+export const affiliateCoupons = pgTable(
+  "affiliate_coupons",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    campaignId: integer("campaignId"),
+    code: text("code").notNull(),
+    discountType: text("discountType").notNull().default("percent"), // percent | fixed
+    discountValue: numeric("discountValue").notNull(),
+    durationMonths: integer("durationMonths").notNull().default(1),
+    plan: text("plan"), // null = all plans | essential | pro
+    expiresAt: timestamp("expiresAt"),
+    usageLimit: integer("usageLimit"),
+    uses: integer("uses").notNull().default(0),
+    status: text("status").notNull().default("active"), // active | disabled
+    whopPromoId: text("whopPromoId"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("affiliate_coupons_code").on(t.code), index("affiliate_coupons_affiliate").on(t.affiliateId)]
+)
+
+export const affiliatePayoutMethods = pgTable(
+  "affiliate_payout_methods",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    type: text("type").notNull(), // paypal | wise | bank
+    label: text("label").notNull(), // masked, safe to display
+    details: text("details").notNull(), // AES-256-GCM encrypted JSON (lib/crypto)
+    isDefault: boolean("isDefault").notNull().default(false),
+    status: text("status").notNull().default("active"), // active | removed
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_payout_methods_affiliate").on(t.affiliateId)]
+)
+
+export const affiliatePayouts = pgTable(
+  "affiliate_payouts",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    amount: numeric("amount").notNull(),
+    currency: text("currency").notNull().default("usd"),
+    methodId: integer("methodId"),
+    methodType: text("methodType").notNull(),
+    methodLabel: text("methodLabel").notNull(),
+    provider: text("provider").notNull().default("manual"),
+    providerRef: text("providerRef"),
+    status: text("status").notNull().default("pending"), // pending | processing | paid | failed | cancelled
+    idempotencyKey: text("idempotencyKey").notNull(),
+    failureReason: text("failureReason"),
+    note: text("note"),
+    processedBy: text("processedBy"),
+    requestedAt: timestamp("requestedAt").notNull().defaultNow(),
+    processedAt: timestamp("processedAt"),
+  },
+  (t) => [uniqueIndex("affiliate_payouts_idem").on(t.idempotencyKey), index("affiliate_payouts_affiliate").on(t.affiliateId, t.requestedAt), index("affiliate_payouts_status").on(t.status)]
+)
+
+// Risk signals for a human to review — never an automatic verdict.
+export const affiliateFraudSignals = pgTable(
+  "affiliate_fraud_signals",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    referralId: integer("referralId"),
+    type: text("type").notNull(),
+    risk: text("risk").notNull().default("low"), // low | medium | high
+    details: jsonb("details").$type<Record<string, unknown>>(),
+    status: text("status").notNull().default("open"), // open | reviewing | cleared | actioned
+    dedupeKey: text("dedupeKey").notNull(),
+    resolvedBy: text("resolvedBy"),
+    resolvedAt: timestamp("resolvedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("affiliate_fraud_dedupe").on(t.dedupeKey), index("affiliate_fraud_status").on(t.status, t.createdAt)]
+)
+
+export const affiliateNotifications = pgTable(
+  "affiliate_notifications",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    readAt: timestamp("readAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_notifications_affiliate").on(t.affiliateId, t.createdAt)]
+)
+
+export const affiliateResources = pgTable("affiliate_resources", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description"),
+  category: text("category").notNull(), // brand | social | creative | product | video | copy
+  url: text("url"), // the downloadable asset
+  previewUrl: text("previewUrl"),
+  content: text("content"), // ready-to-paste copy
+  published: boolean("published").notNull().default(true),
+  sortOrder: integer("sortOrder").notNull().default(0),
+  createdBy: text("createdBy"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
+export const affiliateAnnouncements = pgTable("affiliate_announcements", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  category: text("category").notNull().default("update"),
+  summary: text("summary"),
+  content: text("content").notNull(),
+  published: boolean("published").notNull().default(false),
+  publishedAt: timestamp("publishedAt"),
+  createdBy: text("createdBy"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
+export const affiliateAnnouncementReads = pgTable(
+  "affiliate_announcement_reads",
+  {
+    id: serial("id").primaryKey(),
+    announcementId: integer("announcementId").notNull(),
+    affiliateId: integer("affiliateId").notNull(),
+    readAt: timestamp("readAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("affiliate_announcement_reads_pair").on(t.announcementId, t.affiliateId)]
+)
