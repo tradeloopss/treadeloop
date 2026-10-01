@@ -9,8 +9,10 @@ import { resolveRule, type ResolvedRule, type RuleRow, type TierRow } from "./en
 
 const KEY = "affiliate_program"
 
-// Where referral links point: the public marketing site.
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://tradeloop.pro").replace(/\/+$/, "")
+// Where referral links point: the public marketing site. www is the canonical
+// host (the apex 308s to it), so links go there directly rather than through
+// a redirect.
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.tradeloop.pro").replace(/\/+$/, "")
 
 export async function getProgram(): Promise<ProgramSettings> {
   return normalizeProgram(await getAppSetting(KEY).catch(() => null))
