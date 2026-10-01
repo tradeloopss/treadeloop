@@ -29,6 +29,7 @@ export default async function AdminAffiliatesLayout({ children }: { children: Re
           { href: "/admin/affiliates/fraud", label: "Risk", badge: signals?.v || undefined },
           { href: "/admin/affiliates/resources", label: "Resources" },
           { href: "/admin/affiliates/announcements", label: "Announcements" },
+          { href: "/admin/affiliates/emails", label: "Emails" },
         ]}
       />
       {children}

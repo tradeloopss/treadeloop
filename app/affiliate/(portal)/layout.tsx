@@ -2,7 +2,8 @@ import type React from "react"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
-import { currentRule } from "@/lib/affiliates/program"
+import { couponAccess } from "@/lib/affiliates/engine"
+import { currentRule, getProgram } from "@/lib/affiliates/program"
 import { notificationsFor, unreadCounts } from "@/lib/affiliates/queries"
 import { BrandMark } from "@/components/brand-mark"
 import { ImpersonationBanner } from "@/components/impersonation-banner"
@@ -11,7 +12,9 @@ import { fmtAgo } from "@/components/admin/ui"
 
 export default async function AffiliatePortalLayout({ children }: { children: React.ReactNode }) {
   const { user, affiliate } = await requireAffiliate()
-  const [unread, notifications, rule] = await Promise.all([unreadCounts(affiliate.id), notificationsFor(affiliate.id, 12), currentRule(affiliate.id)])
+  const [unread, notifications, rule, program] = await Promise.all([unreadCounts(affiliate.id), notificationsFor(affiliate.id, 12), currentRule(affiliate.id), getProgram()])
+  // The Coupons section is open only for affiliates an admin opened it for.
+  const coupons = couponAccess(affiliate, program).enabled
 
   const items: PortalNavItem[] = [
     { href: "/affiliate", label: "Overview", icon: "overview" },
@@ -19,7 +22,7 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
     { href: "/affiliate/referrals", label: "Referrals", icon: "referrals" },
     { href: "/affiliate/campaigns", label: "Campaigns", icon: "campaigns" },
     { href: "/affiliate/links", label: "Links", icon: "links" },
-    { href: "/affiliate/coupons", label: "Coupons", icon: "coupons" },
+    ...(coupons ? [{ href: "/affiliate/coupons", label: "Coupons", icon: "coupons" } as PortalNavItem] : []),
     { href: "/affiliate/earnings", label: "Earnings", icon: "earnings" },
     { href: "/affiliate/payouts", label: "Payouts", icon: "payouts" },
     { href: "/affiliate/resources", label: "Resources", icon: "resources" },

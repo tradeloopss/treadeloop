@@ -2,11 +2,14 @@ import { and, eq, gte, lt, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateClicks, affiliateReferrals, affiliates } from "@/lib/db/schema"
 import { getAppSetting, setAppSetting } from "@/lib/app-settings"
-import { emailConfigured, sendEmail } from "@/lib/email"
+import { emailConfigured } from "@/lib/email"
+import { generalNotice } from "@/lib/emails/affiliate-emails"
+import { deliver, pruneEmailEvents, retryDueEmails } from "@/lib/emails/outbox"
 import { getWhopClient } from "@/lib/whop"
 import { money as whopMoney, whopAccountId } from "@/lib/admin/whop"
 import { runAutoPayouts } from "./auto-payouts"
 import { handleAffiliateRefund, releaseHolds } from "./commissions"
+import { ensurePermanentCoupons } from "./coupons"
 import { pruneUnfinishedMethods, sendQueuedAutomatic, trackPayouts } from "./payouts"
 import { evaluateAffiliate } from "./fraud"
 import { prefEnabled } from "./notify"
@@ -46,9 +49,9 @@ async function pruneClicks(): Promise<void> {
   await db.delete(affiliateClicks).where(lt(affiliateClicks.createdAt, new Date(Date.now() - 400 * 86_400_000)))
 }
 
-export function monthlyReportText(firstName: string, r: MonthlyReport): string {
+// The body of the monthly report email (the layout adds the greeting).
+export function monthlyReportBody(r: MonthlyReport): string {
   const lines = [
-    `Hi ${firstName},`,
     `Here's how ${r.label} went:`,
     [`Clicks: ${count(r.clicks)}`, `Sign-ups: ${count(r.signups)}`, `New paying customers: ${count(r.customers)}`, `Conversion: ${pct(r.clicks ? r.customers / r.clicks : 0)}`, `Customer revenue: ${money(r.revenue)}`, `Commission earned: ${money(r.commission)}`].join("\n"),
   ]
@@ -66,7 +69,6 @@ async function sendMonthlyReports(now: Date): Promise<number> {
   if ((await getAppSetting<string>(REPORT_KEY)) === tag) return 0
   // Marked first: a crash mid-run must not mail everyone again tomorrow.
   await setAppSetting(REPORT_KEY, tag)
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")
   const rows = await db.select({ id: affiliates.id, email: affiliates.email, firstName: affiliates.firstName, notifications: affiliates.notifications }).from(affiliates).where(and(eq(affiliates.status, "approved"), sql`${affiliates.onboardedAt} is not null`))
   let sent = 0
   for (const a of rows) {
@@ -74,8 +76,9 @@ async function sendMonthlyReports(now: Date): Promise<number> {
     try {
       const report = await monthlyReport(a.id, lastMonth)
       if (report.clicks + report.signups + report.customers === 0 && report.commission === 0) continue
-      await sendEmail({ to: a.email, subject: `Your ${report.label} affiliate report — TradeLoop`, text: `${monthlyReportText(a.firstName, report)}${base ? `\n\n${base}/affiliate/analytics` : ""}` })
-      sent++
+      // One per affiliate per month, whatever happens to the job.
+      const result = await deliver({ key: `affiliate_monthly_report:${a.id}:${tag}`, to: a.email, affiliateId: a.id, doc: generalNotice({ firstName: a.firstName, sender: "affiliate", title: `Your ${report.label} affiliate report`, body: monthlyReportBody(report), href: "/affiliate/analytics" }) })
+      if (result !== "duplicate") sent++
     } catch (e) {
       console.error("[affiliates] monthly report failed for", a.id, e instanceof Error ? e.message : e)
     }
@@ -87,7 +90,8 @@ async function sendMonthlyReports(now: Date): Promise<number> {
 // a day (the sync VPS): transaction tracking and the automatic payout worker.
 export async function runPayoutJob(now = new Date()) {
   const out: Record<string, unknown> = {}
-  for (const [name, fn] of [["holds", () => releaseHolds({ now })], ["tracking", () => trackPayouts({ olderThanSeconds: 0 })], ["autoPayouts", () => runAutoPayouts(now)], ["sending", () => sendQueuedAutomatic()]] as const) {
+  // (emails: deliveries the provider didn't take the first time are retried here)
+  for (const [name, fn] of [["holds", () => releaseHolds({ now })], ["tracking", () => trackPayouts({ olderThanSeconds: 0 })], ["autoPayouts", () => runAutoPayouts(now)], ["sending", () => sendQueuedAutomatic()], ["emails", () => retryDueEmails()]] as const) {
     try {
       out[name] = await fn()
     } catch (e) {
@@ -115,9 +119,12 @@ export async function runDailyJob(now = new Date()) {
   await step("tracking", () => trackPayouts({ olderThanSeconds: 0 }))
   await step("autoPayouts", () => runAutoPayouts(now))
   await step("sending", () => sendQueuedAutomatic())
+  await step("emails", () => retryDueEmails())
   await step("methods", () => pruneUnfinishedMethods())
+  await step("permanentCoupons", () => ensurePermanentCoupons())
   await step("risk", () => evaluateActive())
   await step("reports", () => sendMonthlyReports(now))
   await step("prune", () => pruneClicks())
+  await step("pruneEmails", () => pruneEmailEvents())
   return out
 }

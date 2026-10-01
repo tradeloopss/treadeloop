@@ -6,7 +6,8 @@ import { CopyField } from "./copy"
 
 // The affiliate's main referral link, ready to copy or hand to the device's
 // share sheet (where the browser has one).
-export function ReferralLinkCard({ url, code, rate, cookieDays }: { url: string; code: string; rate: number; cookieDays: number }) {
+// `coupon`: their permanent discount code, when they have one.
+export function ReferralLinkCard({ url, code, rate, cookieDays, coupon }: { url: string; code: string; rate: number; cookieDays: number; coupon?: { code: string; percent: number; months: number } | null }) {
   const [canShare, setCanShare] = useState(false)
   useEffect(() => setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function"), [])
   return (
@@ -31,6 +32,15 @@ export function ReferralLinkCard({ url, code, rate, cookieDays }: { url: string;
           <ExternalLink className="size-3.5" aria-hidden /> Open link
         </a>
       </div>
+      {coupon && (
+        <div className="mt-4 border-t pt-4">
+          <h3 className="text-sm font-semibold">Your discount code</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            New customers get {coupon.percent}% off their first {coupon.months === 1 ? "month" : `${coupon.months} months`} with this code, and anyone who pays with it is credited to you — even without a link click.
+          </p>
+          <CopyField value={coupon.code} label="Your discount code" className="mt-3 max-w-sm" />
+        </div>
+      )}
     </section>
   )
 }

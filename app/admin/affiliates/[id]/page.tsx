@@ -11,7 +11,8 @@ import { autoPayoutPreview } from "@/lib/affiliates/payouts"
 import { SOCIAL_KEYS, SOCIAL_LABELS, count, methodLabel, money, signedMoney } from "@/lib/affiliates/types"
 import { AdminPageHeader, Panel, fmtAgo } from "@/components/admin/ui"
 import { Empty, FieldRow, Kpi, KpiGrid, LEDGER_TYPE_LABELS, StatusBadge, TableShell, THead, fmtDay, tdClass, thClass } from "@/components/affiliate/ui"
-import { AdjustDialog, CodeEditor, CouponDisableButton, FlagToggles, LedgerRowActions, SignalActions, StandingActions, TierSelect } from "@/components/admin/affiliates/actions"
+import { AdjustDialog, CodeEditor, FlagToggles, LedgerRowActions, SignalActions, StandingActions, TierSelect } from "@/components/admin/affiliates/actions"
+import { CouponAdmin } from "@/components/admin/affiliates/coupons-admin"
 import { MethodAdminActions, PayoutControls } from "@/components/admin/affiliates/payout-admin"
 import { RuleForm, RulesTable } from "@/components/admin/affiliates/program-form"
 
@@ -314,8 +315,17 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
               )}
             </Panel>
 
-            <Panel title="Coupons">
-              {d.coupons.length === 0 ? (
+            <Panel title="Coupons" description="Their permanent code, the codes you generate for them, and whether they can make their own.">
+              {canManage && decided ? (
+                <CouponAdmin
+                  affiliateId={a.id}
+                  name={name}
+                  ready={a.status === "approved" && !!a.onboardedAt}
+                  access={{ couponsEnabled: a.couponsEnabled, maxCouponPercent: a.maxCouponPercent }}
+                  program={{ couponsEnabled: d.program.couponsEnabled, maxCouponPercent: d.program.maxCouponPercent, permanentPercent: d.program.permanentCouponPercent, permanentMonths: d.program.permanentCouponMonths }}
+                  coupons={d.coupons.map((c) => ({ id: c.id, code: c.code, percent: c.discountValue, durationMonths: c.durationMonths, uses: c.uses, status: c.status, permanent: c.permanent, byAdmin: !c.permanent && !!c.createdBy && c.createdBy !== "affiliate" && c.createdBy !== "system" }))}
+                />
+              ) : d.coupons.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No coupons created.</p>
               ) : (
                 <ul className="divide-y text-sm">
@@ -325,12 +335,10 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
                         <span className="font-mono font-medium">{c.code}</span>
                         <span className="block text-xs text-muted-foreground">
                           {c.discountValue}% · {count(c.uses)} use{c.uses === 1 ? "" : "s"}
+                          {c.permanent ? " · permanent" : ""}
                         </span>
                       </span>
-                      <span className="flex items-center gap-2">
-                        <StatusBadge status={c.status} />
-                        {canManage && c.status === "active" && <CouponDisableButton id={c.id} code={c.code} />}
-                      </span>
+                      <StatusBadge status={c.status} />
                     </li>
                   ))}
                 </ul>

@@ -17,7 +17,7 @@ const label = "flex flex-col gap-1.5 text-xs text-muted-foreground"
 export function ProgramForm({ program, canManage }: { program: ProgramSettings; canManage: boolean }) {
   const [form, setForm] = useState({ ...program, durationMonths: program.durationMonths == null ? "" : String(program.durationMonths) })
   const { pending, run } = useAction()
-  const num = (k: "defaultRate" | "cookieDays" | "minPayout" | "holdDays" | "maxCouponPercent") => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value as unknown as number }))
+  const num = (k: "defaultRate" | "cookieDays" | "minPayout" | "holdDays" | "maxCouponPercent" | "permanentCouponPercent" | "permanentCouponMonths") => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value as unknown as number }))
   const toggle = (k: "refundReversal" | "autoApprove" | "couponsEnabled") => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.checked }))
 
   return (
@@ -78,7 +78,7 @@ export function ProgramForm({ program, canManage }: { program: ProgramSettings; 
             [
               ["refundReversal", "Reverse commissions on refunds", "A refunded payment takes its commission back (proportionally for a partial refund). Chargebacks always reverse."],
               ["autoApprove", "Auto-approve applications", "Off = every application waits for a person to approve it."],
-              ["couponsEnabled", "Let affiliates create coupons", "Each coupon is a real promo code at checkout."],
+              ["couponsEnabled", "Let affiliates create coupons", "Only for affiliates whose Coupons section you have opened on their page. Each coupon is a real promo code at checkout."],
             ] as const
           ).map(([key, title, body]) => (
             <li key={key}>
@@ -92,12 +92,31 @@ export function ProgramForm({ program, canManage }: { program: ProgramSettings; 
             </li>
           ))}
         </ul>
-        {form.couponsEnabled && (
-          <label className={`${label} max-w-xs`}>
-            Largest coupon discount (%)
-            <Input type="number" min={1} max={100} step={1} value={form.maxCouponPercent} onChange={num("maxCouponPercent")} required />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <label className={label}>
+            Permanent code discount (%)
+            <Input type="number" min={0} max={100} step={1} value={form.permanentCouponPercent} onChange={num("permanentCouponPercent")} required />
+            <span>Every affiliate gets one permanent code with this discount. 0 = no permanent codes.</span>
           </label>
-        )}
+          <label className={label}>
+            Permanent code applies to the first
+            <select value={form.permanentCouponMonths} onChange={(e) => setForm((f) => ({ ...f, permanentCouponMonths: Number(e.target.value) }))} className={selectClass}>
+              {[1, 2, 3, 6, 12].map((m) => (
+                <option key={m} value={m}>
+                  {m === 1 ? "month" : `${m} months`}
+                </option>
+              ))}
+            </select>
+            <span>Codes already created keep theirs until you update them on the affiliate&apos;s page.</span>
+          </label>
+          {form.couponsEnabled && (
+            <label className={label}>
+              Largest coupon discount (%)
+              <Input type="number" min={1} max={100} step={1} value={form.maxCouponPercent} onChange={num("maxCouponPercent")} required />
+              <span>For coupons affiliates create themselves. An affiliate can have their own limit.</span>
+            </label>
+          )}
+        </div>
       </fieldset>
       {canManage && (
         <div className="flex items-center gap-3">
@@ -325,7 +344,7 @@ export function RuleForm({ affiliateId, campaigns, coupons }: { affiliateId: num
       )}
       <label className={label}>
         Rate (%)
-        <Input type="number" min={0.5} max={90} step="0.5" value={form.ratePercent} onChange={set("ratePercent")} required />
+        <Input type="number" min={0.5} max={100} step="0.5" value={form.ratePercent} onChange={set("ratePercent")} required />
       </label>
       <label className={label}>
         Earning window (months, optional)

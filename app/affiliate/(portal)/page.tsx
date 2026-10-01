@@ -3,6 +3,7 @@ import Link from "next/link"
 import { CircleDollarSign, Hourglass, MousePointerClick, Target, UserPlus, Users, Wallet } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
 import { balancesFor, releaseHolds } from "@/lib/affiliates/commissions"
+import { ensurePermanentCoupon } from "@/lib/affiliates/coupons"
 import { buildTrackingUrl, rate, tierFor } from "@/lib/affiliates/engine"
 import { SITE_URL, currentRule, getProgram, loadTiers, paidCustomerCount } from "@/lib/affiliates/program"
 import { campaignsWithStats, defaultLink, performance, recentReferrals } from "@/lib/affiliates/queries"
@@ -33,6 +34,9 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
     recentReferrals(affiliate.id, 6),
   ])
   const { current, previous } = perf
+  // Their permanent discount code. Created on the spot for anyone who was
+  // approved before these existed; a failure here must not break the page.
+  const permanent = await ensurePermanentCoupon(affiliate.id).catch(() => null)
   const url = buildTrackingUrl({ base: SITE_URL, code: affiliate.code, linkToken: link?.token })
   const tier = tierFor(tiers, customers, affiliate.tierId)
   const next = tiers.filter((t) => t.enabled && t.minCustomers > customers).sort((a, b) => a.minCustomers - b.minCustomers)[0]
@@ -52,7 +56,7 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
           <Kpi label="Paying customers" value={count(customers)} icon={Users} note={tier ? `${tier.name} tier · ${rule.ratePercent}%` : `${rule.ratePercent}% commission`} />
         </KpiGrid>
 
-        <ReferralLinkCard url={url} code={affiliate.code} rate={rule.ratePercent} cookieDays={program.cookieDays} />
+        <ReferralLinkCard url={url} code={affiliate.code} rate={rule.ratePercent} cookieDays={program.cookieDays} coupon={permanent && permanent.status === "active" ? { code: permanent.code, percent: Number(permanent.discountValue), months: permanent.durationMonths } : null} />
 
         <KpiGrid>
           <Kpi label="Clicks" value={count(current.clicks)} icon={MousePointerClick} current={current.clicks} previous={previous?.clicks ?? null} />

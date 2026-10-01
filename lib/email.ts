@@ -10,14 +10,17 @@ export function emailConfigured() {
   return Boolean(process.env.RESEND_API_KEY)
 }
 
-export async function sendEmail({ to, subject, text, html }: { to: string; subject: string; text: string; html?: string }) {
+// `from` overrides the site-wide sender for mail that has its own (the
+// affiliate program, payments). `idempotencyKey` is passed to the provider, so
+// sending the same event again — a retry after a lost answer — delivers once.
+export async function sendEmail({ to, subject, text, html, from, idempotencyKey }: { to: string; subject: string; text: string; html?: string; from?: string; idempotencyKey?: string }) {
   const key = process.env.RESEND_API_KEY
   if (!key) throw new Error("Email isn't set up on this deployment (RESEND_API_KEY is missing).")
 
   const res = await fetch(ENDPOINT, {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM, to: [to], subject, text, html: html ?? textToHtml(text) }),
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey.slice(0, 250) } : {}) },
+    body: JSON.stringify({ from: from ?? FROM, to: [to], subject, text, html: html ?? textToHtml(text) }),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => "")

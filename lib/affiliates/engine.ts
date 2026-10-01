@@ -344,6 +344,15 @@ export function suggestCode(firstName: string, lastName: string, salt: number): 
 export const codeValid = (code: string) => /^[a-z0-9][a-z0-9_-]{2,23}$/.test(code)
 export const couponCodeValid = (code: string) => /^[A-Z0-9][A-Z0-9_-]{2,19}$/.test(code)
 
+// What an affiliate may do with coupons right now: whether the Coupons section
+// of their portal is open (the program allows coupons AND an admin opened it
+// for them), and the largest discount they may offer (their own ceiling when an
+// admin set one, else the program's).
+export function couponAccess(aff: { couponsEnabled: boolean; maxCouponPercent: number | null }, program: { couponsEnabled: boolean; maxCouponPercent: number }): { enabled: boolean; maxPercent: number } {
+  const own = aff.maxCouponPercent
+  return { enabled: program.couponsEnabled && aff.couponsEnabled, maxPercent: own != null && own >= 1 ? Math.min(100, own) : program.maxCouponPercent }
+}
+
 // Only same-site paths are accepted as landing pages — never a full URL.
 export function cleanLandingPage(value: string | null | undefined): string {
   const v = (value ?? "").trim()

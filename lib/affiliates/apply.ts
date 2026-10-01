@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto"
 import { and, eq, ne } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateLinks, affiliates } from "@/lib/db/schema"
-import { emailConfigured, sendEmail } from "@/lib/email"
-import { codeValid, suggestCode } from "./engine"
-import { getProgram } from "./program"
-import { notifyAffiliate } from "./notify"
+import { applicationApproved, applicationDenied, applicationReceived } from "@/lib/emails/affiliate-emails"
+import { ensurePermanentCoupon } from "./coupons"
+import { buildTrackingUrl, codeValid, suggestCode } from "./engine"
+import { SITE_URL, getProgram } from "./program"
+import { notifyAffiliate, type Mail } from "./notify"
 import { AUDIENCE_SIZES, NOTIFICATION_PREFS, SOCIAL_KEYS, TRAFFIC_SOURCES } from "./types"
 
 // Applications and the affiliate's own profile.
@@ -76,6 +77,14 @@ async function freeCode(firstName: string, lastName: string): Promise<string> {
   return `partner${randomBytes(4).toString("hex")}`
 }
 
+// The application emails. A key carries the minute, so a double click sends
+// one email while a later re-application (after a rejection) sends its own.
+const minute = (d: Date) => Math.floor(d.getTime() / 60_000)
+const approvedMail = (affiliateId: number, now: Date): Mail => ({
+  key: `affiliate_application_approved:${affiliateId}:${minute(now)}`,
+  build: (to) => applicationApproved({ firstName: to.firstName, affiliateId: to.id, onboarded: to.onboarded, link: to.onboarded ? buildTrackingUrl({ base: SITE_URL, code: to.code }) : null }),
+})
+
 // Everything an approved affiliate needs to exist: a default tracking link.
 export async function ensureDefaultLink(affiliateId: number): Promise<void> {
   const [existing] = await db.select({ id: affiliateLinks.id }).from(affiliateLinks).where(and(eq(affiliateLinks.affiliateId, affiliateId), eq(affiliateLinks.isDefault, true)))
@@ -108,13 +117,18 @@ export async function submitApplication(user: { id: string; email: string }, inp
 
   if (status === "approved") {
     await ensureDefaultLink(affiliateId)
-    await notifyAffiliate({ affiliateId, type: "application", title: "Welcome to the TradeLoop affiliate program", body: "Your application was approved. Finish setting up your account to get your referral link.", href: "/affiliate/onboarding", email: true })
-  } else if (emailConfigured()) {
-    await sendEmail({
-      to: user.email,
-      subject: "We received your TradeLoop affiliate application",
-      text: `Hi ${data.firstName},\n\nThanks for applying to the TradeLoop affiliate program. We review every application by hand and will email you as soon as there's a decision — usually within a few business days.`,
-    }).catch((e) => console.error("[affiliates] application email failed:", e instanceof Error ? e.message : e))
+    await notifyAffiliate({ affiliateId, type: "application", title: "Welcome to the TradeLoop affiliate program", body: "Your application was approved. Finish setting up your account to get your referral link.", href: "/affiliate/onboarding", email: true, mail: approvedMail(affiliateId, now) })
+  } else {
+    const channel = (data.website ?? Object.values(data.socials)[0] ?? data.trafficSource).replace(/^https?:\/\//, "").replace(/\/$/, "")
+    await notifyAffiliate({
+      affiliateId,
+      type: "application",
+      title: "We received your application",
+      body: "Thanks for applying to the TradeLoop affiliate program. We review every application by hand and will email you as soon as there's a decision.",
+      href: "/affiliate/apply",
+      email: true,
+      mail: { key: `affiliate_application_received:${affiliateId}:${minute(now)}`, build: (to) => applicationReceived({ firstName: to.firstName, affiliateId: to.id, submittedAt: now, channel }) },
+    })
   }
   return { status }
 }
@@ -133,12 +147,22 @@ export async function decideApplication(affiliateId: number, decision: Decision,
   if (decision === "reject") {
     const why = reason.trim().slice(0, 500)
     await db.update(affiliates).set({ status: "rejected", rejectionReason: why || null, reviewedBy: adminId, updatedAt: now }).where(eq(affiliates.id, affiliateId))
-    await notifyAffiliate({ affiliateId, type: "application", title: "Your affiliate application", body: `Thanks for applying. We aren't able to approve your application right now.${why ? `\n\n${why}` : ""}\n\nYou're welcome to apply again later.`, href: "/affiliate/apply", email: true })
+    await notifyAffiliate({
+      affiliateId,
+      type: "application",
+      title: "Your affiliate application",
+      body: `Thanks for applying. We aren't able to approve your application right now.${why ? `\n\n${why}` : ""}\n\nYou're welcome to apply again later.`,
+      href: "/affiliate/apply",
+      email: true,
+      mail: { key: `affiliate_application_denied:${affiliateId}:${minute(now)}`, build: (to) => applicationDenied({ firstName: to.firstName, affiliateId: to.id, reviewedAt: now, reason: why || null }) },
+    })
     return { userId: aff.userId, status: "rejected" }
   }
   await db.update(affiliates).set({ status: "approved", rejectionReason: null, reviewedBy: adminId, approvedAt: aff.approvedAt ?? now, updatedAt: now }).where(eq(affiliates.id, affiliateId))
   await ensureDefaultLink(affiliateId)
-  await notifyAffiliate({ affiliateId, type: "application", title: "You're approved — welcome to the TradeLoop affiliate program", body: "Your application was approved. Finish setting up your account to get your referral link.", href: "/affiliate/onboarding", email: true })
+  // Someone approved again after a rejection already has their code chosen.
+  await ensurePermanentCoupon(affiliateId).catch((e) => console.error("[affiliates] permanent coupon failed:", e instanceof Error ? e.message : e))
+  await notifyAffiliate({ affiliateId, type: "application", title: "You're approved — welcome to the TradeLoop affiliate program", body: "Your application was approved. Finish setting up your account to get your referral link.", href: "/affiliate/onboarding", email: true, mail: approvedMail(affiliateId, now) })
   return { userId: aff.userId, status: "approved" }
 }
 
@@ -161,6 +185,10 @@ export async function completeOnboarding(affiliateId: number, input: { code: unk
   if (aff?.onboardedAt) throw new Error("Your account is already set up.")
   await db.update(affiliates).set({ code, onboardedAt: new Date(), updatedAt: new Date() }).where(eq(affiliates.id, affiliateId))
   await ensureDefaultLink(affiliateId)
+  // Their permanent discount code is built from the referral code they just
+  // chose. If the checkout provider can't be reached now, the daily job (or
+  // their next visit to the dashboard) creates it.
+  await ensurePermanentCoupon(affiliateId).catch((e) => console.error("[affiliates] permanent coupon failed:", e instanceof Error ? e.message : e))
 }
 
 export async function updateProfile(affiliateId: number, input: { firstName: unknown; lastName: unknown; country: unknown; website: unknown; socials: unknown }): Promise<void> {

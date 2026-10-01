@@ -1499,6 +1499,10 @@ export const affiliates = pgTable(
     autoPayoutThreshold: numeric("autoPayoutThreshold"), // the affiliate's own threshold; null = the minimum
     minPayoutOverride: numeric("minPayoutOverride"), // admin: custom minimum; null = inherited
     maxPayoutOverride: numeric("maxPayoutOverride"), // admin: custom maximum; null = inherited
+    // The Coupons section of the portal (creating their own codes). Off for
+    // everyone until an admin opens it for this affiliate.
+    couponsEnabled: boolean("couponsEnabled").notNull().default(false),
+    maxCouponPercent: integer("maxCouponPercent"), // admin: the largest discount they may offer; null = the program's
     notifications: jsonb("notifications").$type<Record<string, boolean>>(),
     rejectionReason: text("rejectionReason"),
     reviewedBy: text("reviewedBy"),
@@ -1701,9 +1705,41 @@ export const affiliateCoupons = pgTable(
     uses: integer("uses").notNull().default(0),
     status: text("status").notNull().default("active"), // active | disabled
     whopPromoId: text("whopPromoId"),
+    // The affiliate's one standing discount code, created by the system. They
+    // can't disable it; an admin can. At most one per affiliate (partial
+    // unique index affiliate_coupons_permanent, migration 0030).
+    permanent: boolean("permanent").notNull().default(false),
+    createdBy: text("createdBy"), // affiliate | system | the admin's user id
     createdAt: timestamp("createdAt").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("affiliate_coupons_code").on(t.code), index("affiliate_coupons_affiliate").on(t.affiliateId)]
+)
+
+// Every transactional email, once. `key` identifies the event
+// ("payout_sent:42"): a second attempt to email the same event finds the row
+// and sends nothing. The row also holds what is needed to retry a delivery the
+// provider didn't take, and the final result.
+export const emailEvents = pgTable(
+  "email_events",
+  {
+    id: serial("id").primaryKey(),
+    key: text("key").notNull(),
+    template: text("template").notNull(),
+    sender: text("sender").notNull(), // the full From header
+    recipient: text("recipient").notNull(),
+    subject: text("subject").notNull(),
+    html: text("html").notNull(),
+    text: text("text").notNull(),
+    // queued | sending | sent | failed
+    status: text("status").notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("lastError"),
+    nextAttemptAt: timestamp("nextAttemptAt").notNull().defaultNow(),
+    affiliateId: integer("affiliateId"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    sentAt: timestamp("sentAt"),
+  },
+  (t) => [uniqueIndex("email_events_key").on(t.key), index("email_events_due").on(t.status, t.nextAttemptAt)]
 )
 
 export const affiliatePayoutMethods = pgTable(

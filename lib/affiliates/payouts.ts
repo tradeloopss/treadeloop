@@ -7,7 +7,9 @@ import { ledgerBalances, round2, settleFifo } from "./engine"
 import { availableRows } from "./commissions"
 import { recordSignal } from "./fraud"
 import { validateMethod } from "./method-validation"
-import { notifyAffiliate, notifyOwners } from "./notify"
+import { payoutApproved, payoutDenied, payoutFailed, payoutMethodChanged, payoutRequested, payoutSent, payoutUpdate, type PayoutFacts } from "@/lib/emails/affiliate-emails"
+import { explorerTxUrl } from "./crypto"
+import { notifyAffiliate, notifyOwners, type Mail } from "./notify"
 import {
   EXCHANGE_REQUEST_WINDOW_MS,
   MAX_AUTO_ATTEMPTS,
@@ -146,6 +148,7 @@ export async function addPayoutMethod(affiliateId: number, type: string, raw: un
 
   const what = `${methodLabel(type)} (${m.label})`
   const hold = created.holdUntil ? `\n\nFor your security, payouts to it start after ${created.holdUntil.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC.` : ""
+  const coin = cryptoSpec(type)
   // Always emailed, whatever the notification preferences: it's a security notice.
   await notifyAffiliate({
     affiliateId,
@@ -154,6 +157,10 @@ export async function addPayoutMethod(affiliateId: number, type: string, raw: un
     body: `${created.changed ? "A new payout method was added to your affiliate account" : "Your first payout method was added"}.\n\nMethod: ${what}${hold}\n\nIf you did not make this change, contact TradeLoop support immediately.`,
     href: "/affiliate/payouts",
     email: true,
+    mail: {
+      key: `${coin ? "wallet_changed" : "payout_method_changed"}:${created.id}:1`,
+      build: (to) => payoutMethodChanged({ firstName: to.firstName, method: methodLabel(type), destination: m.label, changed: created.changed, changedAt: now, holdUntil: created.holdUntil, crypto: coin ? { asset: coin.asset, network: coin.networkLabel } : null }),
+    },
   })
   return { id: created.id, holdUntil: created.holdUntil }
 }
@@ -218,7 +225,7 @@ export async function adminSetMethodStatus(methodId: number, status: "active" | 
     if (status !== "active" && m.isDefault) await pickNewDefault(tx, m.affiliateId)
   })
   if (status !== "active") {
-    await notifyAffiliate({ affiliateId: m.affiliateId, type: "payout_method", title: status === "rejected" ? "A payout method was rejected" : "A payout method needs verifying", body: `${methodLabel(m.type)} (${m.label})${reason ? `\n\n${reason.trim().slice(0, 300)}` : ""}\n\nIt can't be used for payouts until this is resolved. Contact affiliate support if you have questions.`, href: "/affiliate/payouts", email: true })
+    await notifyAffiliate({ affiliateId: m.affiliateId, type: "payout_method", title: status === "rejected" ? "A payout method was rejected" : "A payout method needs verifying", body: `${methodLabel(m.type)} (${m.label})${reason ? `\n\n${reason.trim().slice(0, 300)}` : ""}\n\nIt can't be used for payouts until this is resolved. Contact affiliate support if you have questions.`, href: "/affiliate/payouts", email: true, sender: "payments" })
   }
   return { affiliateId: m.affiliateId }
 }
@@ -413,7 +420,19 @@ export async function createPayout(input: CreateInput): Promise<CreateResult> {
   })
 
   if (result.created) {
-    if (result.notify) await notifyAffiliate({ affiliateId: input.affiliateId, type: "payout", title: result.notify.title, body: result.notify.body, href: "/affiliate/payouts", pref: "payout", email: true })
+    if (result.notify) {
+      const [made] = await db.select().from(affiliatePayouts).where(eq(affiliatePayouts.id, result.id))
+      await notifyAffiliate({
+        affiliateId: input.affiliateId,
+        type: "payout",
+        title: result.notify.title,
+        body: result.notify.body,
+        href: "/affiliate/payouts",
+        pref: "payout",
+        email: true,
+        mail: made ? { key: `payout_requested:${made.id}`, build: (to) => payoutRequested({ firstName: to.firstName, payout: payoutFacts(made), requestedAt: made.requestedAt, sending: isAutoSender(made.provider) && made.status === "queued" }) } : null,
+      })
+    }
     if (result.status === "queued") await executePayout(result.id).catch((e) => console.error("[affiliates] payout execution failed:", e instanceof Error ? e.message : e))
     return { created: true, id: result.id, status: result.status, amount: result.amount }
   }
@@ -470,6 +489,50 @@ const NOTICES: Partial<Record<PayoutStatus, (p: Payout, reason: string) => [stri
   on_hold: (p) => ["Payout on hold", `Your payout of ${money(p.amount)} is on hold while we review it. You don't need to do anything.`],
 }
 
+// What a payout's emails show: amounts, the method with its masked
+// destination, and — for a crypto payout only — the asset, network, wallet and
+// transaction. `sent` is the exact amount of the asset that went out, when
+// that isn't simply the dollar figure.
+function payoutFacts(p: Payout, sent: string | null = null): PayoutFacts {
+  const coin = cryptoSpec(p.methodType)
+  return {
+    id: p.id,
+    amount: Number(p.amount),
+    fee: Number(p.fee),
+    net: Number(p.netAmount ?? p.amount),
+    method: `${methodLabel(p.methodType)} (${p.methodLabel})`,
+    automatic: p.mode === "automatic",
+    crypto: coin ? { asset: coin.asset, network: coin.networkLabel, wallet: p.methodLabel, hash: p.transactionHash, explorerUrl: explorerTxUrl(p.network, p.transactionHash), sent } : null,
+  }
+}
+
+// The email for a payout arriving in a status, with the key that makes it a
+// one-off. null = no email for that step.
+function payoutMail(p: Payout, from: PayoutStatus, reason: string, sent: string | null = null): Mail | null {
+  const facts = payoutFacts(p, sent)
+  const now = new Date()
+  switch (p.status as PayoutStatus) {
+    case "queued":
+      // "Approved" is a person's decision; a payout the rules approved goes
+      // straight from "requested" to "sent".
+      return from === "pending" || from === "on_hold" ? { key: `payout_approved:${p.id}`, build: (to) => payoutApproved({ firstName: to.firstName, payout: facts, approvedAt: p.approvedAt ?? now }) } : null
+    case "paid":
+      return { key: `${facts.automatic ? "automatic_payout_sent" : "payout_sent"}:${p.id}`, build: (to) => payoutSent({ firstName: to.firstName, payout: facts, completedAt: p.completedAt ?? now }) }
+    case "rejected":
+      return { key: `payout_denied:${p.id}`, build: (to) => payoutDenied({ firstName: to.firstName, payout: facts, reviewedAt: now, reason: reason || null }) }
+    case "failed":
+      return { key: `payout_failed:${p.id}`, build: (to) => payoutFailed({ firstName: to.firstName, payout: facts, reason: reason || p.failureReason }) }
+    case "on_hold":
+      // can happen more than once to the same payout
+      return { key: `payout_on_hold:${p.id}:${Math.floor(now.getTime() / 60_000)}`, build: (to) => payoutUpdate({ firstName: to.firstName, payout: facts, status: "on_hold", reason: null }) }
+    case "cancelled":
+    case "reversed":
+      return { key: `payout_${p.status}:${p.id}`, build: (to) => payoutUpdate({ firstName: to.firstName, payout: facts, status: p.status as "cancelled" | "reversed", reason: reason || null }) }
+    default:
+      return null
+  }
+}
+
 // Every status change. Locks the payout, checks the machine, stamps the times,
 // keeps the ledger row (the reservation) in step, and records who did it.
 export async function transition(m: Move): Promise<Payout> {
@@ -519,8 +582,13 @@ export async function transition(m: Move): Promise<Payout> {
     })
 
   const notice = !m.silent && before && before.status !== after.status ? NOTICES[m.to]?.(after, m.reason?.trim() ?? "") : null
-  // A failure or a hold is always emailed; the rest follow the preference.
-  if (notice) await notifyAffiliate({ affiliateId: after.affiliateId, type: "payout", title: notice[0], body: notice[1], href: "/affiliate/payouts", pref: ["failed", "rejected", "reversed"].includes(m.to) ? undefined : "payout", email: true })
+  if (notice) {
+    const mail = payoutMail(after, before!.status as PayoutStatus, m.reason?.trim() ?? "")
+    // In the portal every step shows; by email only the ones that matter: a
+    // failure, a rejection or a return always, the rest by preference. The
+    // in-between steps (processing, submitted, confirming) aren't emailed.
+    await notifyAffiliate({ affiliateId: after.affiliateId, type: "payout", title: notice[0], body: notice[1], href: "/affiliate/payouts", pref: ["failed", "rejected", "reversed"].includes(m.to) ? undefined : "payout", email: !!mail, mail })
+  }
   return after
 }
 
@@ -965,6 +1033,7 @@ async function trackExchange(p: Payout, actor: Actor): Promise<Payout | null> {
     href: "/affiliate/payouts",
     pref: "payout",
     email: true,
+    mail: payoutMail(paid, "confirming", "", formatAsset(units, spec.asset, spec.decimals)),
   })
   return paid
 }
@@ -1223,6 +1292,7 @@ export async function setAffiliatePayoutControls(affiliateId: number, input: { a
       body: result.autoOn ? "Automatic payouts are available for your affiliate account again." : `Automatic payouts have been switched off for your affiliate account.${reason ? ` ${reason.trim().slice(0, 300)}` : ""} Your balance, payout methods and commissions are unchanged.`,
       href: "/affiliate/payouts",
       email: true,
+      sender: "payments",
     })
   }
   return { userId: result.userId, previous: result.previous, next: result.next }

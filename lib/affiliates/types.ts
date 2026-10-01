@@ -62,8 +62,14 @@ export type ProgramSettings = {
   refundReversal: boolean
   attribution: "first_touch" | "last_touch"
   autoApprove: boolean
+  // Master switch for affiliates creating their own coupons. Each affiliate
+  // also needs the Coupons section opened by an admin (affiliates.couponsEnabled).
   couponsEnabled: boolean
   maxCouponPercent: number
+  // Every affiliate's permanent discount code: how much it takes off (0 = no
+  // permanent codes) and for how many months of a subscription.
+  permanentCouponPercent: number
+  permanentCouponMonths: number
   payoutEta: string
 }
 
@@ -79,6 +85,8 @@ export const DEFAULT_PROGRAM: ProgramSettings = {
   autoApprove: false,
   couponsEnabled: true,
   maxCouponPercent: 30,
+  permanentCouponPercent: 20,
+  permanentCouponMonths: 1,
   payoutEta: "2–5 business days",
 }
 
@@ -104,6 +112,8 @@ export function normalizeProgram(raw: unknown): ProgramSettings {
     autoApprove: typeof r.autoApprove === "boolean" ? r.autoApprove : d.autoApprove,
     couponsEnabled: typeof r.couponsEnabled === "boolean" ? r.couponsEnabled : d.couponsEnabled,
     maxCouponPercent: num(r.maxCouponPercent, d.maxCouponPercent, 1, 100),
+    permanentCouponPercent: Math.round(num(r.permanentCouponPercent, d.permanentCouponPercent, 0, 100)),
+    permanentCouponMonths: Math.round(num(r.permanentCouponMonths, d.permanentCouponMonths, 1, 12)),
     payoutEta: typeof r.payoutEta === "string" && r.payoutEta.trim() ? r.payoutEta.trim().slice(0, 60) : d.payoutEta,
   }
 }

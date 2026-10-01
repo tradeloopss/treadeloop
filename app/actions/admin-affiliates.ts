@@ -9,7 +9,7 @@ import { logAdminAction } from "@/lib/admin/audit"
 import type { Permissions } from "@/lib/admin/access"
 import { decideApplication, validateCode, type Decision } from "@/lib/affiliates/apply"
 import { addLedgerEntry, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
-import { setCouponStatus } from "@/lib/affiliates/coupons"
+import { adminCreateCoupon, refreshPermanentCoupon, setCouponAccess, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
 import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
 import { adminPayoutAction, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
 import { notifyAffiliate } from "@/lib/affiliates/notify"
@@ -169,7 +169,8 @@ export async function saveRule(input: { affiliateId: number; scope: string; camp
     const scope = input.scope
     if (scope !== "affiliate" && scope !== "campaign" && scope !== "coupon") throw new Error("Choose what the rule applies to.")
     const ratePercent = Number(input.ratePercent)
-    if (!Number.isFinite(ratePercent) || ratePercent <= 0 || ratePercent > 90) throw new Error("The rate must be between 0 and 90%.")
+    // A custom rule is a deliberate exception, so it may go all the way to 100%.
+    if (!Number.isFinite(ratePercent) || ratePercent <= 0 || ratePercent > 100) throw new Error("The rate must be between 0 and 100%.")
     const durationMonths = input.durationMonths == null || (input.durationMonths as unknown) === "" ? null : Math.round(Number(input.durationMonths))
     if (durationMonths != null && (!Number.isFinite(durationMonths) || durationMonths < 1 || durationMonths > 240)) throw new Error("Duration must be 1–240 months, or empty to follow the program.")
     const date = (v: string | null | undefined) => {
@@ -426,6 +427,51 @@ export async function disableAffiliateCoupon(couponId: number): Promise<ActionRe
     await setCouponStatus(null, Number(couponId), "disabled")
     await logAdminAction(admin, "affiliate.coupon_disable", null, { couponId })
     return "Coupon disabled."
+  })
+}
+
+export async function enableAffiliateCoupon(couponId: number): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    await setCouponStatus(null, Number(couponId), "active")
+    await logAdminAction(admin, "affiliate.coupon_enable", null, { couponId })
+    return "Coupon enabled. It works at checkout again."
+  })
+}
+
+// Opens or closes the Coupons section of one affiliate's portal, and sets the
+// largest discount they may offer there.
+export async function setAffiliateCouponAccess(affiliateId: number, input: { couponsEnabled?: boolean; maxCouponPercent?: number | null }): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const result = await setCouponAccess(Number(affiliateId), { couponsEnabled: typeof input.couponsEnabled === "boolean" ? input.couponsEnabled : undefined, maxCouponPercent: input.maxCouponPercent === undefined ? undefined : input.maxCouponPercent })
+    await logAdminAction(admin, "affiliate.coupon_access", result.userId, { affiliateId, previous: result.previous, next: result.next })
+    if (typeof input.couponsEnabled === "boolean") return input.couponsEnabled ? "Coupons section opened for this affiliate." : "Coupons section closed for this affiliate. Their existing codes keep working."
+    return "Discount limit saved."
+  })
+}
+
+// Generates a coupon for one affiliate: any discount, the code typed in or made up.
+export async function generateAffiliateCoupon(affiliateId: number, input: CouponInput): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const aff = await target(affiliateId)
+    const { code } = await adminCreateCoupon(aff.id, input, admin.id)
+    await logAdminAction(admin, "affiliate.coupon_generate", aff.userId, { affiliateId: aff.id, code, percent: Number(input.percent), durationMonths: Number(input.durationMonths) })
+    return `Coupon ${code} created. It works at checkout right away.`
+  })
+}
+
+// Creates the affiliate's permanent code if they don't have one, or brings it
+// in line with the program's current discount.
+export async function refreshAffiliatePermanentCoupon(affiliateId: number): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const aff = await target(affiliateId)
+    const coupon = await refreshPermanentCoupon(aff.id)
+    if (!coupon) throw new Error("The permanent code couldn't be created. The affiliate has to be approved and set up, and permanent codes switched on in the program rules.")
+    await logAdminAction(admin, "affiliate.coupon_permanent", aff.userId, { affiliateId: aff.id, code: coupon.code, percent: Number(coupon.discountValue) })
+    return `Permanent code ${coupon.code} is live at ${Number(coupon.discountValue)}% off.`
   })
 }
 

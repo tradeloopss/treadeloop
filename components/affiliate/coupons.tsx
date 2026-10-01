@@ -23,6 +23,8 @@ export type CouponView = {
   uses: number
   expiresAt: string | null
   status: string
+  // their standing code, created by the program: it can't be switched off here
+  permanent?: boolean
   stats: { customers: number; revenue: number; commission: number }
 }
 
@@ -38,7 +40,7 @@ export function CouponsManager({ coupons, campaigns, enabled, maxPercent }: { co
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">{enabled ? `Give your audience a discount of up to ${maxPercent}%. A customer who pays with your code is credited to you, even without a link click.` : "Coupons are switched off in the program right now."}</p>
+        <p className="text-sm text-muted-foreground">{enabled ? `Give your audience a discount of up to ${maxPercent}%. A customer who pays with your code is credited to you, even without a link click.` : "Creating your own coupons isn't enabled for your account. Your permanent code keeps working — a customer who pays with it is credited to you."}</p>
         {enabled && (
           <Button onClick={() => (setForm(BLANK), setOpen(true))}>
             <Plus className="size-4" aria-hidden /> New coupon
@@ -70,7 +72,10 @@ export function CouponsManager({ coupons, campaigns, enabled, maxPercent }: { co
             {coupons.map((c) => (
               <tr key={c.id}>
                 <td className={tdClass}>
-                  <p className="font-mono text-sm font-semibold">{c.code}</p>
+                  <p className="font-mono text-sm font-semibold">
+                    {c.code}
+                    {c.permanent && <span className="ms-2 rounded-full bg-primary/12 px-2 py-0.5 font-sans text-xs font-medium text-primary">Permanent</span>}
+                  </p>
                   {c.campaign && <p className="text-xs text-muted-foreground">{c.campaign}</p>}
                 </td>
                 <td className={tdClass}>
@@ -93,7 +98,7 @@ export function CouponsManager({ coupons, campaigns, enabled, maxPercent }: { co
                 <td className={tdClass}>
                   <div className="flex items-center justify-end gap-1.5">
                     <CopyButton value={c.code} label="Copy code" />
-                    {c.status === "active" ? (
+                    {c.permanent ? null : c.status === "active" ? (
                       <ConfirmButton title={`Disable ${c.code}?`} description="The code stops working at checkout straight away. Customers who already used it stay credited to you." confirmLabel="Disable" destructive action={() => changeCouponStatus(c.id, "disabled")}>
                         Disable
                       </ConfirmButton>
