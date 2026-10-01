@@ -216,7 +216,8 @@ export async function submitPayoutRequest(input: { amount: number; methodId: num
   return run(async () => {
     const { affiliateId, actor } = await payoutActor()
     const result = await requestPayout({ affiliateId, amount: Number(input.amount), methodId: Number(input.methodId), idempotencyKey: String(input.key), actor })
-    return result.created ? "Payout requested." : "That payout was already requested."
+    if (!result.created) return "That payout was already requested."
+    return result.sending ? "Payout approved. It's being sent to your wallet and completes once the TRON network confirms it." : "Payout requested."
   })
 }
 

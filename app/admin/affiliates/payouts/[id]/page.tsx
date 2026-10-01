@@ -7,7 +7,7 @@ import { payoutDetail } from "@/lib/affiliates/admin-queries"
 import { PAYOUT_STATUS_LABELS, type PayoutStatus } from "@/lib/affiliates/payout-engine"
 import { payoutEvents, payoutTransactions, trackPayout } from "@/lib/affiliates/payouts"
 import { getPayoutSettings } from "@/lib/affiliates/program"
-import { providerFor } from "@/lib/affiliates/providers"
+import { HOT_PROVIDER, hotWalletReady, providerByName } from "@/lib/affiliates/providers"
 import { explorerTxUrl, maskTxHash } from "@/lib/affiliates/tron"
 import { methodLabel, money } from "@/lib/affiliates/types"
 import { AdminPageHeader, Panel, fmtDateTime } from "@/components/admin/ui"
@@ -35,8 +35,14 @@ const EVENT_LABELS: Record<string, string> = {
   "payout.rejected": "Rejected",
   "payout.cancelled": "Cancelled",
   "payout.reversed": "Reversed",
+  "payout.transaction_signed": "Transaction signed by the payout wallet",
+  "payout.broadcast": "Broadcast to the TRON network",
+  "payout.requeued": "Put back in the queue",
+  "payout.auto_waiting": "Waiting on the payout wallet",
+  "payout.auto_send_off": "Automatic sending switched off — waits to be sent by hand",
+  "payout.send_auto": "Handed to the payout wallet",
 }
-const PROVIDERS: Record<string, string> = { manual: "Manual (sent by hand)", tron_manual: "Manual transfer, verified on the TRON network", stripe: "Stripe Connect" }
+const PROVIDERS: Record<string, string> = { manual: "Manual (sent by hand)", tron_manual: "Manual transfer, verified on the TRON network", tron_hot: "Payout wallet (automatic), verified on the TRON network", stripe: "Stripe Connect" }
 const ACTORS: Record<string, string> = { affiliate: "Affiliate", admin: "Admin", system: "System" }
 
 export default async function AdminAffiliatePayoutDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -51,6 +57,7 @@ export default async function AdminAffiliatePayoutDetailPage({ params }: { param
   const name = `${p.firstName} ${p.lastName}`.trim()
   const link = explorerTxUrl(p.network, p.transactionHash)
   const crypto = !!p.asset
+  const hot = p.provider === HOT_PROVIDER
 
   return (
     <div>
@@ -133,7 +140,7 @@ export default async function AdminAffiliatePayoutDetailPage({ params }: { param
                 {p.attempts > 0 && <FieldRow label="Attempts">{p.attempts}</FieldRow>}
               </div>
             </div>
-            {p.failureReason && <p className="mt-4 rounded-lg bg-[var(--loss)]/8 px-3 py-2 text-sm text-[var(--loss)]">{p.failureReason}</p>}
+            {p.failureReason && (hot && p.status === "queued" ? <p className="mt-4 rounded-lg bg-[var(--chart-4)]/10 px-3 py-2 text-sm text-[var(--chart-4)]">Waiting: {p.failureReason}</p> : <p className="mt-4 rounded-lg bg-[var(--loss)]/8 px-3 py-2 text-sm text-[var(--loss)]">{p.failureReason}</p>)}
             {p.note && <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-sm text-muted-foreground">Note: {p.note}</p>}
             {(p.fraudLock || p.payoutHold || p.affiliateStatus !== "approved") && (
               <p className="mt-3 rounded-lg bg-[var(--chart-4)]/10 px-3 py-2 text-sm text-[var(--chart-4)]">
@@ -146,13 +153,17 @@ export default async function AdminAffiliatePayoutDetailPage({ params }: { param
             {canManage ? (
               <div className="flex flex-col gap-3">
                 <div className="[&>div]:justify-start">
-                  <PayoutAdminActions paused={settings.paused} payout={{ id: p.id, status: p.status, methodType: p.methodType, amount: p.amount, net: p.net, fee: p.fee, asset: p.asset, name, hasHash: !!p.transactionHash, automated: providerFor(p.methodType).automated }} />
+                  <PayoutAdminActions paused={settings.paused} canAutoSend={hotWalletReady()} payout={{ id: p.id, status: p.status, methodType: p.methodType, amount: p.amount, net: p.net, fee: p.fee, asset: p.asset, name, hasHash: !!p.transactionHash, automated: providerByName(p.provider).automated, hot }} />
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {["paid", "failed", "cancelled", "rejected", "reversed"].includes(p.status) && !(p.status === "paid" && !crypto)
                     ? "This payout is finished. Nothing more can be done to it."
-                    : crypto
-                      ? "A crypto payout is completed by the TRON network, not by hand: submit the transaction hash and it finishes once a matching USDT transfer is irreversible."
+                    : hot
+                      ? ["processing", "submitted", "confirming"].includes(p.status)
+                        ? "The payout wallet has signed a transaction for this payout. Only the TRON network decides now: it completes when the transfer is irreversible, or comes back to be sent again once that transaction can provably no longer be included."
+                        : "This payout is sent from the payout wallet. A new transfer is only ever signed when no earlier one can still be included."
+                      : crypto
+                        ? "A crypto payout is completed by the TRON network, not by hand: submit the transaction hash and it finishes once a matching USDT transfer is irreversible."
                       : "Send the money, then record the result. Failing, rejecting or cancelling puts the amount back in the affiliate's available balance."}
                 </p>
               </div>
@@ -199,7 +210,7 @@ export default async function AdminAffiliatePayoutDetailPage({ params }: { param
                       </td>
                       <td className={`${tdClass} font-mono text-xs`}>{t.destination}</td>
                       <td className={tdClass}>
-                        <StatusBadge status={t.status === "confirmed" ? "paid" : t.status === "not_found" || t.status === "replaced" ? "disabled" : t.status} label={t.status.replace("_", " ")} />
+                        <StatusBadge status={t.status === "confirmed" ? "paid" : ["not_found", "replaced", "expired"].includes(t.status) ? "disabled" : t.status === "signed" ? "submitted" : t.status} label={t.status.replace("_", " ")} />
                         {t.failureReason && <span className="mt-1 block max-w-64 text-xs text-[var(--loss)]">{t.failureReason}</span>}
                       </td>
                       <td className={`${tdClass} whitespace-nowrap text-muted-foreground`}>{fmtDateTime(t.confirmedAt)}</td>

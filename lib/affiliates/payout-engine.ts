@@ -24,8 +24,10 @@ export type PayoutStatus = (typeof PAYOUT_STATUSES)[number]
 const NEXT: Record<PayoutStatus, PayoutStatus[]> = {
   pending: ["queued", "rejected", "cancelled", "on_hold"],
   queued: ["processing", "submitted", "confirming", "paid", "failed", "retry_required", "cancelled", "on_hold"],
-  processing: ["submitted", "confirming", "paid", "failed", "retry_required"],
-  submitted: ["confirming", "paid", "failed", "retry_required"],
+  // (→ queued: only for an automatic send whose transaction provably never
+  // happened; it is put back to be sent again.)
+  processing: ["submitted", "confirming", "paid", "failed", "retry_required", "queued"],
+  submitted: ["confirming", "paid", "failed", "retry_required", "queued"],
   confirming: ["paid", "failed", "retry_required"],
   retry_required: ["queued", "processing", "submitted", "confirming", "paid", "failed", "cancelled", "on_hold"],
   on_hold: ["pending", "queued", "cancelled", "rejected"],
@@ -80,10 +82,34 @@ export const PAYOUT_STATUS_LABELS: Record<PayoutStatus, string> = {
 // What an admin may do to a payout in a given state. `crypto` payouts complete
 // only through an on-chain transaction; the others through the admin's (or the
 // provider's) confirmation. The UI shows exactly these; the server enforces them.
-export type AdminPayoutAction = "approve" | "reject" | "hold" | "release" | "cancel" | "start" | "mark_paid" | "submit_tx" | "check" | "fail" | "retry" | "reverse"
+export type AdminPayoutAction = "approve" | "reject" | "hold" | "release" | "cancel" | "start" | "mark_paid" | "submit_tx" | "check" | "fail" | "retry" | "reverse" | "send_auto"
 
-export function adminPayoutActions(p: { status: string; crypto: boolean; automated: boolean; hasHash: boolean }): AdminPayoutAction[] {
-  const sendable = p.crypto ? (["submit_tx"] as AdminPayoutAction[]) : p.automated ? [] : (["mark_paid"] as AdminPayoutAction[])
+// `hot` = the payout is being sent automatically from the payout wallet.
+// `canAutoSend` = the payout wallet is configured, so a crypto payout an admin
+// is about to pay by hand can be handed to it instead.
+export function adminPayoutActions(p: { status: string; crypto: boolean; automated: boolean; hasHash: boolean; hot?: boolean; canAutoSend?: boolean }): AdminPayoutAction[] {
+  if (p.hot) {
+    switch (p.status as PayoutStatus) {
+      case "pending":
+        return ["approve", "reject", "hold", "cancel"]
+      case "queued":
+        // nothing has been signed for it: it can still be stopped, or paid by hand
+        return ["retry", "submit_tx", "hold", "cancel"]
+      case "processing":
+      case "submitted":
+      case "confirming":
+        // a signed transaction may be on its way: only the chain may decide now
+        return ["check"]
+      case "retry_required":
+        return ["retry", "submit_tx", "hold", "cancel", "fail"]
+      case "on_hold":
+        return ["release", "reject", "cancel"]
+      default:
+        return []
+    }
+  }
+  const auto = p.crypto && p.canAutoSend ? (["send_auto"] as AdminPayoutAction[]) : []
+  const sendable = p.crypto ? ([...auto, "submit_tx"] as AdminPayoutAction[]) : p.automated ? [] : (["mark_paid"] as AdminPayoutAction[])
   switch (p.status as PayoutStatus) {
     case "pending":
       return ["approve", "reject", "hold", "cancel"]
@@ -132,6 +158,13 @@ export type PayoutSettings = {
   // account already had one. 0 switches the hold off.
   methodHoldHours: number
   methods: PayoutMethodType[] // offered to affiliates
+  // USDT (TRC-20) sent automatically from the payout wallet, with no approval
+  // step, for payouts inside these caps. Everything above them, and anything
+  // that looks unusual, still waits for a person.
+  cryptoAutoSend: boolean
+  cryptoAutoMax: number // per payout, USD
+  cryptoAutoDaily: number // total sent automatically per UTC day, USD
+  cryptoFeeLimitTrx: number // the most TRX one transfer may burn
 }
 
 const noFee = (): FeeRule => ({ fixed: 0, percent: 0 })
@@ -148,6 +181,10 @@ export const DEFAULT_PAYOUT_SETTINGS: PayoutSettings = {
   fees: { paypal: noFee(), wise: noFee(), bank: noFee(), stripe: noFee(), crypto_trc20: noFee() },
   methodHoldHours: 24,
   methods: ["paypal", "wise", "bank", "crypto_trc20"],
+  cryptoAutoSend: false,
+  cryptoAutoMax: 500,
+  cryptoAutoDaily: 2000,
+  cryptoFeeLimitTrx: 40,
 }
 
 const clamp = (v: unknown, fallback: number, min: number, max: number) => {
@@ -182,6 +219,10 @@ export function normalizePayoutSettings(raw: unknown): PayoutSettings {
     fees,
     methodHoldHours: Math.round(clamp(r.methodHoldHours, d.methodHoldHours, 0, 720)),
     methods,
+    cryptoAutoSend: typeof r.cryptoAutoSend === "boolean" ? r.cryptoAutoSend : d.cryptoAutoSend,
+    cryptoAutoMax: round2(clamp(r.cryptoAutoMax, d.cryptoAutoMax, 1, 100_000)),
+    cryptoAutoDaily: round2(clamp(r.cryptoAutoDaily, d.cryptoAutoDaily, 1, 1_000_000)),
+    cryptoFeeLimitTrx: Math.round(clamp(r.cryptoFeeLimitTrx, d.cryptoFeeLimitTrx, 5, 500)),
   }
 }
 
@@ -379,6 +420,59 @@ export function decideAutoPayout(input: {
   if (limitProblem(amount, input.totals, settings)) return skip("limit_reached", "A program payout limit has been reached.")
   return { ok: true, amount }
 }
+
+// ------------------------------------------------- automatic crypto sending
+
+// Whether a USDT payout may skip approval and be sent straight from the payout
+// wallet. Returns the reason it may not (it then follows the normal approval
+// path instead — it isn't refused), or null. Each "no" is a control on the one
+// thing that makes a hot wallet dangerous: money leaving with nobody looking.
+export function autoSendProblem(input: {
+  settings: PayoutSettings
+  walletReady: boolean
+  amount: number // what would be sent (net)
+  sentToday: number // already sent automatically today
+  methodAgeHours: number
+  openRiskSignals: number // open medium/high signals on the affiliate
+  affiliate: AffiliateState
+}): string | null {
+  const { settings } = input
+  if (!settings.cryptoAutoSend) return "Automatic USDT sending is switched off."
+  if (settings.paused) return "All payouts are paused."
+  if (!input.walletReady) return "The payout wallet isn't configured."
+  if (input.affiliate.status !== "approved" || input.affiliate.fraudLock || input.affiliate.payoutHold) return "The affiliate's account isn't in good standing."
+  if (input.openRiskSignals > 0) return "A risk signal on this affiliate is waiting for review."
+  // Even a first wallet has to have been on file for the hold period: a
+  // hijacked account can't add a wallet and drain the balance in one sitting.
+  if (settings.methodHoldHours > 0 && input.methodAgeHours < settings.methodHoldHours) return `The wallet was added less than ${settings.methodHoldHours} hours ago.`
+  if (input.amount > settings.cryptoAutoMax + 0.001) return `Above the ${settings.cryptoAutoMax.toFixed(2)} limit for automatic sending.`
+  if (input.sentToday + input.amount > settings.cryptoAutoDaily + 0.001) return "Today's limit for automatic sending has been reached."
+  return null
+}
+
+// A TRON transaction carries an expiration; no block after it can include the
+// transaction. So once the chain's IRREVERSIBLE head has passed the expiration
+// (plus a margin) and the transaction still isn't on-chain, it never will be —
+// and only then is it safe to sign a replacement. Until that is proven, a
+// payout with a signed transaction is never signed again.
+export const TX_DEAD_MARGIN_MS = 30_000
+export function transactionProvablyDead(input: { expiresAt: number; solidHeadTime: number; foundOnChain: boolean }): boolean {
+  return !input.foundOnChain && input.solidHeadTime > input.expiresAt + TX_DEAD_MARGIN_MS
+}
+
+// What one automatic transfer may cost, and whether the wallet can pay it.
+export function sendFeeProblem(input: { energyNeeded: number; energyAvailable: number; energyPriceSun: number; trxBalanceSun: number; feeLimitSun: number }): { feeSun: number; problem: string | null } {
+  // bandwidth for a ~350-byte transaction when the free allowance is used up
+  const BANDWIDTH_SUN = 400_000
+  const feeSun = Math.max(0, input.energyNeeded - input.energyAvailable) * input.energyPriceSun + BANDWIDTH_SUN
+  const trx = (sun: number) => (sun / 1_000_000).toFixed(2)
+  if (feeSun > input.feeLimitSun) return { feeSun, problem: `The network fee would be about ${trx(feeSun)} TRX, above the ${trx(input.feeLimitSun)} TRX limit.` }
+  if (input.trxBalanceSun < feeSun) return { feeSun, problem: `The payout wallet needs about ${trx(feeSun)} TRX for the network fee and has ${trx(input.trxBalanceSun)}.` }
+  return { feeSun, problem: null }
+}
+
+// After this many automatic attempts a person takes over.
+export const MAX_AUTO_ATTEMPTS = 3
 
 export const AUTO_SKIP_LABELS: Record<AutoSkip, string> = {
   paused: "All payouts are paused",

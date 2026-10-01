@@ -68,23 +68,48 @@ export function judgeTransaction(info: TxInfo | null, confirmed: boolean, expect
   return confirmed ? { state: "confirmed", amount, blockTime: info.blockTimeStamp ? new Date(info.blockTimeStamp) : null } : { state: "confirming", amount }
 }
 
-async function call(path: string, hash: string, attempt = 0): Promise<TxInfo | null> {
+// One POST to the TRON full-node API. Throws when the node can't be reached
+// or answers with an error status — a failed lookup is never read as an answer.
+export async function tronApi<T = Record<string, unknown>>(path: string, payload: Record<string, unknown> = {}, attempt = 0): Promise<T | null> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(process.env.TRONGRID_API_KEY ? { "TRON-PRO-API-KEY": process.env.TRONGRID_API_KEY } : {}) },
-    body: JSON.stringify({ value: hash }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8_000),
   })
   // Without an API key TronGrid throttles bursts. Wait and ask again rather
   // than report a failure for what is only a busy moment.
   if (res.status === 429 && attempt < 2) {
     await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)))
-    return call(path, hash, attempt + 1)
+    return tronApi<T>(path, payload, attempt + 1)
   }
   if (!res.ok) throw new Error(`TRON network lookup failed (HTTP ${res.status}). Try again in a moment.`)
-  const body = (await res.json().catch(() => null)) as TxInfo | null
+  const body = (await res.json().catch(() => null)) as T | null
   return body && typeof body === "object" ? body : null
 }
+
+const call = (path: string, hash: string) => tronApi<TxInfo>(path, { value: hash })
+
+// Where a transaction stands, raw: in an irreversible block, in a recent one,
+// or nowhere.
+export async function lookupTransaction(hash: string): Promise<{ solid: TxInfo | null; latest: TxInfo | null }> {
+  const id = hash.trim().toLowerCase()
+  const solid = await call("/walletsolidity/gettransactioninfobyid", id)
+  if (solid?.id) return { solid, latest: solid }
+  const latest = await call("/wallet/gettransactioninfobyid", id)
+  return { solid: null, latest: latest?.id ? latest : null }
+}
+
+type Block = { blockID?: string; block_header?: { raw_data?: { number?: number; timestamp?: number } } }
+const blockOf = (b: Block | null) => {
+  const id = b?.blockID
+  const raw = b?.block_header?.raw_data
+  if (!id || !raw?.timestamp) throw new Error("The TRON node returned no block.")
+  return { id, number: raw.number ?? 0, timestamp: raw.timestamp }
+}
+// The chain's current head, and its irreversible ("solidified") head.
+export const headBlock = async () => blockOf(await tronApi<Block>("/wallet/getnowblock"))
+export const solidHeadBlock = async () => blockOf(await tronApi<Block>("/walletsolidity/getnowblock"))
 
 // Looks a transaction up — first among solidified (irreversible) blocks, then
 // among the latest ones — and judges it against the payout. Throws only when

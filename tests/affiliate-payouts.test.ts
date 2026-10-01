@@ -2,9 +2,11 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   DEFAULT_PAYOUT_SETTINGS,
+  MAX_AUTO_ATTEMPTS,
   PAYOUT_GROUPS,
   PAYOUT_STATUSES,
   adminPayoutActions,
+  autoSendProblem,
   affiliateCanCancel,
   decideAutoPayout,
   effectiveLimits,
@@ -19,6 +21,8 @@ import {
   payoutTransitionAllowed,
   periodKey,
   quoteFee,
+  sendFeeProblem,
+  transactionProvablyDead,
   type AffiliateState,
   type PayoutSettings,
 } from "@/lib/affiliates/payout-engine"
@@ -26,7 +30,8 @@ import { ledgerBalances } from "@/lib/affiliates/engine"
 import { abaValid, bankScheme, bicValid, ibanValid, validateMethod } from "@/lib/affiliates/method-validation"
 import { StripeError, stripeAccountState, stripeFailurePermanent } from "@/lib/affiliates/stripe-connect"
 import { judgeTransaction, usdtTransfers, type TxInfo } from "@/lib/affiliates/tron-chain"
-import { INVALID_TRC20_MESSAGE, USDT_TRC20_CONTRACT, base58Decode, explorerTxUrl, isTxHash, maskAddress, maskTxHash, sha256, tronAddressProblem, tronAddressToHex, usdtFromUnits, usdtUnits } from "@/lib/affiliates/tron"
+import { INVALID_TRC20_MESSAGE, USDT_TRC20_CONTRACT, base58Decode, explorerTxUrl, isTxHash, maskAddress, maskTxHash, sha256, tronAddressFromHex, tronAddressProblem, tronAddressToHex, usdtFromUnits, usdtUnits } from "@/lib/affiliates/tron"
+import { addressFromPrivateKey, buildSignedTransfer, encodeTransferRaw, privateKeyValid, recoverSigner, refBlock, signTransactionId, transactionId, transferCallData } from "@/lib/affiliates/tron-tx"
 
 const NOW = new Date("2026-10-07T12:00:00Z") // a Wednesday
 const HOUR = 3_600_000
@@ -194,6 +199,9 @@ test("payout lifecycle: forward only, terminal states are final", () => {
   for (const done of ["failed", "cancelled", "rejected", "reversed"]) for (const to of PAYOUT_STATUSES) assert.equal(payoutTransitionAllowed(done, to), false, `${done}→${to}`)
   assert.equal(payoutTransitionAllowed("paid", "reversed"), true)
   assert.equal(payoutTransitionAllowed("nonsense", "paid"), false)
+  // an automatic send that provably never happened goes back to the queue — but a payout the chain is confirming never does
+  for (const from of ["processing", "submitted"]) assert.equal(payoutTransitionAllowed(from, "queued"), true, `${from}→queued`)
+  for (const from of ["confirming", "paid"]) assert.equal(payoutTransitionAllowed(from, "queued"), false, `${from}→queued`)
   // every status sits in exactly one admin tab
   assert.deepEqual(Object.values(PAYOUT_GROUPS).flat().sort(), [...PAYOUT_STATUSES].sort())
   assert.equal(affiliateCanCancel("pending"), true)
@@ -452,4 +460,147 @@ test("Stripe Connect states: only a connected account can be paid", () => {
   assert.equal(stripeFailurePermanent(new StripeError("slow down", "rate_limit", 429)), false)
   assert.equal(stripeFailurePermanent(new StripeError("oops", "api_error", 500)), false)
   assert.equal(stripeFailurePermanent(new Error("socket hang up")), false)
+})
+
+// --------------------------------------------------- automatic USDT sending
+
+// A transfer built by a TRON mainnet node (/wallet/triggersmartcontract) for
+// exactly these inputs. Ours must be byte-for-byte the same: the transaction
+// id is the hash of these bytes, and the id is what gets signed.
+const NODE_TX = {
+  from: "TWsghcMkFXe1hnwZAWVQ9fUrZBtYv2aGJ8",
+  to: tronAddressFromHex("11".repeat(20)),
+  units: BigInt(420_000_000),
+  refBlockBytes: "89af",
+  refBlockHash: "b9e5b69798475514",
+  expiration: 1790890845000,
+  timestamp: 1790890785329,
+  feeLimit: 40_000_000,
+}
+const NODE_RAW =
+  "0a0289af2208b9e5b6979847551440c8c6a6cb8f345aae01081f12a9010a31747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e54726967676572536d617274436f6e747261637412740a1541e54f448d91153818a4573d6c151171ce8e607bbe121541a614f803b6fd780986a42c78ec9c7f77e6ded13c2244a9059cbb0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000000000000000000000000000000000001908b10070b1f4a2cb8f34900180b48913"
+const NODE_TXID = "ebdd855a74eca9d7d4dae735d2f948bf45df2e1a875643906a2b6b630b0da7cc"
+// Throwaway keys that exist only in this file. KEY_ONE is the number 1, whose
+// account (7e5f…5bdf) is a published vector.
+const KEY_ONE = "0".repeat(63) + "1"
+const KEY_TWO = "0".repeat(63) + "2"
+
+test("a transfer is encoded exactly as a TRON node encodes it", () => {
+  assert.equal(tronAddressToHex(NODE_TX.from), "e54f448d91153818a4573d6c151171ce8e607bbe")
+  const raw = encodeTransferRaw(NODE_TX)
+  assert.equal(hex(raw), NODE_RAW)
+  assert.equal(transactionId(raw), NODE_TXID)
+  // the call is transfer(recipient, units) on the USDT contract and nothing else
+  assert.equal(transferCallData(NODE_TX.to, NODE_TX.units), "a9059cbb" + "11".repeat(20).padStart(64, "0") + (420_000_000).toString(16).padStart(64, "0"))
+  // any change to who, how much, or until when is a different transaction
+  for (const other of [{ units: BigInt(420_000_001) }, { to: tronAddressFromHex("22".repeat(20)) }, { expiration: NODE_TX.expiration + 1 }, { feeLimit: 40_000_001 }]) {
+    assert.notEqual(transactionId(encodeTransferRaw({ ...NODE_TX, ...other })), NODE_TXID)
+  }
+  assert.throws(() => transferCallData("not-an-address", BigInt(1)), /valid TRON address/)
+  assert.throws(() => transferCallData(NODE_TX.to, BigInt(0)), /positive/)
+  // the reference block ties the transaction to the chain's current head
+  assert.deepEqual(refBlock("0000000004a289af" + "b9e5b69798475514" + "0".repeat(32)), { refBlockBytes: "89af", refBlockHash: "b9e5b69798475514" })
+  assert.throws(() => refBlock("89af"), /Invalid block id/)
+})
+
+test("the payout wallet key: its address, its signature, and nobody else's", () => {
+  assert.equal(addressFromPrivateKey(KEY_ONE), tronAddressFromHex("7e5f4552091a69125d5dfcb7b8c2659029395bdf"))
+  assert.equal(addressFromPrivateKey("0x" + KEY_ONE), addressFromPrivateKey(KEY_ONE))
+  assert.equal(tronAddressProblem(addressFromPrivateKey(KEY_ONE)), null)
+  for (const bad of ["", "abc", "0".repeat(64), "f".repeat(64), "z".repeat(64), null, undefined]) assert.equal(privateKeyValid(bad), false, String(bad))
+  assert.equal(privateKeyValid(KEY_ONE), true)
+
+  const one = addressFromPrivateKey(KEY_ONE)
+  const signature = signTransactionId(NODE_TXID, KEY_ONE)
+  assert.equal(signature.length, 130) // r, s, v
+  assert.ok(["1b", "1c"].includes(signature.slice(128)))
+  assert.equal(signTransactionId(NODE_TXID, KEY_ONE), signature) // deterministic: a retry signs the same bytes
+  // a node accepts a transaction only if the signature recovers to the sender
+  assert.equal(recoverSigner(NODE_TXID, signature), one)
+  assert.notEqual(recoverSigner(NODE_TXID, signTransactionId(NODE_TXID, KEY_TWO)), one)
+  assert.notEqual(recoverSigner(transactionId(encodeTransferRaw({ ...NODE_TX, units: BigInt(1) })), signature), one) // a signature doesn't carry over to another transfer
+  assert.equal(recoverSigner(NODE_TXID, "00"), null)
+  assert.equal(recoverSigner(NODE_TXID, signature.slice(0, 128) + "05"), null)
+})
+
+test("a signed transfer is only produced by the wallet it is sent from", () => {
+  const from = addressFromPrivateKey(KEY_ONE)
+  const signed = buildSignedTransfer({ ...NODE_TX, from }, KEY_ONE)
+  assert.equal(signed.txId, transactionId(encodeTransferRaw({ ...NODE_TX, from })))
+  assert.equal(recoverSigner(signed.txId, signed.signature), from)
+  assert.equal(signed.expiration, NODE_TX.expiration)
+  // Transaction { raw_data, signature }: the raw bytes, then the 65-byte signature
+  assert.ok(signed.signedHex.includes(signed.rawHex))
+  assert.ok(signed.signedHex.endsWith("1241" + signed.signature))
+  // the wrong key for the configured wallet signs nothing
+  assert.throws(() => buildSignedTransfer({ ...NODE_TX, from }, KEY_TWO), /doesn't belong/)
+  assert.throws(() => buildSignedTransfer({ ...NODE_TX, from }, "nope"), /64 hexadecimal/)
+  // and the key itself never appears in what is stored or broadcast
+  assert.ok(!JSON.stringify(signed).includes(KEY_ONE))
+})
+
+test("automatic sending: every condition must hold, or the payout waits for a person", () => {
+  const on = settings({ cryptoAutoSend: true, cryptoAutoMax: 500, cryptoAutoDaily: 2000, methodHoldHours: 48 })
+  const ok = { settings: on, walletReady: true, amount: 420, sentToday: 0, methodAgeHours: 72, openRiskSignals: 0, affiliate: affiliate() }
+  assert.equal(autoSendProblem(ok), null)
+  // off by default
+  assert.equal(DEFAULT_PAYOUT_SETTINGS.cryptoAutoSend, false)
+  assert.match(autoSendProblem({ ...ok, settings: settings() })!, /switched off/)
+  assert.match(autoSendProblem({ ...ok, settings: { ...on, paused: true } })!, /paused/)
+  assert.match(autoSendProblem({ ...ok, walletReady: false })!, /isn't configured/)
+  // the affiliate
+  for (const bad of [{ status: "suspended" }, { fraudLock: true }, { payoutHold: true }]) assert.match(autoSendProblem({ ...ok, affiliate: affiliate(bad) })!, /good standing/)
+  assert.match(autoSendProblem({ ...ok, openRiskSignals: 1 })!, /risk signal/)
+  // a wallet has to have been on file for the hold period — even the first one
+  assert.match(autoSendProblem({ ...ok, methodAgeHours: 47.9 })!, /less than 48 hours/)
+  assert.equal(autoSendProblem({ ...ok, methodAgeHours: 48 }), null)
+  assert.equal(autoSendProblem({ ...ok, methodAgeHours: 0, settings: { ...on, methodHoldHours: 0 } }), null)
+  // the caps: per payout, and per day across everyone
+  assert.equal(autoSendProblem({ ...ok, amount: 500 }), null)
+  assert.match(autoSendProblem({ ...ok, amount: 500.01 })!, /Above the 500\.00 limit/)
+  assert.equal(autoSendProblem({ ...ok, sentToday: 1580 }), null)
+  assert.match(autoSendProblem({ ...ok, sentToday: 1580.01 })!, /Today's limit/)
+  // the settings themselves are clamped, whatever is posted
+  const clamped = normalizePayoutSettings({ cryptoAutoSend: "yes", cryptoAutoMax: -5, cryptoAutoDaily: 1e12, cryptoFeeLimitTrx: 100_000 })
+  assert.deepEqual([clamped.cryptoAutoSend, clamped.cryptoAutoMax, clamped.cryptoAutoDaily, clamped.cryptoFeeLimitTrx], [false, 1, 1_000_000, 500])
+  assert.equal(MAX_AUTO_ATTEMPTS, 3)
+})
+
+test("a transaction is replaced only once the chain proves it can never be included", () => {
+  const expiresAt = Date.parse("2026-10-07T12:05:00Z")
+  const dead = (solidHeadTime: number, foundOnChain = false) => transactionProvablyDead({ expiresAt, solidHeadTime, foundOnChain })
+  assert.equal(dead(expiresAt - 60_000), false) // still valid
+  assert.equal(dead(expiresAt), false)
+  assert.equal(dead(expiresAt + 30_000), false) // inside the margin
+  assert.equal(dead(expiresAt + 30_001), true)
+  // found on-chain is never dead, however late
+  assert.equal(dead(expiresAt + 3_600_000, true), false)
+})
+
+test("network fee: affordable and under the limit, or nothing is signed", () => {
+  const fee = (over: Partial<Parameters<typeof sendFeeProblem>[0]> = {}) => sendFeeProblem({ energyNeeded: 64_285, energyAvailable: 0, energyPriceSun: 210, trxBalanceSun: 100_000_000, feeLimitSun: 40_000_000, ...over })
+  // 64,285 energy at 210 sun, plus bandwidth: about 13.9 TRX
+  assert.deepEqual(fee(), { feeSun: 64_285 * 210 + 400_000, problem: null })
+  // a first transfer to an empty wallet costs about double — still under 40 TRX
+  assert.equal(fee({ energyNeeded: 130_285 }).problem, null)
+  assert.match(fee({ energyNeeded: 130_285, feeLimitSun: 20_000_000 }).problem!, /above the 20\.00 TRX limit/)
+  assert.match(fee({ trxBalanceSun: 5_000_000 }).problem!, /needs about 13\.90 TRX .* has 5\.00/)
+  // staked energy covers it: only bandwidth is paid
+  assert.deepEqual(fee({ energyAvailable: 200_000, trxBalanceSun: 400_000 }), { feeSun: 400_000, problem: null })
+})
+
+test("admin actions on a payout sent from the payout wallet", () => {
+  const hot = (status: string) => adminPayoutActions({ status, crypto: true, automated: true, hasHash: status !== "queued", hot: true, canAutoSend: true })
+  // nothing signed yet: it can be sent, paid by hand instead, held or cancelled
+  assert.deepEqual(hot("queued"), ["retry", "submit_tx", "hold", "cancel"])
+  // a signed transaction may be on its way: nobody can fail, cancel or re-send it by hand
+  for (const s of ["processing", "submitted", "confirming"]) assert.deepEqual(hot(s), ["check"], s)
+  assert.deepEqual(hot("retry_required"), ["retry", "submit_tx", "hold", "cancel", "fail"])
+  assert.deepEqual(hot("paid"), [])
+  // a hand-sent crypto payout can be handed to the wallet — only when there is one
+  const byHand = (status: string, canAutoSend: boolean) => adminPayoutActions({ status, crypto: true, automated: false, hasHash: false, canAutoSend })
+  assert.deepEqual(byHand("queued", true), ["start", "send_auto", "submit_tx", "hold", "cancel", "fail"])
+  assert.ok(!byHand("queued", false).includes("send_auto"))
+  assert.ok(!byHand("pending", true).includes("send_auto")) // approval comes first
+  assert.ok(!adminPayoutActions({ status: "queued", crypto: false, automated: false, hasHash: false, canAutoSend: true }).includes("send_auto"))
 })

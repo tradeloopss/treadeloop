@@ -22,6 +22,8 @@ import { PAYOUT_GROUPS, PAYOUT_IN_FLIGHT, type PayoutGroup } from "./payout-engi
 import { EARNED, PAGE_SIZE, ledgerWhere, performance, type LedgerFilters } from "./queries"
 import { rangeStart, type Range } from "./types"
 import { EXPORT_LIMIT } from "./csv"
+import { HOT_PROVIDER } from "./providers"
+import { payoutWallet, walletBalances, type WalletBalances } from "./tron-wallet"
 
 // What the admin side reads. Callers are admin pages/actions that have already
 // passed requireAdmin({ affiliates: [...] }).
@@ -419,5 +421,38 @@ export async function exportTable(kind: ExportKind, affiliateId: number | null, 
     // The customer's email is admin-only: an affiliate never gets it.
     header: ["referral", "signed_up", ...(admin ? ["affiliate", "customer"] : []), "status", "source", "campaign", "plan", "billing", "country", "revenue", "first_payment"],
     rows: rows.map((r) => [r.publicId, r.createdAt, ...(admin ? [r.affiliate, r.customer] : []), r.status, r.source, r.campaign, r.plan, r.billing, r.country, n(r.revenue), r.firstPaymentAt]),
+  }
+}
+
+// The payout wallet as the settings page shows it: whether it can send, what it
+// holds right now, and what has gone out automatically today. The balances come
+// from the network and are best-effort — a slow node must not stall the page.
+export async function payoutWalletStatus() {
+  const wallet = payoutWallet()
+  const now = new Date()
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const live = wallet.address
+    ? Promise.race([walletBalances(wallet.address).catch(() => null), new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000))])
+    : Promise.resolve(null)
+  const [[sent], [waiting], balances] = await Promise.all([
+    db
+      .select({ v: sql<string>`coalesce(sum(coalesce(${affiliatePayouts.netAmount}, ${affiliatePayouts.amount})), 0)`, n: sql<number>`count(*)::int` })
+      .from(affiliatePayouts)
+      .where(and(eq(affiliatePayouts.provider, HOT_PROVIDER), gte(affiliatePayouts.requestedAt, dayStart), sql`${affiliatePayouts.status} not in ('failed','cancelled','rejected','reversed')`)),
+    db
+      .select({ v: sql<string>`coalesce(sum(coalesce(${affiliatePayouts.netAmount}, ${affiliatePayouts.amount})), 0)`, n: sql<number>`count(*)::int` })
+      .from(affiliatePayouts)
+      .where(and(eq(affiliatePayouts.provider, HOT_PROVIDER), inArray(affiliatePayouts.status, ["queued", "retry_required"]))),
+    live as Promise<WalletBalances | null>,
+  ])
+  return {
+    ready: wallet.ready,
+    address: wallet.address,
+    problem: wallet.ready ? null : wallet.problem,
+    balances,
+    sentToday: Number(sent?.v ?? 0),
+    sentTodayCount: sent?.n ?? 0,
+    waiting: Number(waiting?.v ?? 0),
+    waitingCount: waiting?.n ?? 0,
   }
 }

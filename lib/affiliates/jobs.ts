@@ -7,7 +7,7 @@ import { getWhopClient } from "@/lib/whop"
 import { money as whopMoney, whopAccountId } from "@/lib/admin/whop"
 import { runAutoPayouts } from "./auto-payouts"
 import { handleAffiliateRefund, releaseHolds } from "./commissions"
-import { pruneUnfinishedMethods, trackPayouts } from "./payouts"
+import { pruneUnfinishedMethods, sendQueuedAutomatic, trackPayouts } from "./payouts"
 import { evaluateAffiliate } from "./fraud"
 import { prefEnabled } from "./notify"
 import { monthlyReport, type MonthlyReport } from "./queries"
@@ -87,7 +87,7 @@ async function sendMonthlyReports(now: Date): Promise<number> {
 // a day (the sync VPS): transaction tracking and the automatic payout worker.
 export async function runPayoutJob(now = new Date()) {
   const out: Record<string, unknown> = {}
-  for (const [name, fn] of [["holds", () => releaseHolds({ now })], ["tracking", () => trackPayouts({ olderThanSeconds: 0 })], ["autoPayouts", () => runAutoPayouts(now)]] as const) {
+  for (const [name, fn] of [["holds", () => releaseHolds({ now })], ["tracking", () => trackPayouts({ olderThanSeconds: 0 })], ["autoPayouts", () => runAutoPayouts(now)], ["sending", () => sendQueuedAutomatic()]] as const) {
     try {
       out[name] = await fn()
     } catch (e) {
@@ -114,6 +114,7 @@ export async function runDailyJob(now = new Date()) {
   // payouts are paused); then new automatic payouts are created.
   await step("tracking", () => trackPayouts({ olderThanSeconds: 0 }))
   await step("autoPayouts", () => runAutoPayouts(now))
+  await step("sending", () => sendQueuedAutomatic())
   await step("methods", () => pruneUnfinishedMethods())
   await step("risk", () => evaluateActive())
   await step("reports", () => sendMonthlyReports(now))

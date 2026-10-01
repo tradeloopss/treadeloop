@@ -90,7 +90,40 @@ export function base58Decode(value: string): Uint8Array | null {
   return new Uint8Array(bytes)
 }
 
-const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+export const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+export function fromHex(hex: string): Uint8Array {
+  const clean = hex.replace(/^0x/, "")
+  if (clean.length % 2 || /[^0-9a-fA-F]/.test(clean)) throw new Error("Invalid hex")
+  const out = new Uint8Array(clean.length / 2)
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16)
+  return out
+}
+
+export function base58Encode(bytes: Uint8Array): string {
+  let n = BigInt(0)
+  for (const b of bytes) n = (n << BigInt(8)) | BigInt(b)
+  let out = ""
+  while (n > BigInt(0)) {
+    out = ALPHABET[Number(n % BigInt(58))] + out
+    n /= BigInt(58)
+  }
+  for (const b of bytes) {
+    if (b !== 0) break
+    out = "1" + out
+  }
+  return out
+}
+
+// The base58check address for a 20-byte account (hex), on mainnet (0x41).
+export function tronAddressFromHex(hex20: string): string {
+  const payload = fromHex(`41${hex20.replace(/^0x/, "").replace(/^41(?=[0-9a-fA-F]{40}$)/, "")}`)
+  if (payload.length !== 21) throw new Error("A TRON account is 20 bytes")
+  const check = sha256(sha256(payload)).subarray(0, 4)
+  const full = new Uint8Array(25)
+  full.set(payload)
+  full.set(check, 21)
+  return base58Encode(full)
+}
 
 export const normalizeTronAddress = (value: unknown) => String(value ?? "").trim()
 

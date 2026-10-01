@@ -12,6 +12,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
     "@base-ui/react": "^1.5.0",
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
     "@vercel/analytics": "1.6.1",
     "@whop/sdk": "^1.1.4",
     "better-auth": "^1.7.4",

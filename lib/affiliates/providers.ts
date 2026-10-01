@@ -1,6 +1,7 @@
 import { StripeError, createTransfer, retrieveTransfer, stripeConfigured, stripeFailurePermanent } from "./stripe-connect"
 import { TRON_NETWORK, USDT_ASSET, tronAddressProblem } from "./tron"
 import { verifyUsdtPayment, type ChainVerdict } from "./tron-chain"
+import { payoutWallet, payoutWalletReady, walletBalances } from "./tron-wallet"
 import type { PayoutMethodType } from "./types"
 
 // The payout provider abstraction: everything that actually moves money sits
@@ -11,10 +12,15 @@ import type { PayoutMethodType } from "./types"
 //   tron_manual  USDT on TRON — a person sends it from the company wallet and
 //                submits the transaction hash; the payout completes only when
 //                the chain confirms a matching USDT transfer.
+//   tron_hot     USDT on TRON, sent automatically from the payout wallet (a
+//                hot wallet whose key lives in the environment — see
+//                tron-wallet.ts). The send itself is orchestrated by
+//                payouts.sendFromPayoutWallet, which records the signed
+//                transaction before it is broadcast.
 //   stripe       Stripe Connect — sent by API, when configured.
 //
-// An automated crypto custodian (Fireblocks, a payments API…) plugs in as
-// another CryptoPayoutProvider. Nothing in this app holds a private key.
+// An external crypto custodian (Fireblocks, a payments API…) would plug in as
+// another CryptoPayoutProvider.
 
 export type ProviderPayout = { id: number; amount: number; currency: string; methodType: string; details: Record<string, string>; idempotencyKey: string }
 
@@ -115,7 +121,26 @@ const stripe: PayoutProvider = {
   },
 }
 
+export const HOT_PROVIDER = "tron_hot"
+
+const tronHot: CryptoPayoutProvider = {
+  ...tronManual,
+  name: HOT_PROVIDER,
+  automated: true,
+  async getBalance() {
+    const wallet = payoutWallet()
+    return { available: wallet.ready ? (await walletBalances(wallet.address)).usdt : null }
+  },
+}
+
 export const isCryptoMethod = (type: string) => type === "crypto_trc20"
+
+// A payout remembers which provider it was created for.
+export function providerByName(name: string): PayoutProvider {
+  return name === HOT_PROVIDER ? tronHot : name === "tron_manual" ? tronManual : name === "stripe" ? stripe : manual
+}
+
+export const hotWalletReady = payoutWalletReady
 
 export function providerFor(methodType: PayoutMethodType | string): PayoutProvider {
   if (methodType === "crypto_trc20") return tronManual

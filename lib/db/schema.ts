@@ -1795,7 +1795,13 @@ export const affiliatePayoutTransactions = pgTable(
     amount: numeric("amount").notNull(),
     destination: text("destination").notNull(), // masked
     transactionHash: text("transactionHash"),
-    status: text("status").notNull().default("submitted"), // submitted | confirming | confirmed | failed | not_found
+    // For a transaction this app signed: the signed bytes (so the SAME
+    // transaction can be re-broadcast, never a second one) and when it expires
+    // (after which, if it isn't on-chain, it provably never will be).
+    signedTx: text("signedTx"),
+    expiresAt: timestamp("expiresAt"),
+    // signed | submitted | confirming | confirmed | failed | not_found | expired | replaced
+    status: text("status").notNull().default("submitted"),
     failureReason: text("failureReason"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     submittedAt: timestamp("submittedAt"),

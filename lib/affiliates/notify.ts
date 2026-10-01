@@ -16,6 +16,19 @@ export function prefEnabled(prefs: Record<string, boolean> | null | undefined, k
   return prefs && typeof prefs[key] === "boolean" ? prefs[key] : def
 }
 
+// A heads-up to the site owners (OWNER_EMAILS) when the money side needs a
+// person: the payout wallet is short, or an automatic send gave up.
+// Best-effort, like every notification.
+export async function notifyOwners(subject: string, text: string): Promise<void> {
+  try {
+    if (!emailConfigured()) return
+    const owners = (process.env.OWNER_EMAILS ?? "").split(",").map((e) => e.trim()).filter((e) => e.includes("@"))
+    for (const to of owners.slice(0, 5)) await sendEmail({ to, subject: `${subject} — TradeLoop Affiliates`, text: `${text}\n\n${APP_URL}/admin/affiliates/payouts` })
+  } catch (e) {
+    console.error("[affiliates] owner notification failed:", e instanceof Error ? e.message : e)
+  }
+}
+
 export async function notifyAffiliate(input: {
   affiliateId: number
   type: string

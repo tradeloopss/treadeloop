@@ -255,7 +255,8 @@ export function AutoPayoutPanel({ auto }: { auto: AutoPayoutView }) {
 
 // --- Request a payout -------------------------------------------------------
 
-export function RequestPayout({ available, min, max, methods, blocked, eta, feePolicy, fees, approval }: { available: number; min: number; max: number | null; methods: MethodView[]; blocked: string | null; eta: string; feePolicy: "platform" | "affiliate"; fees: Record<string, FeeRule>; approval: "manual" | "automatic" }) {
+// instantUpTo: the most a USDT payout can be for it to be sent automatically (null when that isn't on).
+export function RequestPayout({ available, min, max, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null }: { available: number; min: number; max: number | null; methods: MethodView[]; blocked: string | null; eta: string; feePolicy: "platform" | "affiliate"; fees: Record<string, FeeRule>; approval: "manual" | "automatic"; instantUpTo?: number | null }) {
   const ready = methods.filter(usable)
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState("")
@@ -271,6 +272,8 @@ export function RequestPayout({ available, min, max, methods, blocked, eta, feeP
   const method = ready.find((m) => String(m.id) === methodId)
   // The same quote the server computes and stores — shown before anything is sent.
   const quote = method && amount && !problem ? quoteFee(value, method.type, { ...DEFAULT_PAYOUT_SETTINGS, feePolicy, fees: fees as typeof DEFAULT_PAYOUT_SETTINGS.fees }) : null
+  // A USDT payout inside the limit is normally sent without waiting for review.
+  const instant = instantUpTo != null && method?.type === "crypto_trc20" && !(quote && quote.net > instantUpTo)
 
   return (
     <>
@@ -301,7 +304,7 @@ export function RequestPayout({ available, min, max, methods, blocked, eta, feeP
             <DialogHeader>
               <DialogTitle>Request a payout</DialogTitle>
               <DialogDescription>
-                {money(available)} available. {approval === "manual" ? "Each request is reviewed by our team before it's sent" : "Requests go straight to the payout queue"} — usually {eta}.
+                {money(available)} available.{instant ? "" : ` ${approval === "manual" ? "Each request is reviewed by our team before it's sent" : "Requests go straight to the payout queue"} — usually ${eta}.`}
               </DialogDescription>
             </DialogHeader>
             <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
@@ -343,6 +346,13 @@ export function RequestPayout({ available, min, max, methods, blocked, eta, feeP
                   <dd className="tabular-nums">{money(quote.net)}</dd>
                 </div>
               </dl>
+            )}
+            {instantUpTo != null && method?.type === "crypto_trc20" && (
+              <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                {!instant
+                  ? `USDT payouts above ${money(instantUpTo)} are reviewed by our team before they're sent.`
+                  : `USDT payouts up to ${money(instantUpTo)} are normally sent to your wallet automatically, within minutes. Check the address — a transfer on the TRON network can't be reversed.`}
+              </p>
             )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>

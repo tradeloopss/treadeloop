@@ -6,7 +6,7 @@ import { countryOptions } from "@/lib/affiliates/countries"
 import { FREQUENCY_LABELS, nextPeriodStart, payoutInFlight, type AutoSkip } from "@/lib/affiliates/payout-engine"
 import { autoPayoutPreview, syncStripeMethods, trackPayouts } from "@/lib/affiliates/payouts"
 import { getProgram } from "@/lib/affiliates/program"
-import { methodAvailable } from "@/lib/affiliates/providers"
+import { methodAvailable, hotWalletReady } from "@/lib/affiliates/providers"
 import { payoutMethodsFor, payoutsFor } from "@/lib/affiliates/queries"
 import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
@@ -98,7 +98,7 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Available to withdraw</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{money(balances.available)}</p>
             <div className="mt-4">
-              <RequestPayout available={balances.available} min={limits.min} max={limits.max} methods={methodViews} blocked={blocked} eta={program.payoutEta} feePolicy={settings.feePolicy} fees={settings.fees} approval={settings.approval} />
+              <RequestPayout available={balances.available} min={limits.min} max={limits.max} methods={methodViews} blocked={blocked} eta={program.payoutEta} feePolicy={settings.feePolicy} fees={settings.fees} approval={settings.approval} instantUpTo={settings.cryptoAutoSend && !settings.paused && hotWalletReady() ? settings.cryptoAutoMax : null} />
             </div>
           </section>
           <KpiGrid className="lg:col-span-2">

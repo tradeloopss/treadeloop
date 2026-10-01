@@ -14,6 +14,7 @@ import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
 import { adminPayoutAction, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
 import { notifyAffiliate } from "@/lib/affiliates/notify"
 import { getPayoutSettings, getProgram, saveProgram, savePayoutSettings } from "@/lib/affiliates/program"
+import { hotWalletReady } from "@/lib/affiliates/providers"
 import { ANNOUNCEMENT_CATEGORIES, RESOURCE_CATEGORIES } from "@/lib/affiliates/types"
 
 // Admin side of the affiliate program. Every action re-checks the permission
@@ -257,7 +258,7 @@ export async function reverseCommissionManually(commissionId: number, note: stri
 
 // --- Payouts ---------------------------------------------------------------------
 
-const ACTIONS: AdminAction[] = ["approve", "reject", "hold", "release", "cancel", "start", "mark_paid", "fail", "retry", "reverse"]
+const ACTIONS: AdminAction[] = ["approve", "reject", "hold", "release", "cancel", "start", "mark_paid", "fail", "retry", "reverse", "send_auto"]
 const DONE: Record<AdminAction, string> = {
   approve: "Payout approved.",
   reject: "Payout rejected. The amount is back in the affiliate's balance.",
@@ -269,6 +270,7 @@ const DONE: Record<AdminAction, string> = {
   fail: "Payout marked as failed. The amount is back in the affiliate's balance.",
   retry: "Payout queued again.",
   reverse: "Payout reversed. The amount is back in the affiliate's balance.",
+  send_auto: "Sent from the payout wallet. It completes when the network confirms it.",
 }
 
 const adminActor = (admin: { id: string }): Actor => ({ type: "admin", id: admin.id })
@@ -283,7 +285,11 @@ export async function payoutAction(input: { payoutId: number; action: AdminActio
     const payout = await adminPayoutAction(Number(input.payoutId), input.action, adminActor(admin), { reason: input.reason, reference: input.reference })
     const aff = await target(payout.affiliateId)
     await logAdminAction(admin, `affiliate.payout_${input.action}`, aff.userId, { payoutId: payout.id, amount: Number(payout.amount), status: payout.status, reason: input.reason || undefined, reference: input.reference || undefined })
-    return payout.status === "retry_required" ? `The provider couldn't send it: ${payout.failureReason ?? "unknown error"}` : DONE[input.action]
+    if (payout.status === "retry_required") return `It couldn't be sent: ${payout.failureReason ?? "unknown error"}`
+    // Handed to the payout wallet but not sent yet (it is short of USDT or TRX, or the fee is over the limit).
+    if (payout.provider === "tron_hot" && payout.status === "queued" && payout.failureReason) return `Queued — ${payout.failureReason} It is sent automatically once that is resolved.`
+    if (payout.provider === "tron_hot" && payout.status === "submitted" && (input.action === "retry" || input.action === "approve")) return DONE.send_auto
+    return DONE[input.action]
   })
 }
 
@@ -334,10 +340,18 @@ export async function savePayoutConfig(input: Record<string, unknown>): Promise<
     const minPayout = Number(input.minPayout)
     if (!Number.isFinite(minPayout) || minPayout < 1) throw new Error("The minimum payout must be at least $1.")
     if (input.maxPayout != null && input.maxPayout !== "" && Number(input.maxPayout) < minPayout) throw new Error("The maximum payout can't be below the minimum.")
+    // Automatic sending can only be switched on while there is a wallet to send from.
+    const sendOn = input.cryptoAutoSend === true
+    if (sendOn && !before.cryptoAutoSend && !hotWalletReady()) throw new Error("Automatic USDT sending needs the payout wallet to be configured first.")
+    if (sendOn && Number(input.cryptoAutoDaily) < Number(input.cryptoAutoMax)) throw new Error("The daily limit for automatic sending can't be below the per-payout limit.")
     const saved = await savePayoutSettings({ ...input, paused: before.paused })
     const program = await getProgram()
     if (program.minPayout !== minPayout) await saveProgram({ ...program, minPayout })
+    if (saved.cryptoAutoSend !== before.cryptoAutoSend) await logAdminAction(admin, saved.cryptoAutoSend ? "affiliate.crypto_auto_send_on" : "affiliate.crypto_auto_send_off", null, { perPayout: saved.cryptoAutoMax, perDay: saved.cryptoAutoDaily, feeLimitTrx: saved.cryptoFeeLimitTrx })
     await logAdminAction(admin, saved.autoPayouts !== before.autoPayouts ? (saved.autoPayouts ? "affiliate.auto_payouts_on" : "affiliate.auto_payouts_off") : "affiliate.payout_settings", null, { previous: { ...before, minPayout: program.minPayout }, next: { ...saved, minPayout } })
+    if (saved.cryptoAutoSend !== before.cryptoAutoSend && saved.autoPayouts === before.autoPayouts) {
+      return saved.cryptoAutoSend ? `Saved. USDT payouts up to ${saved.cryptoAutoMax.toFixed(2)} are now sent automatically from the payout wallet.` : "Saved. Automatic USDT sending is OFF — payouts already signed keep being tracked; the rest wait to be sent by hand."
+    }
     return saved.autoPayouts !== before.autoPayouts ? (saved.autoPayouts ? "Saved. Automatic payouts are ON — each payout still passes every eligibility check." : "Saved. Automatic payouts are OFF. Balances and each affiliate's own setting are unchanged.") : "Payout settings saved."
   })
 }

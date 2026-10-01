@@ -20,7 +20,7 @@ const label = "flex flex-col gap-1.5 text-xs text-muted-foreground"
 const DETAIL_LABELS: Record<string, string> = { email: "Email", holder: "Account holder", bankName: "Bank", account: "Account number", routing: "Routing number", accountType: "Account type", iban: "IBAN", swift: "SWIFT / BIC", address: "Wallet address", accountId: "Stripe account" }
 const META_LABELS: Record<string, string> = { country: "Country", currency: "Currency", accountType: "Account type", network: "Network", standard: "Standard", asset: "Asset" }
 
-export type AdminPayout = { id: number; status: string; methodType: string; amount: number; net: number; fee: number; asset: string | null; name: string; hasHash: boolean; automated: boolean }
+export type AdminPayout = { id: number; status: string; methodType: string; amount: number; net: number; fee: number; asset: string | null; name: string; hasHash: boolean; automated: boolean; hot?: boolean }
 
 // The "send it" window: shows where the money goes (decrypted, audit-logged),
 // then records the result. A crypto payout takes a transaction hash and is
@@ -136,11 +136,11 @@ function PayDialog({ payout, open, onOpenChange }: { payout: AdminPayout; open: 
 
 // Exactly the actions the payout's state allows (payout-engine.adminPayoutActions),
 // which is also what the server enforces.
-export function PayoutAdminActions({ payout, paused, size = "sm" }: { payout: AdminPayout; paused: boolean; size?: "sm" | "xs" }) {
+export function PayoutAdminActions({ payout, paused, canAutoSend = false, size = "sm" }: { payout: AdminPayout; paused: boolean; canAutoSend?: boolean; size?: "sm" | "xs" }) {
   const [paying, setPaying] = useState(false)
   const { pending, run } = useAction()
   const crypto = payout.methodType === "crypto_trc20"
-  const actions = adminPayoutActions({ status: payout.status, crypto, automated: payout.automated, hasHash: payout.hasHash })
+  const actions = adminPayoutActions({ status: payout.status, crypto, automated: payout.automated, hasHash: payout.hasHash, hot: payout.hot, canAutoSend })
   const has = (a: AdminPayoutAction) => actions.includes(a)
   const act = (action: Exclude<AdminPayoutAction, "submit_tx" | "check">) => (reason: string) => payoutAction({ payoutId: payout.id, action, reason })
   if (actions.length === 0) return null
@@ -154,9 +154,22 @@ export function PayoutAdminActions({ payout, paused, size = "sm" }: { payout: Ad
           Approve
         </ConfirmButton>
       )}
+      {has("send_auto") && (
+        <ConfirmButton
+          size={size}
+          variant="default"
+          disabled={paused}
+          title={`Send ${payout.net.toFixed(2)} USDT to ${payout.name} from the payout wallet?`}
+          description="The transfer is signed and broadcast now, and the payout completes when the TRON network confirms it. Once broadcast it can't be recalled."
+          confirmLabel="Send from payout wallet"
+          action={act("send_auto")}
+        >
+          Send from wallet
+        </ConfirmButton>
+      )}
       {(has("mark_paid") || has("submit_tx")) && (
-        <Button size={size} variant={has("approve") ? "outline" : "default"} disabled={paused} title={sending} onClick={() => setPaying(true)}>
-          {payout.status === "submitted" ? "Replace hash" : "Pay…"}
+        <Button size={size} variant={has("approve") || has("send_auto") || payout.hot ? "outline" : "default"} disabled={paused} title={sending} onClick={() => setPaying(true)}>
+          {payout.status === "submitted" ? "Replace hash" : payout.hot || has("send_auto") ? "Pay by hand…" : "Pay…"}
         </Button>
       )}
       {has("start") && (
@@ -165,8 +178,22 @@ export function PayoutAdminActions({ payout, paused, size = "sm" }: { payout: Ad
         </Button>
       )}
       {has("retry") && (
-        <ConfirmButton size={size} disabled={paused} title="Retry this payout?" description={payout.automated ? "The provider is asked again with the same idempotency key, so a request that already went through can't pay twice." : "It goes back to the queue to be sent again."} confirmLabel="Retry" action={act("retry")}>
-          Retry
+        <ConfirmButton
+          size={size}
+          variant={payout.hot ? "default" : "outline"}
+          disabled={paused}
+          title={payout.hot ? "Send this payout from the payout wallet now?" : "Retry this payout?"}
+          description={
+            payout.hot
+              ? "A new transfer is signed only if no earlier transaction for this payout can still be included — so it can't be paid twice."
+              : payout.automated
+                ? "The provider is asked again with the same idempotency key, so a request that already went through can't pay twice."
+                : "It goes back to the queue to be sent again."
+          }
+          confirmLabel={payout.hot ? "Send now" : "Retry"}
+          action={act("retry")}
+        >
+          {payout.hot ? "Send now" : "Retry"}
         </ConfirmButton>
       )}
       {has("check") && (
@@ -253,7 +280,7 @@ export function RunAutoPayoutsButton({ disabled }: { disabled: boolean }) {
 
 type FormState = Omit<PayoutSettings, "maxPayout" | "dailyLimit" | "weeklyLimit" | "monthlyLimit" | "paused"> & { maxPayout: string; dailyLimit: string; weeklyLimit: string; monthlyLimit: string; minPayout: string }
 
-export function PayoutSettingsForm({ settings, minPayout, stripeReady, canManage }: { settings: PayoutSettings; minPayout: number; stripeReady: boolean; canManage: boolean }) {
+export function PayoutSettingsForm({ settings, minPayout, stripeReady, walletReady, canManage }: { settings: PayoutSettings; minPayout: number; stripeReady: boolean; walletReady: boolean; canManage: boolean }) {
   const text = (v: number | null) => (v == null ? "" : String(v))
   const [form, setForm] = useState<FormState>({ ...settings, maxPayout: text(settings.maxPayout), dailyLimit: text(settings.dailyLimit), weeklyLimit: text(settings.weeklyLimit), monthlyLimit: text(settings.monthlyLimit), minPayout: String(minPayout) })
   const { pending, run } = useAction()
@@ -262,6 +289,7 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, canManage
   const toggleMethod = (t: PayoutMethodType, on: boolean) => setForm((f) => ({ ...f, methods: on ? PAYOUT_METHOD_TYPES.filter((m) => f.methods.includes(m) || m === t) : f.methods.filter((m) => m !== t) }))
 
   const submit = () => {
+    if (form.cryptoAutoSend && !settings.cryptoAutoSend && !window.confirm(`Switch automatic USDT sending ON?\n\nUSDT payout requests up to ${form.cryptoAutoMax} (and ${form.cryptoAutoDaily} a day in total) will be sent from the payout wallet without anyone approving them. Keep only a working float in that wallet.`)) return
     const turningOn = form.autoPayouts && !settings.autoPayouts
     if (turningOn && !window.confirm("Switch automatic payouts ON for the program?\n\nPayouts will be created without a request for affiliates who opted in and pass every check. Balances that built up are NOT sent in bulk — each affiliate gets at most one payout per period, within the limits.")) return
     run(() => savePayoutConfig({ ...form }))
@@ -334,6 +362,41 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, canManage
         </div>
 
         <div>
+          <h3 className="text-sm font-semibold">Automatic USDT sending</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            USDT (TRC-20) requests inside these limits are approved by the rules and sent from the payout wallet with nobody in the loop. Anything above the limit, a wallet added within the security hold, or an affiliate with an open risk signal still waits for you.
+          </p>
+          <ul className="mt-3 divide-y rounded-lg border">
+            <li>
+              <label className={`flex items-center justify-between gap-4 px-3 py-3 ${walletReady ? "cursor-pointer" : "opacity-60"}`}>
+                <span>
+                  <span className="block text-sm font-medium text-foreground">Send USDT payouts automatically</span>
+                  <span className="block text-xs text-muted-foreground">{walletReady ? "Signed and broadcast by the server from the payout wallet below." : "Needs the payout wallet to be configured first (see below)."}</span>
+                </span>
+                <input type="checkbox" role="switch" checked={form.cryptoAutoSend && walletReady} disabled={!walletReady} onChange={(e) => set("cryptoAutoSend", e.target.checked)} className="size-4 shrink-0 accent-[var(--primary)]" />
+              </label>
+            </li>
+          </ul>
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
+            <label className={label}>
+              Most per payout (USD)
+              <Input type="number" min={1} step="0.01" value={form.cryptoAutoMax} onChange={(e) => set("cryptoAutoMax", e.target.value as unknown as number)} required />
+              <span>Larger payouts wait for approval.</span>
+            </label>
+            <label className={label}>
+              Most per day, all affiliates (USD)
+              <Input type="number" min={1} step="0.01" value={form.cryptoAutoDaily} onChange={(e) => set("cryptoAutoDaily", e.target.value as unknown as number)} required />
+              <span>The ceiling on what can leave unattended in a day.</span>
+            </label>
+            <label className={label}>
+              Network fee limit (TRX)
+              <Input type="number" min={5} max={500} step={1} value={form.cryptoFeeLimitTrx} onChange={(e) => set("cryptoFeeLimitTrx", e.target.value as unknown as number)} required />
+              <span>A transfer that would cost more waits.</span>
+            </label>
+          </div>
+        </div>
+
+        <div>
           <h3 className="text-sm font-semibold">Payout methods and fees</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">Which methods affiliates can add, and what each costs. A fee is only deducted when the affiliate pays it — and they see amount, fee and net before requesting.</p>
           <label className={`${label} mt-3 max-w-sm`}>
@@ -370,7 +433,7 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, canManage
                         <Input aria-label={`${PAYOUT_METHOD_LABELS[t]} percent fee`} type="number" min={0} max={50} step="0.1" value={form.fees[t].percent} onChange={(e) => fee(t, "percent", e.target.value)} className="w-20" disabled={form.feePolicy !== "affiliate"} />
                       </td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">
-                        {t === "crypto_trc20" ? "By hand from your wallet; completed when the TRON network confirms the transaction" : t === "stripe" ? (stripeReady ? "Automatically, by Stripe transfer" : "Not configured — needs STRIPE_CONNECT_SECRET_KEY") : "By hand; you confirm when it's sent"}
+                        {t === "crypto_trc20" ? (form.cryptoAutoSend && walletReady ? "Automatically from the payout wallet (inside the limits above), otherwise by hand; completed when the TRON network confirms it" : "By hand from your wallet; completed when the TRON network confirms the transaction") : t === "stripe" ? (stripeReady ? "Automatically, by Stripe transfer" : "Not configured — needs STRIPE_CONNECT_SECRET_KEY") : "By hand; you confirm when it's sent"}
                       </td>
                     </tr>
                   )
