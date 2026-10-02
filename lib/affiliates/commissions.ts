@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto"
 import { and, asc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateCommissions, affiliateConversions, affiliateReferrals, affiliates } from "@/lib/db/schema"
-import { decideCommission, ledgerBalances, planReversal, refundShare, resolveRule, round2, tierFor, type Balances, type ReversalKind } from "./engine"
+import { decideCommission, ledgerBalances, planReversal, refundShare, resolveRule, round2, tierFor, tierRateText, type Balances, type ReversalKind } from "./engine"
+import { perkLines, syncTierPerks } from "./perks"
 import { getProgram, loadRules, loadTiers, paidCustomerCount } from "./program"
 import { attributeByCoupon } from "./attribution"
 import { notifyAffiliate } from "./notify"
@@ -56,7 +57,8 @@ export async function handleAffiliatePayment(ev: PaymentEvent): Promise<void> {
   const firstPayment = !referral.firstPaymentAt
   // The customer count the tier is measured against includes this one.
   const customersNow = customers + (firstPayment ? 1 : 0)
-  const rule = resolveRule({ program, tiers, rules, customers: customersNow, tierOverrideId: aff.tierId, campaignId: referral.campaignId, couponId: referral.couponId, now: ev.paidAt })
+  // A tier may pay one rate for the customer's first months and another after: it is told when this customer first paid.
+  const rule = resolveRule({ program, tiers, rules, customers: customersNow, tierOverrideId: aff.tierId, campaignId: referral.campaignId, couponId: referral.couponId, firstPaymentAt: referral.firstPaymentAt, now: ev.paidAt })
   const decision = decideCommission({ program, rule, affiliateStatus: aff.status, firstPaymentAt: referral.firstPaymentAt, paidAt: ev.paidAt, baseAmount: ev.amount })
 
   const created = await db.transaction(async (tx) => {
@@ -117,7 +119,10 @@ export async function handleAffiliatePayment(ev: PaymentEvent): Promise<void> {
     const before = tierFor(tiers, customers)
     const after = tierFor(tiers, customersNow)
     if (after && after.id !== before?.id) {
-      await notifyAffiliate({ affiliateId: aff.id, type: "tier", title: `You reached the ${after.name} tier`, body: `Your commission rate is now ${after.ratePercent}% on new payments.`, href: "/affiliate", email: true })
+      // What the tier unlocks is put in place first, so the message can say what they got.
+      const given = await syncTierPerks(aff.id).catch((e) => (console.error("[affiliates] tier perks couldn't be applied:", aff.id, e instanceof Error ? e.message : e), null))
+      const perks = perkLines(after, given, program)
+      await notifyAffiliate({ affiliateId: aff.id, type: "tier", title: `You reached the ${after.name} tier`, body: `Your commission is now ${tierRateText(after)} on payments from here on.${perks.length ? `\n\nIt also unlocks:\n\n${perks.map((p) => `• ${p}`).join("\n\n")}` : ""}`, href: "/affiliate", email: true })
     }
   }
   await evaluateAffiliate(aff.id)

@@ -13,14 +13,16 @@ import { BrandMark } from "@/components/brand-mark"
 import { ThemeSwitch } from "@/components/affiliate/theme-switch"
 import { ApplyForm } from "@/components/affiliate/apply-form"
 import { ProgramTerms } from "@/components/affiliate/program-terms"
+import { TierCards } from "@/components/affiliate/tier-cards"
 import { affiliateHref, appHref } from "@/lib/urls"
 
 // The one public page of the program — what it is, what it pays, and the
 // application. Indexable (the rest of /affiliate is not).
 export async function generateMetadata(): Promise<Metadata> {
-  const program = await getProgram()
+  const [program, tiers] = await Promise.all([getProgram(), loadTiers()])
+  const rates = tiers.filter((t) => t.enabled).map((t) => t.ratePercent)
   const title = "Affiliate Program"
-  const description = `Earn ${program.defaultRate}% ${program.commissionType === "recurring" ? "recurring " : ""}commission for every trader you refer to TradeLoop, the trading journal and analytics platform. ${program.cookieDays}-day tracking, real-time dashboard, payouts from ${money(program.minPayout)}.`
+  const description = `Earn ${rates.length ? `up to ${Math.max(...rates)}` : program.defaultRate}% ${program.commissionType === "recurring" ? "recurring " : ""}commission for every trader you refer to TradeLoop, the trading journal and analytics platform. ${program.cookieDays}-day tracking, real-time dashboard, payouts from ${money(program.minPayout)}.`
   return { title, description, robots: { index: true, follow: true }, alternates: { canonical: affiliateHref("/affiliate/apply") }, openGraph: { title: `${title} — TradeLoop`, description, type: "website" } }
 }
 
@@ -45,7 +47,9 @@ export default async function AffiliateApplyPage() {
   const payoutMethods = methodList(payoutSettings.methods.filter(methodAvailable))
   const country = (await headers()).get("x-vercel-ip-country") ?? ""
   const activeTiers = tiers.filter((t) => t.enabled).sort((a, b) => a.minCustomers - b.minCustomers)
-  const topRate = Math.max(program.defaultRate, ...activeTiers.map((t) => t.ratePercent))
+  // With tiers, what the program pays is what the tiers pay; the default rate only applies without them.
+  const topRate = activeTiers.length ? Math.max(...activeTiers.map((t) => t.ratePercent)) : program.defaultRate
+  const startRate = activeTiers.length ? activeTiers[0].ratePercent : program.defaultRate
   const [firstName = "", ...rest] = (user?.name ?? "").trim().split(/\s+/)
   const canApply = !!user && (!affiliate || affiliate.status === "rejected")
 
@@ -96,7 +100,7 @@ export default async function AffiliateApplyPage() {
         <section className="grid gap-3 sm:grid-cols-3" aria-label="How it works">
           {[
             { icon: Link2, title: "1. Share your link", body: `Get a personal link and coupon code. Clicks are remembered for ${program.cookieDays} days.` },
-            { icon: CircleDollarSign, title: "2. Earn on every payment", body: `${program.defaultRate}% to start, rising with the paying customers you bring in.` },
+            { icon: CircleDollarSign, title: "2. Earn on every payment", body: `${startRate}% to start, rising with the paying customers you bring in.` },
             { icon: MailCheck, title: "3. Get paid", body: `Commissions clear after ${program.holdDays} days. Withdraw by ${payoutMethods}.` },
           ].map((s) => (
             <div key={s.title} className="rounded-xl border bg-card p-5">
@@ -108,20 +112,12 @@ export default async function AffiliateApplyPage() {
         </section>
 
         {activeTiers.length > 0 && (
-          <section className="rounded-xl border bg-card">
-            <div className="border-b px-5 py-4">
-              <h2 className="text-sm font-semibold">Commission tiers</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">Your rate moves up automatically as your paying customers grow.</p>
-            </div>
-            <div className="grid divide-y sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-              {activeTiers.map((t) => (
-                <div key={t.id} className="px-5 py-4">
-                  <p className="text-xs text-muted-foreground">{t.name}</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight">{t.ratePercent}%</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{t.minCustomers === 0 ? "From your first customer" : `${t.minCustomers}+ paying customers`}</p>
-                </div>
-              ))}
-            </div>
+          <section aria-labelledby="tiers-heading">
+            <h2 id="tiers-heading" className="text-sm font-semibold">
+              Commission tiers
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">You move up automatically as your paying customers grow — and each tier unlocks more.</p>
+            <TierCards tiers={activeTiers} couponPercent={program.permanentCouponPercent} className="mt-3" />
           </section>
         )}
 
@@ -169,7 +165,7 @@ export default async function AffiliateApplyPage() {
             <h2 className="text-sm font-semibold">Program terms</h2>
           </div>
           <div className="p-5">
-            <ProgramTerms program={program} />
+            <ProgramTerms program={program} startRate={startRate} scheduled={activeTiers.some((t) => t.introMonths != null)} />
           </div>
         </section>
       </main>

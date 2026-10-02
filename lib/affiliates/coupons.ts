@@ -4,8 +4,8 @@ import { db } from "@/lib/db"
 import { affiliateCampaigns, affiliateCoupons, affiliates } from "@/lib/db/schema"
 import { createPromoCode, deletePromoCode } from "@/lib/admin/whop"
 import { getProductIdForPlan } from "@/lib/whop"
-import { couponAccess, couponCodeValid } from "./engine"
-import { getProgram } from "./program"
+import { couponAccess, couponCodeValid, tierHasPerk } from "./engine"
+import { affiliateTier, getProgram } from "./program"
 
 // Affiliate coupons. Each is a REAL Whop promo code — the customer types it at
 // checkout and Whop applies the discount — and the payment that follows carries
@@ -13,7 +13,8 @@ import { getProgram } from "./program"
 //
 // Three ways a coupon comes to exist:
 //   permanent  one standing code per affiliate, created by the system with the
-//              program's discount. The affiliate can't disable it.
+//              program's discount once their tier includes a personal code (or
+//              by an admin, for anyone). The affiliate can't disable it.
 //   affiliate  made by the affiliate in the portal's Coupons section — which is
 //              closed until an admin opens it for that affiliate — up to the
 //              discount they are allowed (their own ceiling, else the program's).
@@ -163,7 +164,11 @@ export async function permanentCoupon(affiliateId: number): Promise<CouponRow | 
 // returns it. Safe to call as often as you like: the database allows one
 // permanent coupon per affiliate, so two callers at once end up with the same
 // one. Returns null when permanent codes are off, or the affiliate isn't ready.
-export async function ensurePermanentCoupon(affiliateId: number): Promise<CouponRow | null> {
+//
+// The personal code is a TIER PERK: it is created once the affiliate's tier
+// includes it. A code that already exists is always returned — reaching for it
+// never takes one away — and an admin can give one to anyone (`force`).
+export async function ensurePermanentCoupon(affiliateId: number, opts: { force?: boolean } = {}): Promise<CouponRow | null> {
   const existing = await permanentCoupon(affiliateId)
   if (existing) return existing
   const program = await getProgram()
@@ -171,6 +176,7 @@ export async function ensurePermanentCoupon(affiliateId: number): Promise<Coupon
   const [aff] = await db.select({ code: affiliates.code, status: affiliates.status, onboardedAt: affiliates.onboardedAt }).from(affiliates).where(eq(affiliates.id, affiliateId))
   // The code is built from their referral code, which they choose at onboarding.
   if (!aff || aff.status !== "approved" || !aff.onboardedAt) return null
+  if (!opts.force && !tierHasPerk(await affiliateTier(affiliateId), "coupon")) return null
 
   const base = aff.code.toUpperCase().replace(/[^A-Z0-9_-]/g, "").replace(/^[_-]+/, "").slice(0, 16)
   const candidates = [base, ...codeCandidates(aff.code, program.permanentCouponPercent)].filter(couponCodeValid)
@@ -192,8 +198,8 @@ export async function ensurePermanentCoupon(affiliateId: number): Promise<Coupon
   return null
 }
 
-// The daily job: affiliates who were approved before permanent codes existed,
-// or whose code couldn't be minted at the time, get theirs.
+// Affiliates whose code couldn't be minted at the time get theirs — those
+// whose tier includes it (the daily job does this through perks.syncAllTierPerks).
 export async function ensurePermanentCoupons(limit = 50): Promise<{ created: number }> {
   const program = await getProgram()
   if (!(program.permanentCouponPercent > 0)) return { created: 0 }
@@ -213,7 +219,8 @@ export async function ensurePermanentCoupons(limit = 50): Promise<{ created: num
 // code itself — what the affiliate has been telling people — stays the same.
 export async function refreshPermanentCoupon(affiliateId: number): Promise<CouponRow | null> {
   const existing = await permanentCoupon(affiliateId)
-  if (!existing) return ensurePermanentCoupon(affiliateId)
+  // An admin asking for it gives the code whatever the affiliate's tier.
+  if (!existing) return ensurePermanentCoupon(affiliateId, { force: true })
   const program = await getProgram()
   if (!(program.permanentCouponPercent > 0)) throw new Error("Permanent codes are switched off in the program rules.")
   if (existing.whopPromoId) await deletePromoCode(existing.whopPromoId).catch((e) => console.error("[affiliates] couldn't remove the promo code on Whop:", e instanceof Error ? e.message : e))

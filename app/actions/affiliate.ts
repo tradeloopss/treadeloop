@@ -6,6 +6,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateAnnouncementReads, affiliateAnnouncements, affiliateNotifications, supportMessages, supportTickets } from "@/lib/db/schema"
 import { assertAffiliate, getSessionUser } from "@/lib/affiliates/guard"
+import { userHasPerk } from "@/lib/affiliates/perk-access"
 import { completeOnboarding, submitApplication, updateNotificationPrefs, updateProfile, type ApplicationInput } from "@/lib/affiliates/apply"
 import { claimAttribution } from "@/lib/affiliates/attribution"
 import { createCampaign, createLink, setCampaignStatus, setLinkStatus, updateCampaign, type CampaignInput } from "@/lib/affiliates/campaigns"
@@ -279,8 +280,11 @@ export async function markAnnouncementRead(id: number): Promise<ActionResult> {
 // --- Support -------------------------------------------------------------------
 
 // Affiliate questions go into the existing support queue (same tickets, same
-// staff inbox at /admin/support), tagged so staff can tell them apart.
-export async function contactAffiliateSupport(input: { subject: string; message: string }): Promise<{ ok: true; ticketId: number } | { ok: false; error: string }> {
+// staff inbox at /admin/support), tagged so staff can tell them apart. An
+// affiliate whose tier includes priority support is answered first, and can
+// send a feature request the same way — both decided here, from their tier,
+// never from what the form says.
+export async function contactAffiliateSupport(input: { subject: string; message: string; kind?: string }): Promise<{ ok: true; ticketId: number } | { ok: false; error: string }> {
   try {
     const { user, affiliate } = await assertAffiliate()
     const subject = String(input.subject ?? "").trim()
@@ -288,7 +292,13 @@ export async function contactAffiliateSupport(input: { subject: string; message:
     if (subject.length < 3) throw new Error("Add a subject.")
     if (message.length < 10) throw new Error("Describe your question in a little more detail.")
     if (message.length > 5000) throw new Error("Keep the message under 5000 characters.")
-    const [ticket] = await db.insert(supportTickets).values({ userId: user.id, subject: `[Affiliate] ${subject}`.slice(0, 140) }).returning({ id: supportTickets.id })
+    const priority = await userHasPerk(user.id, "prioritySupport")
+    const featureRequest = input.kind === "feature_request"
+    if (featureRequest && !priority) throw new Error("Feature requests open up with the Gold tier.")
+    const [ticket] = await db
+      .insert(supportTickets)
+      .values({ userId: user.id, subject: `${featureRequest ? "[Feature request]" : "[Affiliate]"} ${subject}`.slice(0, 140), priority, kind: featureRequest ? "feature_request" : "support" })
+      .returning({ id: supportTickets.id })
     await db.insert(supportMessages).values({ ticketId: ticket.id, authorId: user.id, body: `${message}\n\n— Affiliate code: ${affiliate.code}` })
     revalidatePath("/support")
     return { ok: true, ticketId: ticket.id }

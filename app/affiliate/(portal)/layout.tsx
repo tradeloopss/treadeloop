@@ -60,6 +60,11 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
               <p className="mt-0.5 text-sm font-semibold tabular-nums">
                 {rule.ratePercent}%{rule.tier ? <span className="ms-1.5 font-normal text-muted-foreground">· {rule.tier.name}</span> : null}
               </p>
+              {rule.tier?.introMonths != null && (
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  for a customer&apos;s first {rule.tier.introMonths} months{rule.tier.afterPercent ? `, then ${rule.tier.afterPercent}%` : ""}
+                </p>
+              )}
             </div>
             <ThemeSwitch className="mb-2" />
             <Link href={appHref("/dashboard")} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">

@@ -1,17 +1,17 @@
 import type React from "react"
 import { notFound } from "next/navigation"
-import { getAdmin } from "@/lib/admin/guard"
+import { getBetaUser } from "@/lib/beta"
 import { getPlaybooks } from "@/app/actions/playbooks"
 import { BacktestNav } from "@/components/backtest/backtest-nav"
 import { CreateSessionDialog } from "@/components/backtest/create-session-dialog"
 import { getT } from "@/lib/i18n/server"
 
 // The Backtesting section shell: its own header + sub-tabs (Dashboard /
-// Sessions / Reports), separate from the rest of the app. Admin-only; a
-// non-admin who deep-links here gets a 404 (the nav sends them to /backtest,
-// which shows the coming-soon screen).
+// Sessions / Reports), separate from the rest of the app. In beta (lib/beta.ts);
+// anyone without beta access who deep-links here gets a 404 (the nav sends them
+// to /backtest, which shows the coming-soon screen).
 export default async function BacktestSectionLayout({ children }: { children: React.ReactNode }) {
-  if (!(await getAdmin())) notFound()
+  if (!(await getBetaUser())) notFound()
   const t = await getT()
   const playbooks = await getPlaybooks()
   return (

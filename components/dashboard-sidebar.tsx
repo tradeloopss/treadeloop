@@ -75,11 +75,14 @@ export function DashboardSidebar({
   userImage,
   isAdmin = false,
   isPro = false,
+  hasBeta = false,
 }: {
   userName: string
   userImage?: string | null
   isAdmin?: boolean
   isPro?: boolean
+  // can use features still in beta (lib/beta.ts): no "Soon" badge on them
+  hasBeta?: boolean
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -259,7 +262,7 @@ export function DashboardSidebar({
                 >
                   <CandlestickChart className="size-4 shrink-0" />
                   <span className={cn(collapsed && "md:hidden")}>{t("Backtesting")}</span>
-                  {!isAdmin && (
+                  {!isAdmin && !hasBeta && (
                     <span className={cn("ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-muted-foreground uppercase", collapsed && "md:hidden")}>
                       {t("Soon")}
                     </span>

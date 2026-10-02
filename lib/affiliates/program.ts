@@ -3,7 +3,7 @@ import { db } from "@/lib/db"
 import { affiliateReferrals, affiliateRules, affiliateTiers, affiliates } from "@/lib/db/schema"
 import { getAppSetting, setAppSetting } from "@/lib/app-settings"
 import { normalizeProgram, type ProgramSettings } from "./types"
-import { resolveRule, type ResolvedRule, type RuleRow, type TierRow } from "./engine"
+import { TIER_STYLES, cleanPerks, resolveRule, tierFor, type ResolvedRule, type RuleRow, type TierRow, type TierStyle } from "./engine"
 import { normalizePayoutSettings, type PayoutSettings } from "./payout-engine"
 
 // Program-level configuration and the rows the rule engine needs.
@@ -42,9 +42,23 @@ export async function savePayoutSettings(next: unknown): Promise<PayoutSettings>
   return clean
 }
 
+export const tierRow = (t: typeof affiliateTiers.$inferSelect): TierRow => ({
+  id: t.id,
+  name: t.name,
+  minCustomers: t.minCustomers,
+  ratePercent: Number(t.ratePercent),
+  introMonths: t.introMonths,
+  afterPercent: t.afterPercent == null ? null : Number(t.afterPercent),
+  perks: cleanPerks(t.perks),
+  tagline: t.tagline,
+  style: (TIER_STYLES as readonly string[]).includes(t.style) ? (t.style as TierStyle) : "plain",
+  sortOrder: t.sortOrder,
+  enabled: t.enabled,
+})
+
 export async function loadTiers(): Promise<TierRow[]> {
   const rows = await db.select().from(affiliateTiers).orderBy(affiliateTiers.sortOrder, affiliateTiers.id)
-  return rows.map((t) => ({ id: t.id, name: t.name, minCustomers: t.minCustomers, ratePercent: Number(t.ratePercent), sortOrder: t.sortOrder, enabled: t.enabled }))
+  return rows.map(tierRow)
 }
 
 export async function loadRules(affiliateId: number): Promise<RuleRow[]> {
@@ -69,6 +83,13 @@ export async function paidCustomerCount(affiliateId: number): Promise<number> {
     .from(affiliateReferrals)
     .where(and(eq(affiliateReferrals.affiliateId, affiliateId), isNotNull(affiliateReferrals.firstPaymentAt)))
   return row?.n ?? 0
+}
+
+// The tier an affiliate sits in right now: the one set by hand on their page,
+// else by their paying customers.
+export async function affiliateTier(affiliateId: number): Promise<TierRow | null> {
+  const [tiers, customers, [aff]] = await Promise.all([loadTiers(), paidCustomerCount(affiliateId), db.select({ tierId: affiliates.tierId }).from(affiliates).where(eq(affiliates.id, affiliateId))])
+  return tierFor(tiers, customers, aff?.tierId ?? null)
 }
 
 // The rate that would apply for this affiliate right now (optionally for a

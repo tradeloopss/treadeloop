@@ -2,7 +2,8 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { ChevronDown } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
-import { currentRule, getProgram } from "@/lib/affiliates/program"
+import { tierHasPerk } from "@/lib/affiliates/engine"
+import { affiliateTier, currentRule, getProgram } from "@/lib/affiliates/program"
 import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
 import { Panel } from "@/components/admin/ui"
@@ -13,13 +14,18 @@ export const metadata: Metadata = { title: "Support" }
 
 export default async function AffiliateSupportPage() {
   const { affiliate } = await requireAffiliate()
-  const [program, rule] = await Promise.all([getProgram(), currentRule(affiliate.id)])
+  const [program, rule, tier] = await Promise.all([getProgram(), currentRule(affiliate.id), affiliateTier(affiliate.id)])
   const duration = program.commissionType === "one_time" ? "the customer's first payment only" : rule.durationMonths ? `every payment a customer makes in their first ${rule.durationMonths} months` : "every payment a customer makes, for as long as they stay subscribed"
+  // A tier that pays one rate for a customer's first months and another after.
+  const scheduled = rule.source === "tier" && rule.tier?.introMonths != null && program.commissionType !== "one_time" ? rule.tier : null
+  const earn = scheduled
+    ? `Right now you're on the ${scheduled.name} tier: ${scheduled.ratePercent}% of every payment a customer makes in their first ${scheduled.introMonths} months${scheduled.afterPercent ? `, then ${scheduled.afterPercent}% of every payment for as long as they stay subscribed` : ""}.`
+    : `Right now you earn ${rule.ratePercent}% of ${duration}.`
 
   // Answers come from the live program settings, so they can't drift from
   // what the system actually does.
   const faq: [string, string][] = [
-    ["How much do I earn?", `Right now you earn ${rule.ratePercent}% of ${duration}. Commission is calculated on what the customer actually pays, after discounts and before tax. Your rate can go up as you bring in more paying customers.`],
+    ["How much do I earn?", `${earn} Commission is calculated on what the customer actually pays, after discounts and before tax. Your rate can go up as you bring in more paying customers.`],
     ["How does tracking work?", `When someone opens your link, we remember it for ${program.cookieDays} days. If they create a TradeLoop account within that time, they're your referral — and stay yours. ${program.attribution === "first_touch" ? "If they clicked more than one affiliate's link, the first one they clicked gets the referral." : "If they clicked more than one affiliate's link, the most recent one gets the referral."}`],
     ["A referral is missing. Why?", "The most common reasons: they already had a TradeLoop account before clicking, they signed up after the tracking window ended, they used a different browser or device than the one they clicked on, or their browser blocked the cookie. A coupon code is a good backup — a customer who pays with your code is credited to you even without a click."],
     ["When does a commission become available?", `Each commission is pending for ${program.holdDays} days after the customer's payment. If the payment isn't refunded in that time, the commission becomes available to withdraw.`],
@@ -48,7 +54,7 @@ export default async function AffiliateSupportPage() {
         </Panel>
         <div className="flex flex-col gap-4 xl:col-span-2">
           <Panel title="Contact the affiliate team" description="Goes to the same support inbox as the rest of TradeLoop.">
-            <AffiliateSupportForm />
+            <AffiliateSupportForm priority={tierHasPerk(tier, "prioritySupport")} />
           </Panel>
           <Panel title="Your requests">
             <p className="text-sm text-muted-foreground">

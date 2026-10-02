@@ -232,6 +232,13 @@
       "when": 1790980000000,
       "tag": "0032_affiliate_hold_period",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790990000000,
+      "tag": "0033_affiliate_tiers_perks",
+      "breakpoints": true
     }
   ]
 }

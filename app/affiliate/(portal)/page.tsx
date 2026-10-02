@@ -4,7 +4,7 @@ import { CircleDollarSign, Hourglass, MousePointerClick, Target, UserPlus, Users
 import { requireAffiliate } from "@/lib/affiliates/guard"
 import { balancesFor, releaseHolds } from "@/lib/affiliates/commissions"
 import { ensurePermanentCoupon } from "@/lib/affiliates/coupons"
-import { buildTrackingUrl, rate, tierFor } from "@/lib/affiliates/engine"
+import { buildTrackingUrl, rate, tierFor, tierRateText } from "@/lib/affiliates/engine"
 import { SITE_URL, currentRule, getProgram, loadTiers, paidCustomerCount } from "@/lib/affiliates/program"
 import { campaignsWithStats, defaultLink, performance, recentReferrals } from "@/lib/affiliates/queries"
 import { count, money, parseRange, pct } from "@/lib/affiliates/types"
@@ -13,6 +13,7 @@ import { BarList, Panel } from "@/components/admin/ui"
 import { Empty, Kpi, KpiGrid, RangeTabs, StatusBadge, TableShell, THead, fmtDay, primaryLinkClass, tdClass, thClass } from "@/components/affiliate/ui"
 import { PerformanceChart } from "@/components/affiliate/performance-chart"
 import { ReferralLinkCard } from "@/components/affiliate/link-card"
+import { TierCards } from "@/components/affiliate/tier-cards"
 import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Overview" }
@@ -35,12 +36,15 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
     recentReferrals(affiliate.id, 6),
   ])
   const { current, previous } = perf
-  // Their permanent discount code. Created on the spot for anyone who was
-  // approved before these existed; a failure here must not break the page.
+  // Their personal discount code, once their tier includes one (or an admin
+  // gave them one). A failure here must not break the page.
   const permanent = await ensurePermanentCoupon(affiliate.id).catch(() => null)
   const url = buildTrackingUrl({ base: SITE_URL, code: affiliate.code, linkToken: link?.token })
   const tier = tierFor(tiers, customers, affiliate.tierId)
-  const next = tiers.filter((t) => t.enabled && t.minCustomers > customers).sort((a, b) => a.minCustomers - b.minCustomers)[0]
+  // (Measured against at least one customer, like the tier itself: the first tier is where everyone starts.)
+  const next = tiers.filter((t) => t.enabled && t.minCustomers > Math.max(customers, 1)).sort((a, b) => a.minCustomers - b.minCustomers)[0]
+  // What they are paid is their tier's rate unless a custom rule outranks it.
+  const paid = tier && rule.source === "tier" ? tierRateText(tier) : `${rule.ratePercent}%`
   const topCampaigns = campaigns
     .filter((c) => c.status === "active")
     .sort((a, b) => b.stats.commission - a.stats.commission || b.stats.clicks - a.stats.clicks)
@@ -54,7 +58,7 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
           <Kpi label="Available to withdraw" value={money(balances.available)} icon={Wallet} note={balances.processing > 0 ? `${money(balances.processing)} being paid out` : `Minimum payout ${money(program.minPayout)}`} />
           <Kpi label="Pending commission" value={money(balances.pending)} icon={Hourglass} note={`Clears after ${program.holdDays} days`} />
           <Kpi label="Lifetime earned" value={money(balances.lifetimeEarned)} icon={CircleDollarSign} note={`${money(balances.lifetimePaid)} paid out`} />
-          <Kpi label="Paying customers" value={count(customers)} icon={Users} note={tier ? `${tier.name} tier · ${rule.ratePercent}%` : `${rule.ratePercent}% commission`} />
+          <Kpi label="Paying customers" value={count(customers)} icon={Users} note={tier ? `${tier.name} tier · ${paid}` : `${paid} commission`} />
         </KpiGrid>
 
         <ReferralLinkCard url={url} code={affiliate.code} rate={rule.ratePercent} cookieDays={program.cookieDays} coupon={permanent && permanent.status === "active" ? { code: permanent.code, percent: Number(permanent.discountValue), months: permanent.durationMonths } : null} />
@@ -95,7 +99,7 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
                 {next.minCustomers - customers} more paying customer{next.minCustomers - customers === 1 ? "" : "s"} to reach {next.name}
               </h2>
               <p className="text-xs text-muted-foreground">
-                {next.name} pays {next.ratePercent}%{tier ? ` · you're on ${tier.name} (${tier.ratePercent}%)` : ""}
+                {next.name} pays {tierRateText(next)}{tier ? ` · you're on ${tier.name} (${tierRateText(tier)})` : ""}
               </p>
             </div>
             <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={next.minCustomers} aria-valuenow={customers} aria-label={`Progress to ${next.name}`}>
@@ -104,6 +108,16 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
             <p className="mt-1.5 text-xs tabular-nums text-muted-foreground">
               {customers} / {next.minCustomers} paying customers
             </p>
+          </section>
+        )}
+
+        {tiers.some((t) => t.enabled) && (
+          <section aria-labelledby="tiers-heading">
+            <h2 id="tiers-heading" className="text-sm font-semibold">
+              Tiers
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">You move up automatically as your paying customers grow. The tier you&apos;re in when a customer pays decides the rate for that payment.</p>
+            <TierCards tiers={tiers} couponPercent={program.permanentCouponPercent} currentId={tier?.id ?? null} customers={customers} className="mt-3" />
           </section>
         )}
 

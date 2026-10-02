@@ -2,7 +2,7 @@ import Link from "next/link"
 import { requireAdmin } from "@/lib/admin/guard"
 import { listTickets } from "@/lib/admin/metrics"
 import { AdminPageHeader, EmptyRow, fmtAgo } from "@/components/admin/ui"
-import { TicketStatus } from "@/components/ticket-status"
+import { TicketFlags, TicketStatus } from "@/components/ticket-status"
 import { cn } from "@/lib/utils"
 
 const TABS: [string, string][] = [
@@ -19,7 +19,7 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
 
   return (
     <div>
-      <AdminPageHeader title="Support" description="Requests users send from Help & support in the app. Replying emails them a link back to the conversation." />
+      <AdminPageHeader title="Support" description="Requests users send from Help & support in the app. Replying emails them a link back to the conversation. Priority requests — from affiliates whose tier includes priority support — are listed first." />
       <div className="p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap gap-1.5">
           {TABS.map(([value, label]) => (
@@ -48,6 +48,7 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
                 <tr key={t.id} className="hover:bg-muted/40">
                   <td className="max-w-[320px] px-4 py-3">
                     <Link href={`/admin/support/${t.id}`} className="block truncate font-medium hover:text-primary">{t.subject}</Link>
+                    <TicketFlags priority={t.priority} kind={t.kind} className="mt-1" />
                   </td>
                   <td className="max-w-[220px] truncate px-3 py-3">
                     <Link href={`/admin/users/${t.userId}`} className="hover:text-primary">{t.email ?? t.userId}</Link>

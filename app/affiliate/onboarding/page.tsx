@@ -4,6 +4,7 @@ import { requireAffiliate } from "@/lib/affiliates/guard"
 import { SITE_URL, currentRule, getPayoutSettings, getProgram } from "@/lib/affiliates/program"
 import { methodAvailable } from "@/lib/affiliates/providers"
 import { methodList, money } from "@/lib/affiliates/types"
+import { earningText } from "@/lib/affiliates/engine"
 import { BrandMark } from "@/components/brand-mark"
 import { ThemeSwitch } from "@/components/affiliate/theme-switch"
 import { OnboardingForm } from "@/components/affiliate/apply-form"
@@ -17,7 +18,7 @@ export default async function AffiliateOnboardingPage() {
   const [program, rule, payoutSettings] = await Promise.all([getProgram(), currentRule(affiliate.id), getPayoutSettings()])
 
   const facts: [string, string][] = [
-    ["Your commission", `${rule.ratePercent}% ${program.commissionType === "recurring" ? (rule.durationMonths ? `of every payment for ${rule.durationMonths} months per customer` : "of every payment your referrals make") : "of each referral's first payment"}`],
+    ["Your commission", earningText(rule, program)],
     ["Tracking window", `${program.cookieDays} days from the click to the sign-up`],
     ["Holding period", `${program.holdDays} days before a commission can be withdrawn`],
     ["Payouts", `From ${money(program.minPayout)}, by ${methodList(payoutSettings.methods.filter(methodAvailable))}`],

@@ -4,12 +4,12 @@ import { requireAdmin } from "@/lib/admin/guard"
 import { roleCan } from "@/lib/admin/access"
 import { affiliateDetail } from "@/lib/affiliates/admin-queries"
 import { countryName } from "@/lib/affiliates/countries"
-import { resolveRule } from "@/lib/affiliates/engine"
+import { TIER_PERKS, resolveRule, tierHasPerk, tierRateText, type TierPerk } from "@/lib/affiliates/engine"
 import { FRAUD_LABELS } from "@/lib/affiliates/fraud"
 import { AUTO_SKIP_LABELS, PAYOUT_STATUS_LABELS, effectiveLimits, type PayoutStatus } from "@/lib/affiliates/payout-engine"
 import { autoPayoutPreview } from "@/lib/affiliates/payouts"
 import { SOCIAL_KEYS, SOCIAL_LABELS, count, methodLabel, money, signedMoney } from "@/lib/affiliates/types"
-import { AdminPageHeader, Panel, fmtAgo } from "@/components/admin/ui"
+import { AdminPageHeader, Panel, fmtAgo, fmtDate } from "@/components/admin/ui"
 import { Empty, FieldRow, Kpi, KpiGrid, LEDGER_TYPE_LABELS, StatusBadge, TableShell, THead, fmtDay, tdClass, thClass } from "@/components/affiliate/ui"
 import { AdjustDialog, CodeEditor, FlagToggles, LedgerRowActions, SignalActions, StandingActions, TierSelect } from "@/components/admin/affiliates/actions"
 import { CouponAdmin } from "@/components/admin/affiliates/coupons-admin"
@@ -17,6 +17,7 @@ import { MethodAdminActions, PayoutControls } from "@/components/admin/affiliate
 import { RuleForm, RulesTable } from "@/components/admin/affiliates/program-form"
 
 const RULE_LABELS: Record<string, string> = { affiliate: "a custom rule", campaign: "a campaign rule", coupon: "a coupon rule", tier: "their tier", default: "the program default" }
+const PERK_SHORT: Record<TierPerk, string> = { coupon: "a personal coupon code", beta: "beta features", freeAccount: "a free-forever account", prioritySupport: "priority support" }
 const safeUrl = (v: string | null) => (v && /^https?:\/\//i.test(v) ? v : null)
 
 export default async function AdminAffiliateDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -112,6 +113,14 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
                 <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
                   Tier
                   <TierSelect id={a.id} tierId={a.tierId} tiers={d.tiers.filter((t) => t.enabled).map((t) => ({ id: t.id, name: t.name, ratePercent: t.ratePercent }))} />
+                  {/* What their tier unlocks besides the rate, and what was already given. */}
+                  {d.tier && (
+                    <span>
+                      {d.tier.name} pays {tierRateText(d.tier)}
+                      {TIER_PERKS.some((k) => tierHasPerk(d.tier, k)) ? ` and unlocks: ${TIER_PERKS.filter((k) => tierHasPerk(d.tier, k)).map((k) => PERK_SHORT[k]).join(", ")}.` : "."}
+                      {a.freeAccountAt ? ` Free-forever account given ${fmtDate(a.freeAccountAt)} — revoke it from the user's page.` : ""}
+                    </span>
+                  )}
                 </label>
                 <FlagToggles id={a.id} payoutHold={a.payoutHold} fraudLock={a.fraudLock} />
                 <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">

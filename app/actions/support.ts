@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { supportMessages, supportTickets } from "@/lib/db/schema"
+import { userHasPerk } from "@/lib/affiliates/perk-access"
 
 async function currentUser() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -27,7 +28,8 @@ export async function createTicket(subject: string, body: string): Promise<{ err
     const user = await currentUser()
     const [ticket] = await db
       .insert(supportTickets)
-      .values({ userId: user.id, subject: clean(subject, 140, "subject") })
+      // Answered first for an affiliate whose tier includes priority support.
+      .values({ userId: user.id, subject: clean(subject, 140, "subject"), priority: await userHasPerk(user.id, "prioritySupport") })
       .returning({ id: supportTickets.id })
     await db.insert(supportMessages).values({ ticketId: ticket.id, authorId: user.id, body: clean(body, 5000, "message") })
     ticketId = ticket.id

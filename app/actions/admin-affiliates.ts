@@ -10,6 +10,8 @@ import type { Permissions } from "@/lib/admin/access"
 import { decideApplication, validateCode, type Decision } from "@/lib/affiliates/apply"
 import { addLedgerEntry, applyHoldPeriod, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
 import { adminCreateCoupon, refreshPermanentCoupon, setCouponAccess, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
+import { TIER_STYLES, cleanPerks } from "@/lib/affiliates/engine"
+import { syncAllTierPerks, syncTierPerks } from "@/lib/affiliates/perks"
 import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
 import { adminPayoutAction, adminRemoveMethodHold, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
 import { notifyAffiliate } from "@/lib/affiliates/notify"
@@ -109,7 +111,10 @@ export async function setAffiliateTier(affiliateId: number, tierId: number | nul
     }
     await db.update(affiliates).set({ tierId: tierId == null ? null : Number(tierId), updatedAt: new Date() }).where(eq(affiliates.id, aff.id))
     await logAdminAction(admin, "affiliate.tier", aff.userId, { affiliateId: aff.id, tierId })
-    return tierId == null ? "Tier now follows paid customers." : "Tier set."
+    // A tier set by hand unlocks what that tier unlocks (a personal code, the free account).
+    const given = await syncTierPerks(aff.id).catch(() => null)
+    const extra = given?.freeAccount ? " Their free-forever account is now active." : ""
+    return tierId == null ? "Tier now follows paid customers." : `Tier set.${extra}`
   })
 }
 
@@ -145,7 +150,22 @@ export async function saveProgramSettings(input: Record<string, unknown>): Promi
   })
 }
 
-export async function saveTier(input: { id?: number | null; name: string; minCustomers: number; ratePercent: number; enabled: boolean }): Promise<ActionResult> {
+export type TierInput = {
+  id?: number | null
+  name: string
+  minCustomers: number
+  ratePercent: number
+  // "for the customer's first N months" — null = the rate applies throughout
+  introMonths?: number | null
+  // the rate after those months — null = the customer stops earning then
+  afterPercent?: number | null
+  perks?: Record<string, unknown>
+  tagline?: string | null
+  style?: string
+  enabled: boolean
+}
+
+export async function saveTier(input: TierInput): Promise<ActionResult> {
   return run(async () => {
     const admin = await assertAdmin(MANAGE)
     const name = String(input.name ?? "").trim().slice(0, 40)
@@ -154,11 +174,20 @@ export async function saveTier(input: { id?: number | null; name: string; minCus
     if (name.length < 2) throw new Error("Give the tier a name.")
     if (!Number.isFinite(minCustomers) || minCustomers < 0) throw new Error("Paid customers must be 0 or more.")
     if (!Number.isFinite(ratePercent) || ratePercent <= 0 || ratePercent > 90) throw new Error("The rate must be between 0 and 90%.")
-    const values = { name, minCustomers, ratePercent: String(ratePercent), sortOrder: minCustomers, enabled: input.enabled !== false }
+    const blank = (v: unknown) => v == null || v === ""
+    const introMonths = blank(input.introMonths) ? null : Math.round(Number(input.introMonths))
+    if (introMonths != null && (!Number.isFinite(introMonths) || introMonths < 1 || introMonths > 120)) throw new Error("The first period must be 1 to 120 months, or empty for one rate throughout.")
+    const afterPercent = blank(input.afterPercent) ? null : Number(input.afterPercent)
+    if (afterPercent != null && (!Number.isFinite(afterPercent) || afterPercent <= 0 || afterPercent > 90)) throw new Error("The rate after the first period must be between 0 and 90%, or empty.")
+    if (afterPercent != null && introMonths == null) throw new Error("A rate for afterwards needs the number of months the first rate lasts.")
+    const style = (TIER_STYLES as readonly string[]).includes(String(input.style)) ? String(input.style) : "plain"
+    const values = { name, minCustomers, ratePercent: String(ratePercent), introMonths, afterPercent: afterPercent == null ? null : String(afterPercent), perks: cleanPerks(input.perks) as Record<string, boolean>, tagline: String(input.tagline ?? "").trim().slice(0, 120) || null, style, sortOrder: minCustomers, enabled: input.enabled !== false }
     if (input.id) await db.update(affiliateTiers).set(values).where(eq(affiliateTiers.id, Number(input.id)))
     else await db.insert(affiliateTiers).values(values)
     await logAdminAction(admin, "affiliate.tier_save", null, { id: input.id ?? null, ...values })
-    return "Tier saved."
+    // Affiliates already in the tier get what it now unlocks (the daily run covers the rest).
+    await syncAllTierPerks(50).catch((e) => console.error("[affiliates] tier perks couldn't be applied:", e instanceof Error ? e.message : e))
+    return "Tier saved. It applies to payments from now on."
   })
 }
 

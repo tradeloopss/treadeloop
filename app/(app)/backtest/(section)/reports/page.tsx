@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { getAdmin } from "@/lib/admin/guard"
+import { getBetaUser } from "@/lib/beta"
 import { getBacktestDashboardData } from "@/app/actions/backtest"
 import { Card } from "@/components/ui/card"
 import { getT } from "@/lib/i18n/server"
@@ -8,7 +8,7 @@ const usd = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", c
 const pf = (n: number) => (n === Infinity ? "∞" : n.toFixed(2))
 
 export default async function BacktestReportsPage() {
-  if (!(await getAdmin())) notFound()
+  if (!(await getBetaUser())) notFound()
   const t = await getT()
   const d = await getBacktestDashboardData()
 

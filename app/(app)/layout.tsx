@@ -17,6 +17,7 @@ import { CrispChat } from "@/components/crisp-chat"
 import { seedStarterTemplates } from "@/lib/starter-templates"
 import { recordRequestTiming } from "@/lib/telemetry"
 import { AffiliateClaim } from "@/components/affiliate/tracker"
+import { userHasPerk } from "@/lib/affiliates/perk-access"
 import { ATTRIBUTION_COOKIE, attributionSecret, claimable } from "@/lib/affiliates/token"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -31,8 +32,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // they're subscribing to. The blurred layer is inert — aria-hidden and
   // pointer-events-none — so nothing behind the paywall is clickable or
   // reachable by keyboard.
-  const [plan, , live, settingsRow] = await Promise.all([
+  const [plan, hasBeta, , live, settingsRow] = await Promise.all([
     getUserPlan(session.user.id),
+    // Features still in beta are open to affiliates whose tier includes them.
+    userHasPerk(session.user.id, "beta"),
     // Starter tags/playbooks on the first visit (no-op after that).
     session.session.impersonatedBy ? Promise.resolve() : seedStarterTemplates(session.user.id),
     db
@@ -78,7 +81,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           aria-hidden={locked || undefined}
           inert={locked || undefined}
         >
-          <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} isPro={plan === "pro"} />
+          <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} isPro={plan === "pro"} hasBeta={hasBeta} />
           <main className="flex-1 overflow-y-auto">
             <AnnouncementBanners items={live} />
             {children}

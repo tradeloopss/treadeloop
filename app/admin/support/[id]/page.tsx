@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react"
 import { requireAdmin } from "@/lib/admin/guard"
 import { roleCan } from "@/lib/admin/access"
 import { getTicket } from "@/lib/admin/metrics"
-import { TicketStatus } from "@/components/ticket-status"
+import { TicketFlags, TicketStatus } from "@/components/ticket-status"
 import { TicketThread } from "@/components/ticket-thread"
 import { StaffReplyForm } from "@/components/admin/staff-reply-form"
 import { fmtDate } from "@/components/admin/ui"
@@ -24,6 +24,7 @@ export default async function AdminTicketPage({ params }: { params: Promise<{ id
       <div className="mb-1 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">{ticket.subject}</h1>
         <TicketStatus status={ticket.status} forStaff />
+        <TicketFlags priority={ticket.priority} kind={ticket.kind} />
       </div>
       <p className="mb-5 text-sm text-muted-foreground">
         From <Link href={`/admin/users/${ticket.userId}`} className="text-foreground hover:text-primary">{ticket.email ?? ticket.userId}</Link> · opened {fmtDate(ticket.createdAt)}

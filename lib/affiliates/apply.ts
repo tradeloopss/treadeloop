@@ -3,8 +3,8 @@ import { and, eq, ne } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateLinks, affiliates } from "@/lib/db/schema"
 import { applicationApproved, applicationDenied, applicationReceived } from "@/lib/emails/affiliate-emails"
-import { ensurePermanentCoupon } from "./coupons"
 import { buildTrackingUrl, codeValid, suggestCode } from "./engine"
+import { syncTierPerks } from "./perks"
 import { SITE_URL, getProgram } from "./program"
 import { notifyAffiliate, type Mail } from "./notify"
 import { AUDIENCE_SIZES, NOTIFICATION_PREFS, SOCIAL_KEYS, TRAFFIC_SOURCES } from "./types"
@@ -161,7 +161,7 @@ export async function decideApplication(affiliateId: number, decision: Decision,
   await db.update(affiliates).set({ status: "approved", rejectionReason: null, reviewedBy: adminId, approvedAt: aff.approvedAt ?? now, updatedAt: now }).where(eq(affiliates.id, affiliateId))
   await ensureDefaultLink(affiliateId)
   // Someone approved again after a rejection already has their code chosen.
-  await ensurePermanentCoupon(affiliateId).catch((e) => console.error("[affiliates] permanent coupon failed:", e instanceof Error ? e.message : e))
+  await syncTierPerks(affiliateId).catch((e) => console.error("[affiliates] tier perks couldn't be applied:", e instanceof Error ? e.message : e))
   await notifyAffiliate({ affiliateId, type: "application", title: "You're approved — welcome to the TradeLoop affiliate program", body: "Your application was approved. Finish setting up your account to get your referral link.", href: "/affiliate/onboarding", email: true, mail: approvedMail(affiliateId, now) })
   return { userId: aff.userId, status: "approved" }
 }
@@ -185,10 +185,11 @@ export async function completeOnboarding(affiliateId: number, input: { code: unk
   if (aff?.onboardedAt) throw new Error("Your account is already set up.")
   await db.update(affiliates).set({ code, onboardedAt: new Date(), updatedAt: new Date() }).where(eq(affiliates.id, affiliateId))
   await ensureDefaultLink(affiliateId)
-  // Their permanent discount code is built from the referral code they just
-  // chose. If the checkout provider can't be reached now, the daily job (or
-  // their next visit to the dashboard) creates it.
-  await ensurePermanentCoupon(affiliateId).catch((e) => console.error("[affiliates] permanent coupon failed:", e instanceof Error ? e.message : e))
+  // What their tier unlocks (someone moved into a higher tier by hand before
+  // they finished setting up). The personal code is built from the referral
+  // code they just chose; if the checkout provider can't be reached now, the
+  // daily job creates it.
+  await syncTierPerks(affiliateId).catch((e) => console.error("[affiliates] tier perks couldn't be applied:", e instanceof Error ? e.message : e))
 }
 
 export async function updateProfile(affiliateId: number, input: { firstName: unknown; lastName: unknown; country: unknown; website: unknown; socials: unknown }): Promise<void> {

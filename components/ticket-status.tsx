@@ -22,3 +22,16 @@ export async function TicketStatus({ status, forStaff }: { status: string; forSt
     </span>
   )
 }
+
+// What staff should notice about a request before its status: it jumps the
+// queue (priority support is a tier perk of the affiliate program), or it is a
+// feature request rather than a question. Renders nothing for an ordinary one.
+export function TicketFlags({ priority, kind, className }: { priority: boolean; kind: string; className?: string }) {
+  if (!priority && kind !== "feature_request") return null
+  return (
+    <span className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      {priority && <span className="shrink-0 rounded-full bg-[var(--chart-4)]/15 px-2 py-0.5 text-xs font-medium text-[var(--chart-4)]">Priority</span>}
+      {kind === "feature_request" && <span className="shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-xs font-medium text-primary">Feature request</span>}
+    </span>
+  )
+}

@@ -24,7 +24,13 @@ import {
   sameMailbox,
   settleFifo,
   shouldCountClick,
+  TIER_PERKS,
+  cleanPerks,
+  earningText,
   tierFor,
+  tierHasPerk,
+  tierRate,
+  tierRateText,
   type LedgerEntry,
   type RuleRow,
   type TierRow,
@@ -217,6 +223,127 @@ test("a suspended (or otherwise inactive) affiliate earns nothing", () => {
   }
   // nothing to pay on a zero payment (e.g. a 100% coupon)
   assert.equal(decideCommission({ program: program(), rule: r, affiliateStatus: "approved", firstPaymentAt: null, paidAt: NOW, baseAmount: 0 }).ok, false)
+})
+
+// ------------------------------------------------- tiers with a schedule and perks
+
+// The program's tiers: Bronze 1 customer / 20% per sale; Silver 11 / 30% for 9
+// months → 15% lifetime; Gold 100 / 35% for 12 months → 15%; Diamond 300 / 40%
+// for 12 months → 20%.
+const ALL = { coupon: true, beta: true, freeAccount: true, prioritySupport: true }
+const LADDER: TierRow[] = [
+  { id: 11, name: "Bronze", minCustomers: 1, ratePercent: 20, introMonths: null, afterPercent: null, perks: {}, style: "bronze", sortOrder: 1, enabled: true },
+  { id: 12, name: "Silver", minCustomers: 11, ratePercent: 30, introMonths: 9, afterPercent: 15, perks: { coupon: true }, style: "silver", sortOrder: 11, enabled: true },
+  { id: 13, name: "Gold", minCustomers: 100, ratePercent: 35, introMonths: 12, afterPercent: 15, perks: ALL, style: "gold", sortOrder: 100, enabled: true },
+  { id: 14, name: "Diamond", minCustomers: 300, ratePercent: 40, introMonths: 12, afterPercent: 20, perks: ALL, style: "diamond", sortOrder: 300, enabled: true },
+]
+const [BRONZE, SILVER, GOLD, DIAMOND] = LADDER
+
+test("the tier ladder: where an affiliate sits by paying customers", () => {
+  // a tier that asks for one customer is where everyone starts — nothing is earned before the first one
+  assert.equal(tierFor(LADDER, 0)?.name, "Bronze")
+  assert.equal(tierFor(LADDER, 1)?.name, "Bronze")
+  assert.equal(tierFor(LADDER, 10)?.name, "Bronze")
+  assert.equal(tierFor(LADDER, 11)?.name, "Silver")
+  assert.equal(tierFor(LADDER, 99)?.name, "Silver")
+  assert.equal(tierFor(LADDER, 100)?.name, "Gold")
+  assert.equal(tierFor(LADDER, 299)?.name, "Gold")
+  assert.equal(tierFor(LADDER, 300)?.name, "Diamond")
+  assert.equal(tierFor(LADDER, 5000)?.name, "Diamond")
+  // set by hand on the affiliate's page
+  assert.equal(tierFor(LADDER, 0, 13)?.name, "Gold")
+  // a first tier that asks for more than one customer is not handed out for free
+  assert.equal(tierFor([{ ...BRONZE, minCustomers: 5 }], 0), null)
+  assert.equal(tierFor([{ ...BRONZE, minCustomers: 5 }], 4), null)
+})
+
+test("a tier's schedule: its rate for a customer's first months, the after-rate from then on", () => {
+  const first = new Date("2026-01-10T00:00:00Z")
+  const at = (iso: string) => new Date(`${iso}T00:00:00Z`)
+  // Bronze: one rate, always
+  assert.deepEqual(tierRate(BRONZE, null, first), { ratePercent: 20, phase: "intro" })
+  assert.deepEqual(tierRate(BRONZE, first, at("2031-01-10")), { ratePercent: 20, phase: "intro" })
+  // Silver: 30% on the first payment and through month 9, 15% from the day month 9 ends
+  assert.deepEqual(tierRate(SILVER, null, first), { ratePercent: 30, phase: "intro" })
+  assert.deepEqual(tierRate(SILVER, first, at("2026-09-10")), { ratePercent: 30, phase: "intro" }) // the 9th monthly payment
+  assert.deepEqual(tierRate(SILVER, first, at("2026-10-09")), { ratePercent: 30, phase: "intro" })
+  assert.deepEqual(tierRate(SILVER, first, at("2026-10-10")), { ratePercent: 15, phase: "after" }) // the 10th
+  assert.deepEqual(tierRate(SILVER, first, at("2036-01-10")), { ratePercent: 15, phase: "after" }) // lifetime
+  // Gold and Diamond: 12 months, then 15% / 20%
+  assert.equal(tierRate(GOLD, first, at("2027-01-09")).ratePercent, 35)
+  assert.equal(tierRate(GOLD, first, at("2027-01-10")).ratePercent, 15)
+  assert.equal(tierRate(DIAMOND, first, at("2026-12-10")).ratePercent, 40)
+  assert.equal(tierRate(DIAMOND, first, at("2027-01-10")).ratePercent, 20)
+  // months with no after-rate: nothing once they are up
+  assert.deepEqual(tierRate({ ...SILVER, afterPercent: null }, first, at("2026-10-10")), { ratePercent: 0, phase: "after" })
+
+  assert.equal(tierRateText(BRONZE), "20%")
+  assert.equal(tierRateText(SILVER), "30% for 9 months, then 15%")
+  assert.equal(tierRateText(DIAMOND), "40% for 12 months, then 20%")
+  assert.equal(tierRateText({ ratePercent: 30, introMonths: 1, afterPercent: null }), "30% for 1 month")
+})
+
+test("the commission on a payment follows the tier the affiliate is in and how long the customer has paid", () => {
+  const first = new Date("2026-01-10T00:00:00Z")
+  const base = { program: program(), tiers: LADDER, rules: [] as RuleRow[] }
+  const pay = (customers: number, firstPaymentAt: Date | null, paidAt: Date, amount = 100) => {
+    const r = resolveRule({ ...base, customers, firstPaymentAt, now: paidAt })
+    return decideCommission({ program: base.program, rule: r, affiliateStatus: "approved", firstPaymentAt, paidAt, baseAmount: amount })
+  }
+  const amount = (d: ReturnType<typeof pay>) => (d.ok ? [d.amount, d.ratePercent, d.source] : d.reason)
+  // Bronze: 20% of every payment, years in
+  assert.deepEqual(amount(pay(1, null, first)), [20, 20, "tier"])
+  assert.deepEqual(amount(pay(5, first, new Date("2029-06-10T00:00:00Z"))), [20, 20, "tier"])
+  // Silver: 30% for the customer's first 9 months, 15% for life after
+  assert.deepEqual(amount(pay(11, null, first)), [30, 30, "tier"])
+  assert.deepEqual(amount(pay(40, first, new Date("2026-09-10T00:00:00Z"))), [30, 30, "tier"])
+  assert.deepEqual(amount(pay(40, first, new Date("2026-10-10T00:00:00Z"))), [15, 15, "tier"])
+  assert.deepEqual(amount(pay(40, first, new Date("2035-10-10T00:00:00Z"))), [15, 15, "tier"])
+  // Gold and Diamond
+  assert.deepEqual(amount(pay(100, first, new Date("2026-12-10T00:00:00Z"))), [35, 35, "tier"])
+  assert.deepEqual(amount(pay(100, first, new Date("2027-02-10T00:00:00Z"))), [15, 15, "tier"])
+  assert.deepEqual(amount(pay(300, first, new Date("2026-12-10T00:00:00Z"))), [40, 40, "tier"])
+  assert.deepEqual(amount(pay(300, first, new Date("2027-02-10T00:00:00Z"))), [20, 20, "tier"])
+  // a tier's lifetime after-rate outlasts a program-wide earning window; a tier without a schedule follows it
+  const windowed = { ...base, program: program({ durationMonths: 6 }) }
+  assert.equal(resolveRule({ ...windowed, customers: 40, firstPaymentAt: first, now: NOW }).durationMonths, null)
+  assert.equal(resolveRule({ ...windowed, customers: 3, firstPaymentAt: first, now: NOW }).durationMonths, 6)
+  // months with no after-rate: the customer stops earning when they are up
+  const noAfter = { ...base, tiers: [{ ...SILVER, minCustomers: 1, afterPercent: null }] }
+  const late = new Date("2026-10-10T00:00:00Z")
+  const ended = resolveRule({ ...noAfter, customers: 1, firstPaymentAt: first, now: late })
+  assert.equal(ended.durationMonths, 9)
+  assert.equal(decideCommission({ program: base.program, rule: ended, affiliateStatus: "approved", firstPaymentAt: first, paidAt: late, baseAmount: 100 }).ok, false)
+  // a custom rule on the affiliate still outranks the tier, schedule and all
+  const custom = resolveRule({ ...base, rules: [rule({ ratePercent: 100 })], customers: 40, firstPaymentAt: first, now: new Date("2030-01-10T00:00:00Z") })
+  assert.deepEqual([custom.ratePercent, custom.source], [100, "affiliate"])
+  // one-time programs still pay the first payment only
+  const once = program({ commissionType: "one_time" })
+  assert.equal(decideCommission({ program: once, rule: resolveRule({ ...base, program: once, customers: 40, firstPaymentAt: first, now: NOW }), affiliateStatus: "approved", firstPaymentAt: first, paidAt: NOW, baseAmount: 100 }).ok, false)
+})
+
+test("what a rule pays, in words", () => {
+  const base = { program: program(), tiers: LADDER, rules: [] as RuleRow[], now: NOW }
+  assert.equal(earningText(resolveRule({ ...base, customers: 0 }), program()), "20% of every payment your referrals make")
+  assert.equal(earningText(resolveRule({ ...base, customers: 11 }), program()), "30% of every payment in a customer's first 9 months, then 15% for as long as they stay subscribed")
+  assert.equal(earningText(resolveRule({ ...base, customers: 300 }), program()), "40% of every payment in a customer's first 12 months, then 20% for as long as they stay subscribed")
+  assert.equal(earningText(resolveRule({ ...base, customers: 11, rules: [rule({ ratePercent: 50, durationMonths: 6 })] }), program()), "50% of every payment for 6 months per customer")
+  assert.equal(earningText(resolveRule({ ...base, customers: 11 }), program({ commissionType: "one_time" })), "30% of each referral's first payment")
+})
+
+test("tier perks: only the known ones, only when switched on", () => {
+  assert.deepEqual(cleanPerks({ coupon: true, beta: "yes", freeAccount: 1, prioritySupport: false, admin: true }), { coupon: true })
+  assert.deepEqual(cleanPerks(null), {})
+  assert.deepEqual(cleanPerks("coupon"), {})
+  assert.deepEqual(TIER_PERKS.map((k) => [tierHasPerk(BRONZE, k), tierHasPerk(SILVER, k), tierHasPerk(GOLD, k), tierHasPerk(DIAMOND, k)]), [
+    [false, true, true, true], // coupon
+    [false, false, true, true], // beta
+    [false, false, true, true], // freeAccount
+    [false, false, true, true], // prioritySupport
+  ])
+  assert.equal(tierHasPerk(null, "beta"), false)
+  // a tier from before perks existed has none
+  assert.equal(tierHasPerk(TIERS[3], "freeAccount"), false)
 })
 
 // ------------------------------------------------------------------- ledger

@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { deleteRule, deleteTier, saveProgramSettings, saveRule, saveTier, setRuleEnabled } from "@/app/actions/admin-affiliates"
+import { TIER_PERKS, TIER_STYLES, tierRateText, type TierPerk, type TierPerks, type TierStyle } from "@/lib/affiliates/engine"
 import type { ProgramSettings } from "@/lib/affiliates/types"
 import { ConfirmButton } from "@/components/affiliate/confirm"
 import { Empty, StatusBadge, TableShell, THead, fmtDay, selectClass, tdClass, thClass } from "@/components/affiliate/ui"
@@ -132,77 +133,146 @@ export function ProgramForm({ program, canManage }: { program: ProgramSettings; 
 
 // --- Tiers ------------------------------------------------------------------------
 
-export type TierView = { id: number; name: string; minCustomers: number; ratePercent: number; enabled: boolean; affiliates: number }
+export type TierView = { id: number; name: string; minCustomers: number; ratePercent: number; introMonths?: number | null; afterPercent?: number | null; perks?: TierPerks; tagline?: string | null; style?: TierStyle; enabled: boolean; affiliates: number }
 
-function TierRow({ tier, canManage }: { tier: TierView | null; canManage: boolean }) {
-  const [form, setForm] = useState({ name: tier?.name ?? "", minCustomers: String(tier?.minCustomers ?? ""), ratePercent: String(tier?.ratePercent ?? ""), enabled: tier?.enabled ?? true })
+const PERK_NAMES: Record<TierPerk, [string, string]> = {
+  coupon: ["Personal coupon code", "Their own discount code, created when they reach the tier."],
+  beta: ["Beta feature access", "Features that aren't released to everyone yet."],
+  freeAccount: ["Free-forever account", "A Pro plan with no end date, granted once."],
+  prioritySupport: ["Priority support", "Their tickets and feature requests are answered first."],
+}
+
+function TierEditor({ tier, canManage }: { tier: TierView | null; canManage: boolean }) {
+  const blank = { name: "", minCustomers: "", ratePercent: "", introMonths: "", afterPercent: "", tagline: "", style: "plain" as TierStyle, perks: {} as TierPerks, enabled: true }
+  const [form, setForm] = useState(tier ? { name: tier.name, minCustomers: String(tier.minCustomers), ratePercent: String(tier.ratePercent), introMonths: tier.introMonths == null ? "" : String(tier.introMonths), afterPercent: tier.afterPercent == null ? "" : String(tier.afterPercent), tagline: tier.tagline ?? "", style: tier.style ?? "plain", perks: tier.perks ?? {}, enabled: tier.enabled } : blank)
   const { pending, run } = useAction()
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
+  const scheduled = form.introMonths !== ""
+  // What the tier will pay, in words, as it is typed.
+  const pays = form.ratePercent === "" ? "" : tierRateText({ ratePercent: Number(form.ratePercent), introMonths: scheduled ? Number(form.introMonths) : null, afterPercent: form.afterPercent === "" ? null : Number(form.afterPercent) })
+
   return (
-    <tr>
-      <td className={tdClass}>
-        <Input aria-label="Tier name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} maxLength={40} placeholder="New tier name" disabled={!canManage} />
-      </td>
-      <td className={tdClass}>
-        <Input aria-label="Paying customers needed" type="number" min={0} step={1} value={form.minCustomers} onChange={(e) => setForm((f) => ({ ...f, minCustomers: e.target.value }))} className="w-28" disabled={!canManage} />
-      </td>
-      <td className={tdClass}>
-        <Input aria-label="Commission rate (%)" type="number" min={0.5} max={90} step="0.5" value={form.ratePercent} onChange={(e) => setForm((f) => ({ ...f, ratePercent: e.target.value }))} className="w-24" disabled={!canManage} />
-      </td>
-      <td className={tdClass}>
-        <input aria-label="Enabled" type="checkbox" role="switch" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} className="size-4 accent-[var(--primary)]" disabled={!canManage} />
-      </td>
-      <td className={`${tdClass} tabular-nums text-muted-foreground`}>{tier ? tier.affiliates : "—"}</td>
-      <td className={tdClass}>
-        {canManage && (
-          <div className="flex justify-end gap-1.5">
-            <Button
-              variant={tier ? "outline" : "default"}
-              size="sm"
-              disabled={pending || !form.name.trim() || form.minCustomers === "" || form.ratePercent === ""}
-              onClick={() =>
-                run(
-                  () => saveTier({ id: tier?.id ?? null, name: form.name, minCustomers: Number(form.minCustomers), ratePercent: Number(form.ratePercent), enabled: form.enabled }),
-                  () => {
-                    if (!tier) setForm({ name: "", minCustomers: "", ratePercent: "", enabled: true })
-                  }
-                )
-              }
-            >
-              {tier ? "Save" : "Add tier"}
-            </Button>
-            {tier && (
-              <ConfirmButton variant="ghost" destructive title={`Delete the ${tier.name} tier?`} description="Affiliates in it fall back to whichever remaining tier they qualify for (or the default rate). Commissions already recorded don't change." confirmLabel="Delete" action={() => deleteTier(tier.id)}>
-                <Trash2 className="size-3.5" aria-hidden />
-                <span className="sr-only">Delete</span>
-              </ConfirmButton>
-            )}
+    <li className="rounded-xl border bg-card p-4">
+      <fieldset disabled={!canManage || pending} className="grid gap-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <label className={`${label} lg:col-span-2`}>
+            Tier name
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} maxLength={40} placeholder="New tier name" />
+          </label>
+          <label className={label}>
+            Paying customers needed
+            <Input type="number" min={0} step={1} value={form.minCustomers} onChange={(e) => set("minCustomers", e.target.value)} />
+          </label>
+          <label className={label}>
+            Commission (%)
+            <Input type="number" min={0.5} max={90} step="0.5" value={form.ratePercent} onChange={(e) => set("ratePercent", e.target.value)} />
+          </label>
+          <label className={label}>
+            For the first (months)
+            <Input type="number" min={1} max={120} step={1} value={form.introMonths} onChange={(e) => set("introMonths", e.target.value)} placeholder="Always" />
+          </label>
+          <label className={label}>
+            Then (%)
+            <Input type="number" min={0.5} max={90} step="0.5" value={form.afterPercent} onChange={(e) => set("afterPercent", e.target.value)} placeholder={scheduled ? "Stops" : "—"} disabled={!scheduled} />
+          </label>
+        </div>
+        <p className="-mt-2 text-xs text-muted-foreground">
+          {pays ? (
+            <>
+              Pays <span className="font-medium text-foreground">{pays}</span>
+              {scheduled ? (form.afterPercent === "" ? " — counted from each customer's first payment; after that the customer stops earning." : " for as long as the customer stays subscribed — counted from each customer's first payment.") : " on every payment that earns a commission."}
+            </>
+          ) : (
+            "Leave the months empty for one rate throughout."
+          )}
+        </p>
+
+        <div>
+          <p className="text-xs text-muted-foreground">What reaching it unlocks</p>
+          <div className="mt-1.5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {TIER_PERKS.map((k) => (
+              <label key={k} className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2">
+                <input type="checkbox" checked={form.perks[k] === true} onChange={(e) => set("perks", { ...form.perks, [k]: e.target.checked })} className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" />
+                <span>
+                  <span className="block text-sm font-medium text-foreground">{PERK_NAMES[k][0]}</span>
+                  <span className="block text-xs text-muted-foreground">{PERK_NAMES[k][1]}</span>
+                </span>
+              </label>
+            ))}
           </div>
-        )}
-      </td>
-    </tr>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <label className={`${label} lg:col-span-3`}>
+            Line on the card (optional)
+            <Input value={form.tagline} onChange={(e) => set("tagline", e.target.value)} maxLength={120} placeholder="e.g. Start your journey. Earn from your first referral!" />
+          </label>
+          <label className={label}>
+            Card style
+            <select value={form.style} onChange={(e) => set("style", e.target.value as TierStyle)} className={selectClass}>
+              {TIER_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {s[0].toUpperCase() + s.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm">
+            <input type="checkbox" role="switch" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} className="size-4 accent-[var(--primary)]" />
+            Enabled
+          </label>
+          <p className="self-end pb-2 text-xs text-muted-foreground lg:text-end">{tier ? `${tier.affiliates} affiliate${tier.affiliates === 1 ? "" : "s"} in it` : "New tier"}</p>
+        </div>
+      </fieldset>
+
+      {canManage && (
+        <div className="mt-4 flex justify-end gap-1.5 border-t pt-3">
+          {tier && (
+            <ConfirmButton variant="ghost" destructive title={`Delete the ${tier.name} tier?`} description="Affiliates in it fall back to whichever remaining tier they qualify for (or the default rate). Commissions already recorded don't change, and nothing a tier already unlocked is taken back." confirmLabel="Delete" action={() => deleteTier(tier.id)}>
+              <Trash2 className="size-3.5" aria-hidden /> Delete
+            </ConfirmButton>
+          )}
+          <Button
+            variant={tier ? "outline" : "default"}
+            size="sm"
+            disabled={pending || !form.name.trim() || form.minCustomers === "" || form.ratePercent === ""}
+            onClick={() =>
+              run(
+                () =>
+                  saveTier({
+                    id: tier?.id ?? null,
+                    name: form.name,
+                    minCustomers: Number(form.minCustomers),
+                    ratePercent: Number(form.ratePercent),
+                    introMonths: form.introMonths === "" ? null : Number(form.introMonths),
+                    afterPercent: !scheduled || form.afterPercent === "" ? null : Number(form.afterPercent),
+                    perks: form.perks,
+                    tagline: form.tagline,
+                    style: form.style,
+                    enabled: form.enabled,
+                  }),
+                () => {
+                  if (!tier) setForm(blank)
+                }
+              )
+            }
+          >
+            {tier ? "Save" : "Add tier"}
+          </Button>
+        </div>
+      )}
+    </li>
   )
 }
 
 export function TiersEditor({ tiers, canManage }: { tiers: TierView[]; canManage: boolean }) {
   return (
-    <TableShell>
-      <THead>
-        <tr>
-          <th className={thClass}>Tier</th>
-          <th className={thClass}>Paying customers</th>
-          <th className={thClass}>Rate (%)</th>
-          <th className={thClass}>Enabled</th>
-          <th className={thClass}>Affiliates</th>
-          <th className={`${thClass} text-end`}>Actions</th>
-        </tr>
-      </THead>
-      <tbody className="divide-y">
-        {tiers.map((t) => (
-          <TierRow key={t.id} tier={t} canManage={canManage} />
-        ))}
-        {canManage && <TierRow key="new" tier={null} canManage />}
-      </tbody>
-    </TableShell>
+    <ul className="grid gap-3">
+      {tiers.map((t) => (
+        <TierEditor key={t.id} tier={t} canManage={canManage} />
+      ))}
+      {canManage && <TierEditor key="new" tier={null} canManage />}
+    </ul>
   )
 }
 

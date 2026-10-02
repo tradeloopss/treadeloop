@@ -9,7 +9,7 @@ import { getWhopClient } from "@/lib/whop"
 import { money as whopMoney, whopAccountId } from "@/lib/admin/whop"
 import { runAutoPayouts } from "./auto-payouts"
 import { handleAffiliateRefund, releaseHolds } from "./commissions"
-import { ensurePermanentCoupons } from "./coupons"
+import { syncAllTierPerks } from "./perks"
 import { pruneUnfinishedMethods, sendQueuedAutomatic, trackPayouts } from "./payouts"
 import { evaluateAffiliate } from "./fraud"
 import { prefEnabled } from "./notify"
@@ -121,7 +121,7 @@ export async function runDailyJob(now = new Date()) {
   await step("sending", () => sendQueuedAutomatic())
   await step("emails", () => retryDueEmails())
   await step("methods", () => pruneUnfinishedMethods())
-  await step("permanentCoupons", () => ensurePermanentCoupons())
+  await step("tierPerks", () => syncAllTierPerks())
   await step("risk", () => evaluateActive())
   await step("reports", () => sendMonthlyReports(now))
   await step("prune", () => pruneClicks())

@@ -527,20 +527,20 @@ export async function listTickets(status: string | undefined) {
     params.push(status)
     where = `where t.status = $1`
   }
-  return q<{ id: number; subject: string; status: string; lastMessageAt: Date; createdAt: Date; userId: string; email: string | null; name: string | null; messages: string; lastFromStaff: boolean | null }>(
-    `select t.id, t.subject, t.status, t."lastMessageAt", t."createdAt", t."userId", u.email, u.name,
+  return q<{ id: number; subject: string; status: string; priority: boolean; kind: string; lastMessageAt: Date; createdAt: Date; userId: string; email: string | null; name: string | null; messages: string; lastFromStaff: boolean | null }>(
+    `select t.id, t.subject, t.status, t.priority, t.kind, t."lastMessageAt", t."createdAt", t."userId", u.email, u.name,
        (select count(*) from support_messages m where m."ticketId" = t.id) as messages,
        (select m."fromStaff" from support_messages m where m."ticketId" = t.id order by m."createdAt" desc limit 1) as "lastFromStaff"
      from support_tickets t left join "user" u on u.id = t."userId"
      ${where}
-     order by (t.status = 'open') desc, t."lastMessageAt" desc limit 200`,
+     order by (t.status = 'open') desc, t.priority desc, t."lastMessageAt" desc limit 200`,
     params
   )
 }
 
 export async function getTicket(id: number) {
-  const [ticket] = await q<{ id: number; subject: string; status: string; createdAt: Date; userId: string; email: string | null; name: string | null }>(
-    `select t.id, t.subject, t.status, t."createdAt", t."userId", u.email, u.name from support_tickets t left join "user" u on u.id = t."userId" where t.id = $1`,
+  const [ticket] = await q<{ id: number; subject: string; status: string; priority: boolean; kind: string; createdAt: Date; userId: string; email: string | null; name: string | null }>(
+    `select t.id, t.subject, t.status, t.priority, t.kind, t."createdAt", t."userId", u.email, u.name from support_tickets t left join "user" u on u.id = t."userId" where t.id = $1`,
     [id]
   )
   if (!ticket) return null

@@ -688,6 +688,10 @@ export const supportTickets = pgTable("support_tickets", {
   userId: text("userId").notNull(),
   subject: text("subject").notNull(),
   status: text("status").notNull().default("open"), // open (needs staff) | waiting (on the user) | closed
+  // Answered first: set when the ticket is opened by someone whose affiliate
+  // tier includes priority support (lib/affiliates/perks).
+  priority: boolean("priority").notNull().default(false),
+  kind: text("kind").notNull().default("support"), // support | feature_request
   lastMessageAt: timestamp("lastMessageAt").notNull().defaultNow(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
@@ -1503,6 +1507,9 @@ export const affiliates = pgTable(
     // everyone until an admin opens it for this affiliate.
     couponsEnabled: boolean("couponsEnabled").notNull().default(false),
     maxCouponPercent: integer("maxCouponPercent"), // admin: the largest discount they may offer; null = the program's
+    // When the tier perk "a free TradeLoop account, for good" was given. Given
+    // once: an admin who later revokes that access isn't overruled by the next run.
+    freeAccountAt: timestamp("freeAccountAt"),
     notifications: jsonb("notifications").$type<Record<string, boolean>>(),
     rejectionReason: text("rejectionReason"),
     reviewedBy: text("reviewedBy"),
@@ -1520,6 +1527,15 @@ export const affiliateTiers = pgTable("affiliate_tiers", {
   name: text("name").notNull(),
   minCustomers: integer("minCustomers").notNull().default(0),
   ratePercent: numeric("ratePercent").notNull(),
+  // "30% for 9 months → 15% lifetime": ratePercent for each customer's first
+  // introMonths, afterPercent on their payments from then on. Both null = one
+  // rate throughout (lib/affiliates/engine.tierRate).
+  introMonths: integer("introMonths"),
+  afterPercent: numeric("afterPercent"),
+  // What reaching the tier unlocks: { coupon, beta, freeAccount, prioritySupport }.
+  perks: jsonb("perks").$type<Record<string, boolean>>().notNull().default({}),
+  tagline: text("tagline"),
+  style: text("style").notNull().default("plain"), // plain | bronze | silver | gold | diamond
   sortOrder: integer("sortOrder").notNull().default(0),
   enabled: boolean("enabled").notNull().default(true),
   createdAt: timestamp("createdAt").notNull().defaultNow(),

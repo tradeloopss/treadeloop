@@ -7,16 +7,16 @@ import { revalidatePath } from "next/cache"
 import { computePnl, computeRMultiple, contractMultiplierForSymbol } from "@/lib/calc"
 import { instrumentMarket, timeframeSeconds } from "@/lib/market-data"
 import { regenerateJournalForDay } from "@/app/actions/trades"
-import { getAdmin } from "@/lib/admin/guard"
+import { getBetaUser } from "@/lib/beta"
 import { computeBacktestDashboard, type BacktestDashboard } from "@/lib/backtest/dashboard-stats"
 
-// Backtesting is admin-only while it's still in progress, so every action here
-// requires an admin — a non-admin who calls one directly is refused, not just
-// hidden from the nav.
+// Backtesting is in beta: open to the team and to anyone with beta access
+// (lib/beta.ts). Every action here checks that — someone without it who calls
+// one directly is refused, not just hidden from the nav.
 async function getUserId() {
-  const admin = await getAdmin()
-  if (!admin) throw new Error("Backtesting isn't available on your account yet.")
-  return admin.id
+  const who = await getBetaUser()
+  if (!who) throw new Error("Backtesting isn't available on your account yet.")
+  return who.id
 }
 
 export type BacktestSession = typeof backtestSessions.$inferSelect

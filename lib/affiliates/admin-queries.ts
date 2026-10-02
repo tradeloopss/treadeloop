@@ -17,7 +17,7 @@ import {
   user,
 } from "@/lib/db/schema"
 import { ledgerBalances, round2, tierFor, type Balances } from "./engine"
-import { getProgram, loadTiers } from "./program"
+import { getProgram, loadTiers, tierRow } from "./program"
 import { PAYOUT_GROUPS, PAYOUT_IN_FLIGHT, type PayoutGroup } from "./payout-engine"
 import { EARNED, PAGE_SIZE, ledgerWhere, performance, type LedgerFilters } from "./queries"
 import { rangeStart, type Range } from "./types"
@@ -323,7 +323,7 @@ export async function tiersWithCounts() {
     db.select({ id: affiliates.id, tierId: affiliates.tierId }).from(affiliates).where(eq(affiliates.status, "approved")),
     db.select({ id: affiliateReferrals.affiliateId, v: sql<number>`count(${affiliateReferrals.firstPaymentAt})::int` }).from(affiliateReferrals).groupBy(affiliateReferrals.affiliateId),
   ])
-  const list = tiers.map((t) => ({ id: t.id, name: t.name, minCustomers: t.minCustomers, ratePercent: n(t.ratePercent), sortOrder: t.sortOrder, enabled: t.enabled }))
+  const list = tiers.map(tierRow)
   const counts = new Map<number, number>()
   for (const a of rows) {
     const tier = tierFor(list, customers.find((c) => c.id === a.id)?.v ?? 0, a.tierId)

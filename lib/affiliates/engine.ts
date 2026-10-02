@@ -9,7 +9,43 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
 
 // ------------------------------------------------------------ rule engine
 
-export type TierRow = { id: number; name: string; minCustomers: number; ratePercent: number; sortOrder: number; enabled: boolean }
+// What reaching a tier can unlock, besides its rate.
+//   coupon           a personal discount code for the affiliate's audience
+//   beta             features that aren't released to everyone yet
+//   freeAccount      a TradeLoop account that stays free, for good
+//   prioritySupport  their support tickets and feature requests go to the front
+export const TIER_PERKS = ["coupon", "beta", "freeAccount", "prioritySupport"] as const
+export type TierPerk = (typeof TIER_PERKS)[number]
+export type TierPerks = Partial<Record<TierPerk, boolean>>
+export const TIER_STYLES = ["plain", "bronze", "silver", "gold", "diamond"] as const
+export type TierStyle = (typeof TIER_STYLES)[number]
+
+// `ratePercent` is what the tier pays. With `introMonths` set it pays that for
+// each customer's first N months, and `afterPercent` on their payments from
+// then on ("30% for 9 months → 15% lifetime"); without an `afterPercent` the
+// customer stops earning once the N months are up.
+export type TierRow = {
+  id: number
+  name: string
+  minCustomers: number
+  ratePercent: number
+  sortOrder: number
+  enabled: boolean
+  introMonths?: number | null
+  afterPercent?: number | null
+  perks?: TierPerks
+  tagline?: string | null
+  style?: TierStyle
+}
+
+export const cleanPerks = (raw: unknown): TierPerks => {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>
+  const out: TierPerks = {}
+  for (const k of TIER_PERKS) if (r[k] === true) out[k] = true
+  return out
+}
+
+export const tierHasPerk = (tier: TierRow | null | undefined, perk: TierPerk) => tier?.perks?.[perk] === true
 export type RuleRow = {
   id: number
   scope: "affiliate" | "campaign" | "coupon"
@@ -26,15 +62,34 @@ export type ResolvedRule = { ratePercent: number; source: RuleSource; durationMo
 
 // The tier an affiliate sits in: a manual override if one is set (and still
 // enabled), otherwise the highest enabled tier whose threshold they've reached.
+// Measured against at least one customer: nothing is earned before the first
+// one, so a tier that asks for a single customer is where everyone starts.
 export function tierFor(tiers: TierRow[], customers: number, overrideId?: number | null): TierRow | null {
   const enabled = tiers.filter((t) => t.enabled)
   if (overrideId != null) {
     const forced = enabled.find((t) => t.id === overrideId)
     if (forced) return forced
   }
+  const reached = Math.max(customers, 1)
   let best: TierRow | null = null
-  for (const t of enabled) if (customers >= t.minCustomers && (!best || t.minCustomers > best.minCustomers)) best = t
+  for (const t of enabled) if (reached >= t.minCustomers && (!best || t.minCustomers > best.minCustomers)) best = t
   return best
+}
+
+// What a tier pays on one payment: its rate while the customer is inside the
+// tier's first months (or always, when it has none), its after-rate from then
+// on. `firstPaymentAt` null = this is the customer's first payment.
+export function tierRate(tier: TierRow, firstPaymentAt: Date | null | undefined, paidAt: Date): { ratePercent: number; phase: "intro" | "after" } {
+  const months = tier.introMonths
+  if (months == null || !firstPaymentAt || monthsBetween(firstPaymentAt, paidAt) < months) return { ratePercent: tier.ratePercent, phase: "intro" }
+  return { ratePercent: tier.afterPercent != null && tier.afterPercent > 0 ? tier.afterPercent : 0, phase: "after" }
+}
+
+// "20%", or "30% for 9 months, then 15%".
+export function tierRateText(tier: Pick<TierRow, "ratePercent" | "introMonths" | "afterPercent">): string {
+  if (tier.introMonths == null) return `${tier.ratePercent}%`
+  const first = `${tier.ratePercent}% for ${tier.introMonths} month${tier.introMonths === 1 ? "" : "s"}`
+  return tier.afterPercent != null && tier.afterPercent > 0 ? `${first}, then ${tier.afterPercent}%` : first
 }
 
 const ruleLive = (r: RuleRow, now: Date) => r.enabled && (!r.startsAt || r.startsAt <= now) && (!r.endsAt || r.endsAt > now)
@@ -46,7 +101,11 @@ const ruleLive = (r: RuleRow, now: Date) => r.enabled && (!r.startsAt || r.start
 //   4. the affiliate's tier
 //   5. the program default
 // Within a level the newest rule wins. A rule's own duration overrides the
-// program's; otherwise the program duration applies.
+// program's; otherwise the program duration applies. A tier with its own
+// schedule ("30% for 9 months → 15% lifetime") decides both the rate, from how
+// long the customer has been paying, and how long they keep earning.
+// `firstPaymentAt` is the customer's first payment (omit it for "what a new
+// sale would earn"); `now` is when the payment was made.
 export function resolveRule(input: {
   program: ProgramSettings
   tiers: TierRow[]
@@ -55,6 +114,7 @@ export function resolveRule(input: {
   tierOverrideId?: number | null
   campaignId?: number | null
   couponId?: number | null
+  firstPaymentAt?: Date | null
   now: Date
 }): ResolvedRule {
   const live = input.rules.filter((r) => ruleLive(r, input.now)).sort((a, b) => b.id - a.id)
@@ -72,8 +132,26 @@ export function resolveRule(input: {
     if (byCoupon) return byCoupon
   }
   const tier = tierFor(input.tiers, input.customers, input.tierOverrideId)
-  if (tier) return { ratePercent: tier.ratePercent, source: "tier", durationMonths: input.program.durationMonths, ruleId: null, tier }
+  if (tier) {
+    if (tier.introMonths == null) return { ratePercent: tier.ratePercent, source: "tier", durationMonths: input.program.durationMonths, ruleId: null, tier }
+    const lifetime = tier.afterPercent != null && tier.afterPercent > 0
+    // With an after-rate the customer earns for life; without one, for the tier's months.
+    return { ratePercent: tierRate(tier, input.firstPaymentAt, input.now).ratePercent, source: "tier", durationMonths: lifetime ? null : tier.introMonths, ruleId: null, tier }
+  }
   return { ratePercent: input.program.defaultRate, source: "default", durationMonths: input.program.durationMonths, ruleId: null, tier: null }
+}
+
+// What a rule pays, as a sentence fragment: "20% of every payment your
+// referrals make", "30% of every payment in a customer's first 9 months, then
+// 15% for as long as they stay subscribed".
+export function earningText(rule: Pick<ResolvedRule, "ratePercent" | "durationMonths" | "source" | "tier">, program: Pick<ProgramSettings, "commissionType">): string {
+  if (program.commissionType !== "recurring") return `${rule.ratePercent}% of each referral's first payment`
+  const t = rule.source === "tier" ? rule.tier : null
+  if (t && t.introMonths != null) {
+    const first = `${t.ratePercent}% of every payment in a customer's first ${t.introMonths} month${t.introMonths === 1 ? "" : "s"}`
+    return t.afterPercent != null && t.afterPercent > 0 ? `${first}, then ${t.afterPercent}% for as long as they stay subscribed` : first
+  }
+  return rule.durationMonths ? `${rule.ratePercent}% of every payment for ${rule.durationMonths} months per customer` : `${rule.ratePercent}% of every payment your referrals make`
 }
 
 export function monthsBetween(from: Date, to: Date): number {
