@@ -11,7 +11,7 @@ import { decideApplication, validateCode, type Decision } from "@/lib/affiliates
 import { addLedgerEntry, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
 import { adminCreateCoupon, refreshPermanentCoupon, setCouponAccess, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
 import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
-import { adminPayoutAction, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
+import { adminPayoutAction, adminRemoveMethodHold, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
 import { notifyAffiliate } from "@/lib/affiliates/notify"
 import { getPayoutSettings, getProgram, saveProgram, savePayoutSettings } from "@/lib/affiliates/program"
 import { exchangeReady, hotWalletReady, isAutoSender } from "@/lib/affiliates/providers"
@@ -400,6 +400,18 @@ export async function setPayoutMethodStatus(methodId: number, status: "active" |
     const aff = await target(affiliateId)
     await logAdminAction(admin, "affiliate.payout_method", aff.userId, { methodId, status, reason: reason || undefined })
     return status === "active" ? "Payout method restored." : status === "rejected" ? "Payout method rejected." : "Marked as needing verification."
+  })
+}
+
+// Lifts the security hold on one payout method (a wallet or account added to
+// an affiliate that already had one, or one too new for automatic sending).
+export async function removePayoutMethodHold(methodId: number, reason = ""): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const { affiliateId, label } = await adminRemoveMethodHold(Number(methodId), adminActor(admin), String(reason ?? ""))
+    const aff = await target(affiliateId)
+    await logAdminAction(admin, "affiliate.payout_method_hold", aff.userId, { methodId, method: label, reason: reason || undefined })
+    return "Security hold removed. The method can be paid to now."
   })
 }
 

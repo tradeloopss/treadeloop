@@ -230,6 +230,30 @@ export async function adminSetMethodStatus(methodId: number, status: "active" | 
   return { affiliateId: m.affiliateId }
 }
 
+// Admin: lift the security hold on a payout method. It can be paid to
+// straight away, and — an admin having vouched for it — it no longer has to
+// wait out the "on file long enough" rule for automatic sending either.
+// Recorded in the audit trail, and the affiliate is told.
+export async function adminRemoveMethodHold(methodId: number, actor: Actor, reason = ""): Promise<{ affiliateId: number; label: string }> {
+  const [m] = await db.select().from(affiliatePayoutMethods).where(eq(affiliatePayoutMethods.id, methodId))
+  if (!m || m.status === "removed") throw new Error("That payout method no longer exists.")
+  const now = new Date()
+  await db.transaction(async (tx) => {
+    await tx.update(affiliatePayoutMethods).set({ holdUntil: null, holdWaivedAt: now, updatedAt: now }).where(eq(affiliatePayoutMethods.id, m.id))
+    await logEvent(tx, { affiliateId: m.affiliateId, methodId: m.id, actor, action: "method.hold_removed", previous: { holdUntil: m.holdUntil?.toISOString() ?? null }, next: { holdUntil: null }, reason })
+  })
+  await notifyAffiliate({
+    affiliateId: m.affiliateId,
+    type: "payout_method",
+    title: "The security hold on your payout method was lifted",
+    body: `${methodLabel(m.type)} (${m.label}) can be paid to now.\n\nIf you did not add this payout method, contact TradeLoop support immediately.`,
+    href: "/affiliate/payouts",
+    email: true,
+    sender: "payments",
+  })
+  return { affiliateId: m.affiliateId, label: `${methodLabel(m.type)} (${m.label})` }
+}
+
 function readDetails(m: Pick<Method, "details">): Record<string, string> | null {
   try {
     return JSON.parse(decrypt(m.details)) as Record<string, string>
@@ -373,7 +397,7 @@ export async function createPayout(input: CreateInput): Promise<CreateResult> {
           .from(affiliateFraudSignals)
           .where(and(eq(affiliateFraudSignals.affiliateId, aff.id), inArray(affiliateFraudSignals.risk, ["medium", "high"]), inArray(affiliateFraudSignals.status, ["open", "reviewing"]))),
       ])
-      hot = autoSendProblem({ settings, walletReady: sender != null, amount: quote.net, sentToday: Number(sent?.v ?? 0), methodAgeHours: (now.getTime() - method.createdAt.getTime()) / 3_600_000, openRiskSignals: signals?.n ?? 0, affiliate: stateOf(aff) }) === null
+      hot = autoSendProblem({ settings, walletReady: sender != null, amount: quote.net, sentToday: Number(sent?.v ?? 0), methodAgeHours: method.holdWaivedAt ? Number.POSITIVE_INFINITY : (now.getTime() - method.createdAt.getTime()) / 3_600_000, openRiskSignals: signals?.n ?? 0, affiliate: stateOf(aff) }) === null
     }
     const provider = hot && sender ? providerByName(sender) : providerFor(method.type)
     // A payout only the exchange can send has no "queued for a person to send":

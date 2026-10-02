@@ -88,6 +88,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "affiliate.auto_payout_disable": "Disabled automatic payouts for an affiliate",
   "affiliate.payout_controls": "Changed an affiliate's payout controls",
   "affiliate.payout_method": "Changed a payout method's status",
+  "affiliate.payout_method_hold": "Removed the security hold on a payout method",
   "affiliate.payout_reveal": "Viewed payout account details",
   "affiliate.signal": "Resolved a risk signal",
   "affiliate.coupon_disable": "Disabled an affiliate coupon",

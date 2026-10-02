@@ -152,7 +152,7 @@ export async function affiliateDetail(id: number) {
       .limit(40),
     db.select().from(affiliatePayouts).where(eq(affiliatePayouts.affiliateId, id)).orderBy(desc(affiliatePayouts.requestedAt)).limit(20),
     db
-      .select({ id: affiliatePayoutMethods.id, type: affiliatePayoutMethods.type, label: affiliatePayoutMethods.label, nickname: affiliatePayoutMethods.nickname, metadata: affiliatePayoutMethods.metadata, isDefault: affiliatePayoutMethods.isDefault, status: affiliatePayoutMethods.status, holdUntil: affiliatePayoutMethods.holdUntil, createdAt: affiliatePayoutMethods.createdAt })
+      .select({ id: affiliatePayoutMethods.id, type: affiliatePayoutMethods.type, label: affiliatePayoutMethods.label, nickname: affiliatePayoutMethods.nickname, metadata: affiliatePayoutMethods.metadata, isDefault: affiliatePayoutMethods.isDefault, status: affiliatePayoutMethods.status, holdUntil: affiliatePayoutMethods.holdUntil, holdWaivedAt: affiliatePayoutMethods.holdWaivedAt, createdAt: affiliatePayoutMethods.createdAt })
       .from(affiliatePayoutMethods)
       .where(eq(affiliatePayoutMethods.affiliateId, id))
       .orderBy(desc(affiliatePayoutMethods.isDefault), affiliatePayoutMethods.id),

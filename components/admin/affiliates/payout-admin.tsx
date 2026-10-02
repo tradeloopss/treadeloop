@@ -5,7 +5,7 @@ import { OctagonAlert, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { checkPayout, payoutAction, revealPayoutAccount, runAutoPayoutsNow, savePayoutConfig, setPayoutControls, setPayoutMethodStatus, setPayoutPause, submitPayoutTransaction } from "@/app/actions/admin-affiliates"
+import { checkPayout, payoutAction, revealPayoutAccount, runAutoPayoutsNow, removePayoutMethodHold, savePayoutConfig, setPayoutControls, setPayoutMethodStatus, setPayoutPause, submitPayoutTransaction } from "@/app/actions/admin-affiliates"
 import { cryptoSpec } from "@/lib/affiliates/crypto"
 import { FREQUENCY_LABELS, PAYOUT_FREQUENCIES, adminPayoutActions, type AdminPayoutAction, type PayoutSettings } from "@/lib/affiliates/payout-engine"
 import { PAYOUT_METHOD_LABELS, PAYOUT_METHOD_TYPES, methodLabel, money, type PayoutMethodType } from "@/lib/affiliates/types"
@@ -547,7 +547,9 @@ export function PayoutControls({ affiliateId, name, controls, inherited }: { aff
   )
 }
 
-export function MethodAdminActions({ id, status, name }: { id: number; status: string; name: string }) {
+// `held`: the method is inside its security hold (or too new to be sent to
+// automatically) and an admin hasn't lifted that yet.
+export function MethodAdminActions({ id, status, name, held = false }: { id: number; status: string; name: string; held?: boolean }) {
   if (status === "removed") return null
   if (status === "rejected" || status === "verification_required") {
     return (
@@ -558,8 +560,15 @@ export function MethodAdminActions({ id, status, name }: { id: number; status: s
   }
   if (status !== "active" && status !== "disabled") return null
   return (
+    <>
+      {held && (
+        <ConfirmButton size="xs" title={`Remove the security hold on ${name}?`} description="It can be paid to straight away, and automatic sending no longer waits for it to have been on file. Only do this if you're sure the affiliate added it themselves — the hold is what protects a hijacked account." confirmLabel="Remove hold" reason={{ label: "Reason (kept in the audit log)" }} action={(reason) => removePayoutMethodHold(id, reason)}>
+          Remove hold
+        </ConfirmButton>
+      )}
     <ConfirmButton size="xs" variant="ghost" destructive title={`Reject ${name}?`} description="It can no longer be paid to, and the affiliate is told. Payouts already in progress to it are not changed — cancel or hold those separately." confirmLabel="Reject method" reason={{ label: "Reason (the affiliate sees this)" }} action={(reason) => setPayoutMethodStatus(id, "rejected", reason)}>
       Reject
     </ConfirmButton>
+    </>
   )
 }

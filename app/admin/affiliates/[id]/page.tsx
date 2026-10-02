@@ -30,6 +30,9 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
   const name = `${a.firstName} ${a.lastName}`.trim()
   const rule = resolveRule({ program: d.program, tiers: d.tiers, rules: d.rules.map((r) => ({ ...r, scope: r.scope as "affiliate" | "campaign" | "coupon" })), customers: d.stats.customers, tierOverrideId: a.tierId, now: new Date() })
   const website = safeUrl(a.website)
+  // A method newer than the hold period isn't sent to automatically, unless an admin lifted that.
+  const holdHours = preview?.settings.methodHoldHours ?? 0
+  const tooNew = (m: { createdAt: Date; holdWaivedAt: Date | null }) => holdHours > 0 && !m.holdWaivedAt && Date.now() - m.createdAt.getTime() < holdHours * 3_600_000
   const decided = a.status === "approved" || a.status === "suspended"
 
   return (
@@ -165,11 +168,17 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
                           <span className="block truncate font-mono text-xs text-muted-foreground">
                             {methodLabel(m.type)} · {m.label}
                           </span>
-                          {m.holdUntil && m.holdUntil > new Date() && <span className="block text-xs text-[var(--chart-4)]">Security hold until {fmtDay(m.holdUntil)}</span>}
+                          {m.holdUntil && m.holdUntil > new Date() ? (
+                            <span className="block text-xs text-[var(--chart-4)]">Security hold until {fmtDay(m.holdUntil)}</span>
+                          ) : tooNew(m) ? (
+                            <span className="block text-xs text-[var(--chart-4)]">Added less than {preview.settings.methodHoldHours} hours ago — not sent to automatically yet</span>
+                          ) : m.holdWaivedAt ? (
+                            <span className="block text-xs text-muted-foreground">Security hold removed by an admin {fmtDay(m.holdWaivedAt)}</span>
+                          ) : null}
                         </span>
                         <span className="flex items-center gap-2">
                           <StatusBadge status={m.status} />
-                          {canManage && <MethodAdminActions id={m.id} status={m.status} name={`${methodLabel(m.type)} ${m.label}`} />}
+                          {canManage && <MethodAdminActions id={m.id} status={m.status} name={`${methodLabel(m.type)} ${m.label}`} held={(!!m.holdUntil && m.holdUntil > new Date()) || tooNew(m)} />}
                         </span>
                       </li>
                     ))}

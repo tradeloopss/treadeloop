@@ -1762,6 +1762,9 @@ export const affiliatePayoutMethods = pgTable(
     // A method added to an account that already had one can't be paid to
     // until this passes (the wallet-change security hold).
     holdUntil: timestamp("holdUntil"),
+    // Set when an admin lifted that hold: the method can be paid to at once,
+    // and counts as "on file long enough" for automatic sending.
+    holdWaivedAt: timestamp("holdWaivedAt"),
     verifiedAt: timestamp("verifiedAt"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),

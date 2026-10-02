@@ -218,6 +218,13 @@
       "when": 1790960000000,
       "tag": "0030_affiliate_coupons_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790970000000,
+      "tag": "0031_affiliate_method_hold_waiver",
+      "breakpoints": true
     }
   ]
 }
