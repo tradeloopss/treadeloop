@@ -30,7 +30,7 @@ function describeMethod(m: MethodView) {
 // The amount as typed → a number, or why it can't be requested. The server
 // applies the same rules again (payout-engine.manualPayoutProblem); this is the
 // answer without a round trip.
-function readAmount(text: string, limits: { min: number; max: number | null; available: number }): { value: number | null; problem: string | null } {
+function readAmount(text: string, limits: { min: number; max: number | null; available: number; minWhy?: string }): { value: number | null; problem: string | null } {
   const raw = text.trim()
   if (!raw) return { value: null, problem: "Enter an amount." }
   if (!/^\d*\.?\d*$/.test(raw) || raw === ".") return { value: null, problem: "Enter a valid amount." }
@@ -38,7 +38,7 @@ function readAmount(text: string, limits: { min: number; max: number | null; ava
   if (!Number.isFinite(value)) return { value: null, problem: "Enter a valid amount." }
   if ((raw.split(".")[1] ?? "").length > 2) return { value: null, problem: "Use at most two decimal places." }
   if (value <= 0) return { value: null, problem: "The amount must be greater than $0." }
-  if (value < limits.min) return { value, problem: `The minimum payout is ${money(limits.min)}.` }
+  if (value < limits.min) return { value, problem: limits.minWhy ?? `The minimum payout is ${money(limits.min)}.` }
   if (value > limits.available) return { value, problem: "That's more than your available balance." }
   if (limits.max != null && value > limits.max) return { value, problem: `The most you can withdraw in one payout is ${money(limits.max)}.` }
   return { value, problem: null }
@@ -62,7 +62,7 @@ function Callout({ tone, icon: Icon, title, children, action }: { tone: Tone; ic
 
 // --- Destination picker ---------------------------------------------------------
 
-function MethodPicker({ methods, selected, onSelect, onAdd, canAdd, labelId }: { methods: MethodView[]; selected: MethodView | null; onSelect: (id: number) => void; onAdd: () => void; canAdd: boolean; labelId: string }) {
+function MethodPicker({ methods, selected, onSelect, onAdd, canAdd, labelId, mins }: { methods: MethodView[]; selected: MethodView | null; onSelect: (id: number) => void; onAdd: () => void; canAdd: boolean; labelId: string; mins: Record<string, MethodMin> }) {
   const [open, setOpen] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   // Arrow keys move between the choices, as in any list box.
@@ -119,6 +119,7 @@ function MethodPicker({ methods, selected, onSelect, onAdd, canAdd, labelId }: {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{d.name}</span>
                   <span className="block truncate font-mono text-xs text-muted-foreground">{d.detail}</span>
+                  {mins[m.type] && <span className="block text-xs text-muted-foreground">Minimum {mins[m.type].text}</span>}
                   {why && <span className="block text-xs text-[var(--chart-4)]">{why}</span>}
                 </span>
                 {isSelected && <Check className="size-4 shrink-0 text-primary" aria-hidden />}
@@ -138,12 +139,18 @@ function MethodPicker({ methods, selected, onSelect, onAdd, canAdd, labelId }: {
 
 // --- The dialog -----------------------------------------------------------------
 
+// A payout method's own minimum: as it is set ("5 USDT", "0.1 LTC") and in US
+// dollars — null when the coin's price isn't known (the server then decides).
+export type MethodMin = { text: string; usd: number | null; title: string }
+
 export type RequestPayoutProps = {
   available: number
   // commission still inside its holding period
   pendingBalance?: number
   min: number
   max: number | null
+  // by method type: the least a payout by that method can be, when it has a minimum of its own
+  methodMins?: Record<string, MethodMin>
   methods: MethodView[]
   // why nothing can be requested right now (payouts paused, a hold on the
   // account, a payout already in progress…), decided by the server
@@ -166,7 +173,7 @@ export type RequestPayoutProps = {
 
 const SUCCESS_STATUS: Partial<Record<PayoutStatus, string>> = { pending: "Pending review", queued: "Queued to be sent", processing: "Being sent", submitted: "Being sent", confirming: "Being sent", paid: "Sent" }
 
-export function RequestPayout({ available, pendingBalance = 0, min, max, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null, instantTypes = ["crypto_trc20"], prices = {}, autoPayoutOn = false, methodConfig }: RequestPayoutProps) {
+export function RequestPayout({ available, pendingBalance = 0, min, max, methodMins = {}, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null, instantTypes = ["crypto_trc20"], prices = {}, autoPayoutOn = false, methodConfig }: RequestPayoutProps) {
   const router = useRouter()
   const ids = { amount: useId(), amountHelp: useId(), sendTo: useId() }
   const [open, setOpen] = useState(false)
@@ -190,11 +197,16 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methods
   const held = live.find((m) => m.status === "active" && inHold(m))
 
   const belowMin = available < min
-  const { value, problem } = readAmount(amount, { min, max, available })
+  const coin = cryptoSpec(method?.type)
+  // The chosen method's own minimum counts when it is above the affiliate's.
+  const floor = method ? methodMins[method.type] : undefined
+  const floorBinds = !!floor && floor.usd != null && floor.usd > min
+  const minNow = floorBinds ? floor.usd! : min
+  const floorText = floor ? `${floor.text}${floor.usd != null && coin && !coin.usdPegged ? ` (about ${money(floor.usd)})` : ""}` : ""
+  const { value, problem } = readAmount(amount, { min: minNow, max, available, minWhy: floorBinds ? `The minimum payout to ${floor.title} is ${floorText}.` : undefined })
   const valid = value != null && !problem
   // The same quote the server computes and stores — shown before anything is sent.
   const quote = method && valid ? quoteFee(value, method.type, { ...DEFAULT_PAYOUT_SETTINGS, feePolicy, fees: fees as typeof DEFAULT_PAYOUT_SETTINGS.fees }) : null
-  const coin = cryptoSpec(method?.type)
   // A crypto payout inside the limit is normally sent without waiting for review.
   const automatic = instantUpTo != null && !!coin && instantTypes.includes(coin.type)
   const instant = automatic && !(quote && quote.net > instantUpTo)
@@ -341,7 +353,7 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methods
                         </Button>
                       </div>
                       <p id={ids.amountHelp} className={cn("text-xs", showError ? "text-[var(--loss)]" : "text-muted-foreground")} role={showError ? "alert" : undefined}>
-                        {showError ? problem : `Minimum ${money(min)}${max != null ? ` · up to ${money(max)} per payout` : ""}`}
+                        {showError ? problem : `Minimum ${floorBinds ? `${floorText} for this method` : money(min)}${max != null ? ` · up to ${money(max)} per payout` : ""}`}
                       </p>
                       <div role="group" aria-label="Quick amounts" className="grid grid-cols-4 gap-2">
                         {quick.map(([name, v]) => {
@@ -351,7 +363,7 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methods
                               key={name}
                               type="button"
                               aria-pressed={on}
-                              disabled={v < min}
+                              disabled={v < minNow}
                               onClick={() => onAmount(v.toFixed(2))}
                               className={cn("flex flex-col items-center rounded-lg border px-1 py-1.5 outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-45", on ? "border-primary bg-primary/8 text-foreground" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground")}
                             >
@@ -377,7 +389,13 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methods
                           )}
                         </div>
                       ) : (
-                        <MethodPicker methods={live} selected={method} onSelect={setMethodId} onAdd={addMethod} canAdd={!!methodConfig && methodConfig.methods.length > 0} labelId={ids.sendTo} />
+                        <MethodPicker methods={live} selected={method} onSelect={setMethodId} onAdd={addMethod} canAdd={!!methodConfig && methodConfig.methods.length > 0} labelId={ids.sendTo} mins={methodMins} />
+                      )}
+                      {floorBinds && most < minNow && (
+                        <Callout tone="warning" icon={Info} title={`${floor.title} needs at least ${floor.text}`}>
+                          You have {money(available)} available. A payout by this method starts at {floorText}
+                          {live.length > 1 ? " — choose another method, or wait until your balance reaches it." : "."}
+                        </Callout>
                       )}
                       {live.length > 0 && !method && (
                         <Callout tone="warning" icon={ShieldCheck} title={held ? "Wallet security hold" : "No active payout method"}>

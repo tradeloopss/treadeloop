@@ -17,6 +17,7 @@ import {
   limitProblem,
   manualPayoutProblem,
   methodHoldUntil,
+  methodMinimum,
   methodProblem,
   nextPeriodStart,
   normalizePayoutSettings,
@@ -293,6 +294,70 @@ test("limits: affiliate overrides win over the program's", () => {
   assert.equal(limitProblem(1e9, { day: 1e9, week: 1e9, month: 1e9 }, settings({ dailyLimit: null })), null)
 })
 
+const manual = (over: Partial<Parameters<typeof manualPayoutProblem>[0]> = {}) =>
+  manualPayoutProblem({ amount: 100, available: 250, limits: { min: 50, max: 5000 }, settings: settings(), affiliate: affiliate(), method: ACTIVE, hasPayoutInFlight: false, totals: NO_TOTALS, now: NOW, ...over })
+
+test("each payout method has its own minimum, in its own unit", () => {
+  const s = settings()
+  // the defaults: 5 USDT on TRON, 10 USDT on Aptos, 0.1 LTC; nothing for the methods sent by hand
+  assert.deepEqual(DEFAULT_PAYOUT_SETTINGS.methodMin, { paypal: 0, wise: 0, bank: 0, stripe: 0, crypto_trc20: 5, crypto_aptos: 10, crypto_ltc: 0.1 })
+  assert.deepEqual(methodMinimum("crypto_trc20", s), { units: 5, asset: "USDT", text: "5 USDT", usd: 5, title: "USDT — TRC-20" })
+  assert.deepEqual(methodMinimum("crypto_aptos", s), { units: 10, asset: "USDT", text: "10 USDT", usd: 10, title: "USDT — Aptos" })
+  assert.equal(methodMinimum("paypal", s), null)
+  assert.equal(methodMinimum(null, s), null)
+  assert.equal(methodMinimum("crypto_trc20", settings({ methodMin: { ...s.methodMin, crypto_trc20: 0 } })), null)
+  assert.deepEqual(methodMinimum("bank", settings({ methodMin: { ...s.methodMin, bank: 25 } })), { units: 25, asset: "USD", text: "$25.00", usd: 25, title: "Bank transfer" })
+  // a coin that isn't a dollar: converted at the market price, rounded UP to the cent
+  assert.deepEqual(methodMinimum("crypto_ltc", s, { LTC: 68.67 }), { units: 0.1, asset: "LTC", text: "0.1 LTC", usd: 6.87, title: "Litecoin — LTC" })
+  assert.equal(methodMinimum("crypto_ltc", s, { LTC: 68.611 })!.usd, 6.87)
+  assert.equal(methodMinimum("crypto_ltc", s, { LTC: 70 })!.usd, 7)
+  // no price: the minimum is known in LTC, not in dollars
+  assert.equal(methodMinimum("crypto_ltc", s)!.usd, null)
+  assert.equal(methodMinimum("crypto_ltc", s, { LTC: 0 })!.usd, null)
+
+  // the higher of the affiliate's minimum and the method's applies
+  const own = { programMin: 50, settings: s }
+  assert.deepEqual(effectiveLimits({ ...own, method: methodMinimum("crypto_aptos", s) }), { min: 50, max: 5000 })
+  assert.deepEqual(effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_trc20", s) }), { min: 5, max: 5000, minWhy: "The minimum payout to USDT — TRC-20 is 5 USDT." })
+  assert.deepEqual(effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_aptos", s) }), { min: 10, max: 5000, minWhy: "The minimum payout to USDT — Aptos is 10 USDT." })
+  assert.deepEqual(effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_ltc", s, { LTC: 68.67 }) }), { min: 6.87, max: 5000, minWhy: "The minimum payout to Litecoin — LTC is 0.1 LTC (about $6.87 right now)." })
+  assert.deepEqual(effectiveLimits({ ...own, minOverride: 1, method: null }), { min: 1, max: 5000 })
+  // an affiliate's own maximum below the method's minimum can't strand a balance
+  assert.deepEqual(effectiveLimits({ ...own, minOverride: 1, maxOverride: 3, method: methodMinimum("crypto_trc20", s) }).max, 5)
+  // a coin minimum with no price can't be checked: nothing is guessed
+  assert.deepEqual(effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_ltc", s) }), { min: 1, max: 5000, minUnknown: true })
+
+  // a request below the method's minimum is refused, in the method's words
+  const viaTron = effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_trc20", s) })
+  assert.equal(manual({ amount: 4.99, limits: viaTron }), "The minimum payout to USDT — TRC-20 is 5 USDT.")
+  assert.equal(manual({ amount: 5, limits: viaTron }), null)
+  assert.equal(manual({ amount: 9.99, limits: effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_aptos", s) }) }), "The minimum payout to USDT — Aptos is 10 USDT.")
+  const viaLtc = effectiveLimits({ ...own, minOverride: 1, method: methodMinimum("crypto_ltc", s, { LTC: 68.67 }) })
+  assert.match(manual({ amount: 6.86, limits: viaLtc })!, /0\.1 LTC \(about \$6\.87 right now\)/)
+  assert.equal(manual({ amount: 6.87, limits: viaLtc }), null)
+  assert.match(manual({ amount: 100, limits: effectiveLimits({ ...own, method: methodMinimum("crypto_ltc", s) }) })!, /price .* couldn't be read/)
+
+  // the automatic payout waits for the method's minimum too
+  const autoWith = (limits: ReturnType<typeof effectiveLimits>, available: number) => decideAutoPayout({ settings: s, affiliate: affiliate(), available, limits, threshold: null, method: ACTIVE, hasPayoutInFlight: false, paidThisPeriod: false, openHighRiskSignals: 0, totals: NO_TOTALS, now: NOW })
+  assert.deepEqual(autoWith(viaTron, 4.5), { ok: false, code: "below_threshold", message: "Available balance is below the $5.00 threshold." })
+  assert.deepEqual(autoWith(viaTron, 5.25), { ok: true, amount: 5.25 })
+  assert.equal((autoWith(effectiveLimits({ ...own, method: methodMinimum("crypto_ltc", s) }), 500) as { code: string }).code, "price_unavailable")
+})
+
+test("stored method minimums: defaults when never set, clamped when they are", () => {
+  // settings saved before the minimums existed get the defaults
+  assert.deepEqual(normalizePayoutSettings({ approval: "automatic" }).methodMin, DEFAULT_PAYOUT_SETTINGS.methodMin)
+  // a method left out keeps its default; one that is set is kept; junk and negatives aren't
+  const m = normalizePayoutSettings({ methodMin: { crypto_trc20: "4", crypto_ltc: "0.25", paypal: 20, wise: -3, bank: "", stripe: "abc", unknown: 9 } }).methodMin
+  assert.deepEqual(m, { paypal: 20, wise: 0, bank: 0, stripe: 0, crypto_trc20: 4, crypto_aptos: 10, crypto_ltc: 0.25 })
+  // 0 switches a method's minimum off
+  assert.equal(normalizePayoutSettings({ methodMin: { crypto_aptos: 0 } }).methodMin.crypto_aptos, 0)
+  // what the admin form sends back survives a round trip
+  const saved = normalizePayoutSettings({ ...DEFAULT_PAYOUT_SETTINGS, methodMin: { ...DEFAULT_PAYOUT_SETTINGS.methodMin, crypto_ltc: "0.05" } })
+  assert.deepEqual(normalizePayoutSettings(saved), saved)
+  assert.equal(saved.methodMin.crypto_ltc, 0.05)
+})
+
 test("frequency: one automatic payout per period", () => {
   assert.equal(periodKey("daily", NOW), "2026-10-07")
   assert.equal(periodKey("immediate", NOW), "2026-10-07")
@@ -313,9 +378,6 @@ test("frequency: one automatic payout per period", () => {
 })
 
 // ---------------------------------------------------------------- manual
-
-const manual = (over: Partial<Parameters<typeof manualPayoutProblem>[0]> = {}) =>
-  manualPayoutProblem({ amount: 100, available: 250, limits: { min: 50, max: 5000 }, settings: settings(), affiliate: affiliate(), method: ACTIVE, hasPayoutInFlight: false, totals: NO_TOTALS, now: NOW, ...over })
 
 test("manual payout request validation", () => {
   assert.equal(manual(), null)

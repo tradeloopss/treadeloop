@@ -293,6 +293,7 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, walletRea
   const { pending, run } = useAction()
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }))
   const fee = (t: PayoutMethodType, k: "fixed" | "percent", v: string) => setForm((f) => ({ ...f, fees: { ...f.fees, [t]: { ...f.fees[t], [k]: v as unknown as number } } }))
+  const methodMin = (t: PayoutMethodType, v: string) => setForm((f) => ({ ...f, methodMin: { ...f.methodMin, [t]: v as unknown as number } }))
   const toggleMethod = (t: PayoutMethodType, on: boolean) => setForm((f) => ({ ...f, methods: on ? PAYOUT_METHOD_TYPES.filter((m) => f.methods.includes(m) || m === t) : f.methods.filter((m) => m !== t) }))
 
   const submit = () => {
@@ -410,7 +411,9 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, walletRea
 
         <div>
           <h3 className="text-sm font-semibold">Payout methods and fees</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">Which methods affiliates can add, and what each costs. A fee is only deducted when the affiliate pays it — and they see amount, fee and net before requesting.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Which methods affiliates can add, the least a payout by each can be, and what each costs. A method&apos;s minimum is in its own unit — the coin for crypto — and never lowers the minimum payout above or an affiliate&apos;s own: the higher of the two applies. Leave it at 0 for none. A fee is only deducted when the affiliate pays it — and they see amount, fee and net before requesting.
+          </p>
           <label className={`${label} mt-3 max-w-sm`}>
             Who pays the fee
             <select value={form.feePolicy} onChange={(e) => set("feePolicy", e.target.value as PayoutSettings["feePolicy"])} className={selectClass}>
@@ -424,6 +427,7 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, walletRea
                 <tr>
                   <th className="px-3 py-2 text-start font-medium">Method</th>
                   <th className="px-3 py-2 text-start font-medium">Offered</th>
+                  <th className="px-3 py-2 text-start font-medium">Minimum payout</th>
                   <th className="px-3 py-2 text-start font-medium">Fixed fee (USD)</th>
                   <th className="px-3 py-2 text-start font-medium">Plus %</th>
                   <th className="px-3 py-2 text-start font-medium">How it is sent</th>
@@ -438,6 +442,12 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, walletRea
                       <td className="px-3 py-2 font-medium">{PAYOUT_METHOD_LABELS[t]}</td>
                       <td className="px-3 py-2">
                         <input aria-label={`Offer ${PAYOUT_METHOD_LABELS[t]}`} type="checkbox" role="switch" checked={form.methods.includes(t) && !unavailable} disabled={unavailable} onChange={(e) => toggleMethod(t, e.target.checked)} className="size-4 accent-[var(--primary)]" />
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="flex items-center gap-1.5">
+                          <Input aria-label={`${PAYOUT_METHOD_LABELS[t]} minimum payout`} type="number" min={0} max={100000} step="any" value={form.methodMin[t]} onChange={(e) => methodMin(t, e.target.value)} className="w-24" />
+                          <span className="text-xs text-muted-foreground">{coin?.asset ?? "USD"}</span>
+                        </span>
                       </td>
                       <td className="px-3 py-2">
                         <Input aria-label={`${PAYOUT_METHOD_LABELS[t]} fixed fee`} type="number" min={0} max={1000} step="0.01" value={form.fees[t].fixed} onChange={(e) => fee(t, "fixed", e.target.value)} className="w-24" disabled={form.feePolicy !== "affiliate"} />

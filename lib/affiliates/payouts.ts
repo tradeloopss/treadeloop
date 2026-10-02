@@ -23,6 +23,7 @@ import {
   exchangeSendProblem,
   manualPayoutProblem,
   methodHoldUntil,
+  methodMinimum,
   payoutLedgerStatus,
   payoutTransitionAllowed,
   periodKey,
@@ -298,7 +299,23 @@ const num = (v: string | null) => (v == null ? null : Number(v))
 // Everything the payout rules need to know about one affiliate, read through
 // `exec` — the locked transaction when a payout is being created, the plain
 // connection when a page only wants to show what WOULD happen.
-async function payoutContext(exec: Exec, aff: typeof affiliates.$inferSelect, methodId: number | null, settings: PayoutSettings, programMin: number, now: Date) {
+// The market price of the coin a payout by this method is converted at — needed
+// when the method's minimum is set in that coin (0.1 LTC). Read BEFORE any lock
+// is taken (it is a network call) and time-boxed; nothing for dollar methods
+// and stablecoins. No price back means the minimum can't be checked, and the
+// rules then refuse rather than guess.
+async function methodPrices(affiliateId: number, methodId: number | null): Promise<Record<string, number>> {
+  const [m] = await db
+    .select({ type: affiliatePayoutMethods.type })
+    .from(affiliatePayoutMethods)
+    .where(and(eq(affiliatePayoutMethods.affiliateId, affiliateId), ne(affiliatePayoutMethods.status, "removed"), methodId != null ? eq(affiliatePayoutMethods.id, methodId) : eq(affiliatePayoutMethods.isDefault, true)))
+  const coin = cryptoSpec(m?.type)
+  if (!coin || coin.usdPegged) return {}
+  const price = await Promise.race([assetPriceUsd(coin.asset).catch(() => null), new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000))])
+  return price ? { [coin.asset]: price } : {}
+}
+
+async function payoutContext(exec: Exec, aff: typeof affiliates.$inferSelect, methodId: number | null, settings: PayoutSettings, programMin: number, now: Date, prices: Record<string, number> = {}) {
   const [method] = await exec
     .select()
     .from(affiliatePayoutMethods)
@@ -310,6 +327,7 @@ async function payoutContext(exec: Exec, aff: typeof affiliates.$inferSelect, me
     .from(affiliateFraudSignals)
     .where(and(eq(affiliateFraudSignals.affiliateId, aff.id), eq(affiliateFraudSignals.risk, "high"), inArray(affiliateFraudSignals.status, ["open", "reviewing"])))
   const [thisPeriod] = await exec.select({ id: affiliatePayouts.id }).from(affiliatePayouts).where(eq(affiliatePayouts.idempotencyKey, `auto:${aff.id}:${periodKey(settings.frequency, now)}`))
+  const own = { programMin, settings, minOverride: num(aff.minPayoutOverride), maxOverride: num(aff.maxPayoutOverride) }
   return {
     method: (method as Method | undefined) ?? null,
     methodState: method ? { status: method.status, holdUntil: method.holdUntil } : null,
@@ -318,7 +336,10 @@ async function payoutContext(exec: Exec, aff: typeof affiliates.$inferSelect, me
     openHighRiskSignals: risk?.n ?? 0,
     paidThisPeriod: !!thisPeriod,
     totals: await windowTotals(exec, now),
-    limits: effectiveLimits({ programMin, settings, minOverride: num(aff.minPayoutOverride), maxOverride: num(aff.maxPayoutOverride) }),
+    // what applies to a payout by THIS method: never below the method's own minimum
+    limits: effectiveLimits({ ...own, method: method ? methodMinimum(method.type, settings, prices) : null }),
+    // the affiliate's limits whatever the method
+    baseLimits: effectiveLimits(own),
   }
 }
 
@@ -327,9 +348,11 @@ async function payoutContext(exec: Exec, aff: typeof affiliates.$inferSelect, me
 export async function autoPayoutPreview(affiliateId: number, now = new Date()) {
   const [[aff], settings, program] = await Promise.all([db.select().from(affiliates).where(eq(affiliates.id, affiliateId)), getPayoutSettings(), getProgram()])
   if (!aff) return null
-  const ctx = await payoutContext(db, aff, null, settings, program.minPayout, now)
+  const ctx = await payoutContext(db, aff, null, settings, program.minPayout, now, await methodPrices(aff.id, null))
   const decision = decideAutoPayout({ settings, affiliate: stateOf(aff), available: ctx.available, limits: ctx.limits, threshold: num(aff.autoPayoutThreshold), method: ctx.methodState, hasPayoutInFlight: ctx.hasPayoutInFlight, paidThisPeriod: ctx.paidThisPeriod, openHighRiskSignals: ctx.openHighRiskSignals, totals: ctx.totals, now })
-  return { decision, settings, limits: ctx.limits, available: ctx.available, threshold: Math.max(ctx.limits.min, num(aff.autoPayoutThreshold) ?? ctx.limits.min), method: ctx.method ? { id: ctx.method.id, type: ctx.method.type, label: ctx.method.label, holdUntil: ctx.method.holdUntil } : null, paidThisPeriod: ctx.paidThisPeriod }
+  // `limits` are the affiliate's own (any method); `threshold` is what the
+  // automatic payout really waits for, the default method's minimum included.
+  return { decision, settings, limits: ctx.baseLimits, available: ctx.available, threshold: Math.max(ctx.limits.min, num(aff.autoPayoutThreshold) ?? ctx.limits.min), method: ctx.method ? { id: ctx.method.id, type: ctx.method.type, label: ctx.method.label, holdUntil: ctx.method.holdUntil } : null, paidThisPeriod: ctx.paidThisPeriod }
 }
 
 export type CreateResult = { created: true; id: number; status: PayoutStatus; amount: number } | { created: false; id: number } | { created: false; skipped: AutoSkip; message: string }
@@ -348,6 +371,7 @@ type CreateInput =
 export async function createPayout(input: CreateInput): Promise<CreateResult> {
   const now = input.now ?? new Date()
   const program = await getProgram()
+  const prices = await methodPrices(input.affiliateId, input.mode === "manual" ? input.methodId : null)
 
   const result = await db.transaction(async (tx): Promise<CreateResult & { notify?: { title: string; body: string } }> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('affiliate_payouts'))`)
@@ -360,7 +384,7 @@ export async function createPayout(input: CreateInput): Promise<CreateResult> {
     const [dupe] = await tx.select({ id: affiliatePayouts.id }).from(affiliatePayouts).where(eq(affiliatePayouts.idempotencyKey, key))
     if (dupe) return input.mode === "manual" ? { created: false, id: dupe.id } : { created: false, skipped: "already_paid_this_period", message: "This period's automatic payout was already created." }
 
-    const ctx = await payoutContext(tx, aff, input.mode === "manual" ? input.methodId : null, settings, program.minPayout, now)
+    const ctx = await payoutContext(tx, aff, input.mode === "manual" ? input.methodId : null, settings, program.minPayout, now, prices)
     let amount: number
     if (input.mode === "manual") {
       // Not rounded: an amount with a fraction of a cent is refused, never adjusted.

@@ -90,7 +90,11 @@ export default async function AdminAffiliatePayoutSettingsPage() {
                           {n.quota ? formatAsset(n.quota.fee, n.asset) : "—"}
                           {n.quota && n.priceUsd && n.quota.fee * n.priceUsd > settings.cryptoMaxFeeUsd ? <span className="block text-xs text-[var(--loss)]">above your {money(settings.cryptoMaxFeeUsd)} limit</span> : null}
                         </td>
-                        <td className="px-3 py-2 text-end tabular-nums">{n.quota ? formatAsset(n.quota.min, n.asset) : "—"}</td>
+                        <td className="px-3 py-2 text-end tabular-nums">
+                          {n.quota ? formatAsset(n.quota.min, n.asset) : "—"}
+                          {/* the least a payout by this method can be: the method's own minimum, or the program's if that is higher */}
+                          {n.quota && n.priceUsd && Math.max(settings.methodMin[n.type], program.minPayout / n.priceUsd) < n.quota.min ? <span className="block text-xs text-[var(--loss)]">above your minimum payout for this method — raise it, or smaller payouts can&apos;t be sent</span> : null}
+                        </td>
                         <td className="px-3 py-2 text-end">{n.quota ? n.quota.enabled ? "Open" : <span className="text-[var(--loss)]">Closed by KuCoin</span> : "—"}</td>
                       </tr>
                     ))}

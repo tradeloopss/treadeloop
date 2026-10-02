@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Input } from "@/components/ui/input"
 import { connectStripe, savePayoutMethod } from "@/app/actions/affiliate"
 import { bankScheme, validateMethod } from "@/lib/affiliates/method-validation"
+import { USDT_LOGO, USDT_TRC20_LOGO } from "@/lib/affiliates/coin-logos"
 import { cryptoSpec } from "@/lib/affiliates/crypto"
 import { maskAddress } from "@/lib/affiliates/tron"
 import { PAYOUT_CURRENCIES, PAYOUT_METHOD_BLURBS, PAYOUT_METHOD_LABELS, type PayoutMethodType } from "@/lib/affiliates/types"
@@ -16,16 +17,30 @@ import { selectClass } from "./ui"
 import { useAction } from "./use-action"
 
 // --- Method marks ---------------------------------------------------------------
-// Small monogram tiles in the method's own colour — not the brands' logos.
+// The coins carry their own logos; the rest are small monogram tiles in the
+// method's colour. USDT on TRON is the Tether coin with the TRON mark on its
+// corner; USDT on Aptos is the plain Tether coin (lib/affiliates/coin-logos).
+
+// eslint-disable-next-line @next/next/no-img-element
+const logo = (src: string, className?: string) => <img src={src} alt="" width={96} height={96} className={cn("block size-full object-contain", className)} />
+
+// The Litecoin mark (glyph from the public-domain cryptocurrency-icons set, CC0).
+const litecoin = (
+  <svg viewBox="0 0 32 32" className="size-full" aria-hidden>
+    <circle cx="16" cy="16" r="16" fill="#345d9d" />
+    <path fill="#fff" fillRule="evenodd" d="M10.427 19.214L9 19.768l.688-2.759 1.444-.58L13.213 8h5.129l-1.519 6.196 1.41-.571-.68 2.75-1.427.571-.848 3.483H23L22.127 24H9.252z" />
+  </svg>
+)
 
 const MARKS: Record<PayoutMethodType, { className: string; node: React.ReactNode }> = {
   paypal: { className: "bg-[#003087] text-white", node: <span className="text-[15px] font-black italic leading-none">P</span> },
   wise: { className: "bg-[#9fe870] text-[#163300]", node: <ArrowLeftRight className="size-4" aria-hidden /> },
   bank: { className: "bg-muted text-foreground", node: <Landmark className="size-4" aria-hidden /> },
   stripe: { className: "bg-[#635bff] text-white", node: <span className="text-[15px] font-bold leading-none">S</span> },
-  crypto_trc20: { className: "bg-[#26a17b] text-white", node: <span className="text-[15px] font-bold leading-none">₮</span> },
-  crypto_aptos: { className: "bg-[#0d1b1a] text-[#3ddbb4]", node: <span className="text-[15px] font-bold leading-none">₮</span> },
-  crypto_ltc: { className: "bg-[#345d9d] text-white", node: <span className="text-[15px] font-bold leading-none">Ł</span> },
+  // that file has a ring around the coin: scaled so the coin itself matches the plain one
+  crypto_trc20: { className: "", node: logo(USDT_TRC20_LOGO, "scale-[1.16]") },
+  crypto_aptos: { className: "", node: logo(USDT_LOGO) },
+  crypto_ltc: { className: "", node: litecoin },
 }
 
 export function MethodMark({ type, className }: { type: string; className?: string }) {

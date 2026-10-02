@@ -3,7 +3,7 @@ import { Download } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
 import { balancesFor, releaseHolds } from "@/lib/affiliates/commissions"
 import { countryOptions } from "@/lib/affiliates/countries"
-import { FREQUENCY_LABELS, nextPeriodStart, payoutInFlight, type AutoSkip } from "@/lib/affiliates/payout-engine"
+import { FREQUENCY_LABELS, methodMinimum, nextPeriodStart, payoutInFlight, type AutoSkip } from "@/lib/affiliates/payout-engine"
 import { autoPayoutPreview, syncStripeMethods, trackPayouts } from "@/lib/affiliates/payouts"
 import { getProgram } from "@/lib/affiliates/program"
 import { CRYPTO_METHOD_TYPES, cryptoSpec } from "@/lib/affiliates/crypto"
@@ -14,6 +14,7 @@ import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
 import { Kpi, KpiGrid, linkButtonClass } from "@/components/affiliate/ui"
 import { AddPayoutMethodButton, AutoPayoutPanel, MethodCards, PayoutHistory, RequestPayout, type MethodDialogConfig } from "@/components/affiliate/payouts"
+import type { MethodMin } from "@/components/affiliate/request-payout-dialog"
 import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Payouts" }
@@ -65,6 +66,7 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
     in_flight: "After your current payout completes",
     already_paid_this_period: `From ${when(nextPeriodStart(settings.frequency, new Date()))}`,
     below_threshold: `When your balance reaches ${money(preview.threshold)}`,
+    price_unavailable: "On the next run",
     limit_reached: "Later — the program's payout limit was reached",
   }
 
@@ -79,6 +81,13 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
   for (const asset of new Set(methods.map((m) => cryptoSpec(m.type)).filter((c) => c && !c.usdPegged).map((c) => c!.asset))) {
     const price = await Promise.race([assetPriceUsd(asset).catch(() => null), new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))])
     if (price) prices[asset] = price
+  }
+  // Each method's own minimum, for the methods this affiliate has. The server
+  // applies the same rule when the request is made (payout-engine.effectiveLimits).
+  const methodMins: Record<string, MethodMin> = {}
+  for (const type of new Set(methods.map((m) => m.type))) {
+    const floor = methodMinimum(type, settings, prices)
+    if (floor) methodMins[type] = { text: floor.text, usd: floor.usd, title: floor.title }
   }
 
   return (
@@ -114,6 +123,7 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
                 pendingBalance={balances.pending}
                 min={limits.min}
                 max={limits.max}
+                methodMins={methodMins}
                 methods={methodViews}
                 blocked={blocked}
                 eta={program.payoutEta}

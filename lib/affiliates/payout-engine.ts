@@ -1,6 +1,6 @@
 import { round2 } from "./engine"
-import { isCryptoMethod } from "./crypto"
-import { PAYOUT_METHOD_TYPES, type PayoutMethodType } from "./types"
+import { cryptoSpec, formatAsset, isCryptoMethod } from "./crypto"
+import { PAYOUT_METHOD_LABELS, PAYOUT_METHOD_TYPES, type PayoutMethodType } from "./types"
 
 // The payout rules as pure functions: the status machine, the settings an
 // admin controls, fees, limits, and the single decision "may an automatic
@@ -165,6 +165,11 @@ export type PayoutSettings = {
   // account already had one. 0 switches the hold off.
   methodHoldHours: number
   methods: PayoutMethodType[] // offered to affiliates
+  // The least one payout by this method can be, in the method's OWN unit: US
+  // dollars, or the coin itself for a crypto method (5 USDT, 0.1 LTC). 0 = the
+  // method has no minimum of its own. It never lowers the program's (or an
+  // affiliate's own) minimum: the higher of the two applies.
+  methodMin: Record<PayoutMethodType, number>
   // Crypto sent automatically (from the exchange account, or the payout
   // wallet), with no approval step, for payouts inside these caps. Everything
   // above them, and anything that looks unusual, still waits for a person.
@@ -189,6 +194,7 @@ export const DEFAULT_PAYOUT_SETTINGS: PayoutSettings = {
   fees: { paypal: noFee(), wise: noFee(), bank: noFee(), stripe: noFee(), crypto_trc20: noFee(), crypto_aptos: noFee(), crypto_ltc: noFee() },
   methodHoldHours: 24,
   methods: ["paypal", "wise", "bank", "crypto_trc20"],
+  methodMin: { paypal: 0, wise: 0, bank: 0, stripe: 0, crypto_trc20: 5, crypto_aptos: 10, crypto_ltc: 0.1 },
   cryptoAutoSend: false,
   cryptoAutoMax: 500,
   cryptoAutoDaily: 2000,
@@ -215,6 +221,11 @@ export function normalizePayoutSettings(raw: unknown): PayoutSettings {
   const fees = {} as Record<PayoutMethodType, FeeRule>
   for (const t of PAYOUT_METHOD_TYPES) fees[t] = { fixed: round2(clamp(rawFees[t]?.fixed, 0, 0, 1000)), percent: clamp(rawFees[t]?.percent, 0, 0, 50) }
   const methods = Array.isArray(r.methods) ? PAYOUT_METHOD_TYPES.filter((t) => (r.methods as unknown[]).includes(t)) : d.methods
+  // A method that was never given a minimum gets the default one; an empty or
+  // zero value means "none".
+  const rawMin = (r.methodMin && typeof r.methodMin === "object" ? r.methodMin : {}) as Record<string, unknown>
+  const methodMin = {} as Record<PayoutMethodType, number>
+  for (const t of PAYOUT_METHOD_TYPES) methodMin[t] = t in rawMin ? Math.round(clamp(rawMin[t] === "" || rawMin[t] === null ? 0 : rawMin[t], d.methodMin[t], 0, 100_000) * 1e8) / 1e8 : d.methodMin[t]
   return {
     autoPayouts: typeof r.autoPayouts === "boolean" ? r.autoPayouts : d.autoPayouts,
     paused: typeof r.paused === "boolean" ? r.paused : d.paused,
@@ -228,6 +239,7 @@ export function normalizePayoutSettings(raw: unknown): PayoutSettings {
     fees,
     methodHoldHours: Math.round(clamp(r.methodHoldHours, d.methodHoldHours, 0, 720)),
     methods,
+    methodMin,
     cryptoAutoSend: typeof r.cryptoAutoSend === "boolean" ? r.cryptoAutoSend : d.cryptoAutoSend,
     cryptoAutoMax: round2(clamp(r.cryptoAutoMax, d.cryptoAutoMax, 1, 100_000)),
     cryptoAutoDaily: round2(clamp(r.cryptoAutoDaily, d.cryptoAutoDaily, 1, 1_000_000)),
@@ -252,13 +264,38 @@ export function quoteFee(amount: number, type: string, settings: PayoutSettings)
 
 // -------------------------------------------------------------------- limits
 
-export type Limits = { min: number; max: number | null }
+// `minWhy` — the sentence to show when the minimum that applies is the payout
+// method's own. `minUnknown` — the method's minimum is set in a coin whose
+// price couldn't be read, so nothing can be checked against it right now.
+export type Limits = { min: number; max: number | null; minWhy?: string; minUnknown?: boolean }
 
-// An affiliate's own minimum/maximum when an admin set one, else the program's.
-export function effectiveLimits(input: { programMin: number; settings: PayoutSettings; minOverride?: number | null; maxOverride?: number | null }): Limits {
-  const min = input.minOverride != null && input.minOverride > 0 ? input.minOverride : input.programMin
+// A payout method's own minimum: as it is set ("0.1 LTC") and in US dollars.
+// `usd` is null when the coin's price isn't known.
+export type MethodMinimum = { units: number; asset: string; text: string; usd: number | null; title: string }
+
+export function methodMinimum(type: string | null | undefined, settings: PayoutSettings, prices: Record<string, number> = {}): MethodMinimum | null {
+  const units = settings.methodMin[type as PayoutMethodType]
+  if (!type || !(units > 0)) return null
+  const coin = cryptoSpec(type)
+  const title = coin?.title ?? PAYOUT_METHOD_LABELS[type as PayoutMethodType] ?? type
+  if (!coin) return { units, asset: "USD", text: `$${units.toFixed(2)}`, usd: round2(units), title }
+  const text = formatAsset(units, coin.asset)
+  if (coin.usdPegged) return { units, asset: coin.asset, text, usd: round2(units), title }
+  const price = prices[coin.asset]
+  // Rounded UP to the cent: an amount that passes is never short of the coin minimum.
+  return { units, asset: coin.asset, text, usd: price > 0 ? Math.ceil(units * price * 100 - 1e-6) / 100 : null, title }
+}
+
+// An affiliate's own minimum/maximum when an admin set one, else the program's
+// — and never below the minimum of the method the payout is sent by.
+export function effectiveLimits(input: { programMin: number; settings: PayoutSettings; minOverride?: number | null; maxOverride?: number | null; method?: MethodMinimum | null }): Limits {
+  const base = input.minOverride != null && input.minOverride > 0 ? input.minOverride : input.programMin
   const max = input.maxOverride != null && input.maxOverride > 0 ? input.maxOverride : input.settings.maxPayout
-  return { min, max: max != null && max < min ? min : max }
+  const m = input.method
+  if (m && m.usd == null) return { min: base, max: max != null && max < base ? base : max, minUnknown: true }
+  const min = m && m.usd! > base ? m.usd! : base
+  const minWhy = m && m.usd! > base ? `The minimum payout to ${m.title} is ${m.text}${m.asset === "USD" || m.usd === m.units ? "" : ` (about $${m.usd!.toFixed(2)} right now)`}.` : undefined
+  return { min, max: max != null && max < min ? min : max, ...(minWhy ? { minWhy } : {}) }
 }
 
 export type WindowTotals = { day: number; week: number; month: number }
@@ -361,7 +398,8 @@ export function manualPayoutProblem(input: {
   if (input.hasPayoutInFlight) return "You already have a payout in progress. You can request another once it's complete."
   if (!Number.isFinite(amount) || amount <= 0) return "Enter an amount."
   if (round2(amount) !== amount) return "Use at most two decimal places."
-  if (amount < limits.min) return `The minimum payout is $${limits.min.toFixed(2)}.`
+  if (limits.minUnknown) return "The current price for this payout method couldn't be read, so its minimum can't be checked right now. Please try again in a minute."
+  if (amount < limits.min) return limits.minWhy ?? `The minimum payout is $${limits.min.toFixed(2)}.`
   if (limits.max != null && amount > limits.max) return `The most you can withdraw in one payout is $${limits.max.toFixed(2)}.`
   if (amount > input.available) return "That's more than your available balance."
   return limitProblem(amount, input.totals, input.settings)
@@ -384,6 +422,7 @@ export type AutoSkip =
   | "in_flight"
   | "already_paid_this_period"
   | "below_threshold"
+  | "price_unavailable"
   | "limit_reached"
 
 export type AutoDecision = { ok: true; amount: number } | { ok: false; code: AutoSkip; message: string }
@@ -422,6 +461,8 @@ export function decideAutoPayout(input: {
   if (input.method.holdUntil && input.method.holdUntil > input.now) return skip("method_hold", "The payout method is inside its security hold.")
   if (input.hasPayoutInFlight) return skip("in_flight", "A payout is already in progress.")
   if (input.paidThisPeriod) return skip("already_paid_this_period", "This period's automatic payout was already created.")
+  // Tried again on the next run; nothing is created against a minimum that can't be checked.
+  if (limits.minUnknown) return skip("price_unavailable", "The price needed to check the payout method's minimum couldn't be read.")
   const threshold = Math.max(limits.min, input.threshold ?? limits.min)
   if (!(input.available >= threshold)) return skip("below_threshold", `Available balance is below the $${threshold.toFixed(2)} threshold.`)
   // Whole cents, never more than the maximum for one payout.
@@ -539,5 +580,6 @@ export const AUTO_SKIP_LABELS: Record<AutoSkip, string> = {
   in_flight: "A payout is in progress",
   already_paid_this_period: "Already paid this period",
   below_threshold: "Below the threshold",
+  price_unavailable: "The coin's price couldn't be read",
   limit_reached: "Program limit reached",
 }
