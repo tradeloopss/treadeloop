@@ -10,6 +10,7 @@ import { methodAvailable } from "@/lib/affiliates/providers"
 import { getAffiliateByUser } from "@/lib/affiliates/queries"
 import { methodList, money } from "@/lib/affiliates/types"
 import { BrandMark } from "@/components/brand-mark"
+import { ThemeSwitch } from "@/components/affiliate/theme-switch"
 import { ApplyForm } from "@/components/affiliate/apply-form"
 import { ProgramTerms } from "@/components/affiliate/program-terms"
 import { affiliateHref, appHref } from "@/lib/urls"
@@ -57,15 +58,18 @@ export default async function AffiliateApplyPage() {
             <span className="font-semibold tracking-tight">TradeLoop</span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">Affiliates</span>
           </Link>
-          {user ? (
-            <Link href={appHref("/dashboard")} className="text-sm text-muted-foreground hover:text-foreground">
-              Back to app
-            </Link>
-          ) : (
-            <Link href={appHref("/sign-in?next=/affiliate/apply")} className="inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium hover:bg-muted">
-              Sign in
-            </Link>
-          )}
+          <div className="flex items-center gap-2">
+            <ThemeSwitch compact />
+            {user ? (
+              <Link href={appHref("/dashboard")} className="text-sm text-muted-foreground hover:text-foreground">
+                Back to app
+              </Link>
+            ) : (
+              <Link href={appHref("/sign-in?next=/affiliate/apply")} className="inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium hover:bg-muted">
+                Sign in
+              </Link>
+            )}
+          </div>
         </div>
       </header>
 

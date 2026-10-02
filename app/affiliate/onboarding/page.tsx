@@ -5,6 +5,7 @@ import { SITE_URL, currentRule, getPayoutSettings, getProgram } from "@/lib/affi
 import { methodAvailable } from "@/lib/affiliates/providers"
 import { methodList, money } from "@/lib/affiliates/types"
 import { BrandMark } from "@/components/brand-mark"
+import { ThemeSwitch } from "@/components/affiliate/theme-switch"
 import { OnboardingForm } from "@/components/affiliate/apply-form"
 import { affiliateHref } from "@/lib/urls"
 
@@ -25,10 +26,13 @@ export default async function AffiliateOnboardingPage() {
   return (
     <div className="min-h-svh bg-background">
       <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6 sm:py-16">
-        <div className="flex items-center gap-2">
-          <BrandMark className="size-7" />
-          <span className="font-semibold tracking-tight">TradeLoop</span>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">Affiliates</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BrandMark className="size-7" />
+            <span className="font-semibold tracking-tight">TradeLoop</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">Affiliates</span>
+          </div>
+          <ThemeSwitch compact />
         </div>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Welcome aboard, {affiliate.firstName}</h1>
