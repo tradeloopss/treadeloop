@@ -3,8 +3,9 @@ import type { TierRow } from "@/lib/affiliates/engine"
 import type { ProgramSettings } from "@/lib/affiliates/types"
 import { cn } from "@/lib/utils"
 import { ProgramTerms } from "@/components/affiliate/program-terms"
+import { SiteFooter } from "@/components/site-footer"
+import { ContactSupportTrigger } from "@/components/support/contact-support"
 import { AffiliateNavbar, type NavLink } from "./nav"
-import { AffiliateFooter } from "./sections"
 import { Eyebrow, containerClass } from "./parts"
 
 // The affiliate program's terms, on a page of their own (/affiliate/terms),
@@ -14,14 +15,12 @@ export function AffiliateTermsView({
   tiers,
   signedIn,
   nav,
-  footer,
   urls,
 }: {
   program: ProgramSettings
   tiers: TierRow[]
   signedIn: boolean
   nav: NavLink[]
-  footer: { label: string; href: string }[]
   urls: { site: string; program: string; apply: string; signIn: string; signUp: string; app: string }
 }) {
   return (
@@ -42,7 +41,13 @@ export function AffiliateTermsView({
               <ProgramTerms program={program} tiers={tiers} />
             </div>
             <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-primary/[0.04] px-5 py-4">
-              <p className="text-sm text-muted-foreground">Questions about the terms? Contact support@tradeloop.pro.</p>
+              <p className="text-sm text-muted-foreground">
+                Questions about the terms?{" "}
+                <ContactSupportTrigger category="affiliate" className="cursor-pointer font-medium text-primary hover:underline">
+                  Contact support
+                </ContactSupportTrigger>
+                .
+              </p>
               <a href={urls.apply} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-ring/40">
                 Apply to the program <ArrowRight className="size-4 rtl:rotate-180" aria-hidden />
               </a>
@@ -50,7 +55,7 @@ export function AffiliateTermsView({
           </div>
         </div>
       </main>
-      <AffiliateFooter homeHref={urls.site} links={footer} />
+      <SiteFooter affiliate supportCategory="affiliate" />
     </div>
   )
 }

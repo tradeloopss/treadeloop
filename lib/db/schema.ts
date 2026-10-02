@@ -682,10 +682,22 @@ export const securityEvents = pgTable(
   (t) => [index("security_events_created_idx").on(t.createdAt), index("security_events_user_idx").on(t.userId)]
 )
 
-// In-app support desk: a user opens a ticket, staff reply from /admin/support.
-export const supportTickets = pgTable("support_tickets", {
+// The support desk: a ticket is opened from inside the app (by a signed-in
+// user) or from the Contact Support window anywhere on the site — where the
+// sender may have no account, so the ticket carries their email instead.
+// Staff reply from /admin/support. Shown to people as SUP-<10000 + id>.
+export const supportTickets = pgTable(
+  "support_tickets",
+  {
   id: serial("id").primaryKey(),
-  userId: text("userId").notNull(),
+  userId: text("userId"), // null = sent without an account
+  // Who to answer when there is no account (and what they typed, when there is).
+  email: text("email"),
+  name: text("name"),
+  category: text("category"), // lib/support/request SUPPORT_CATEGORIES; null on older tickets
+  page: text("page"), // host + path the request was sent from
+  // HMAC of the sender's IP (lib/trial-ip), for rate limiting only.
+  ipHash: text("ipHash"),
   subject: text("subject").notNull(),
   status: text("status").notNull().default("open"), // open (needs staff) | waiting (on the user) | closed
   // Answered first: set when the ticket is opened by someone whose affiliate
@@ -694,7 +706,9 @@ export const supportTickets = pgTable("support_tickets", {
   kind: text("kind").notNull().default("support"), // support | feature_request
   lastMessageAt: timestamp("lastMessageAt").notNull().defaultNow(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
-})
+  },
+  (t) => [index("support_tickets_email_idx").on(t.email, t.createdAt), index("support_tickets_ip_idx").on(t.ipHash, t.createdAt)]
+)
 
 export const supportMessages = pgTable(
   "support_messages",
@@ -1752,6 +1766,9 @@ export const emailEvents = pgTable(
     attempts: integer("attempts").notNull().default(0),
     lastError: text("lastError"),
     nextAttemptAt: timestamp("nextAttemptAt").notNull().defaultNow(),
+    // Where a reply should go when it isn't the sender (a support request
+    // forwarded to the team: replying writes to the customer).
+    replyTo: text("replyTo"),
     affiliateId: integer("affiliateId"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     sentAt: timestamp("sentAt"),

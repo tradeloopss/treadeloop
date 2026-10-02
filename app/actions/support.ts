@@ -8,6 +8,9 @@ import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { supportMessages, supportTickets } from "@/lib/db/schema"
 import { userHasPerk } from "@/lib/affiliates/perk-access"
+import { createSupportRequest, type SupportResult } from "@/lib/support/service"
+import type { SupportInput } from "@/lib/support/request"
+import { clientIp, hashIp } from "@/lib/trial-ip"
 
 async function currentUser() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -55,5 +58,35 @@ export async function replyToMyTicket(ticketId: number, body: string): Promise<{
     return { ok: true }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Couldn't send that." }
+  }
+}
+
+// --- Contact Support (works without an account) ---------------------------------
+
+// What the Contact Support window fills in for someone who is signed in. Null
+// for everyone else — which is the usual case on the public pages.
+export async function supportPrefill(): Promise<{ email: string; name: string } | null> {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() })
+    return session?.user ? { email: session.user.email, name: session.user.name ?? "" } : null
+  } catch {
+    return null
+  }
+}
+
+// A request from the Contact Support window. Everything is checked again on
+// the server (lib/support): the fields, the rate limit, who is signed in.
+export async function sendSupportRequest(input: SupportInput): Promise<SupportResult> {
+  try {
+    const requestHeaders = await headers()
+    const session = await auth.api.getSession({ headers: requestHeaders }).catch(() => null)
+    const user = session?.user ? { id: session.user.id, email: session.user.email, name: session.user.name ?? null } : null
+    const result = await createSupportRequest(input, { user, ipHash: hashIp(clientIp(requestHeaders)) })
+    if (result.ok && user) revalidatePath("/support")
+    return result
+  } catch (err) {
+    // Never the raw error: a database or provider message is no use to the sender.
+    console.error("[support] request failed:", err instanceof Error ? err.message : err)
+    return { ok: false, error: "We couldn't send your message right now. Please try again." }
   }
 }

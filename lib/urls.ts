@@ -6,6 +6,15 @@ export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ""
 // A link into the app. Same-origin (relative) unless NEXT_PUBLIC_APP_URL is set.
 export const appHref = (path: string) => `${APP_URL}${path}`
 
+// The public site's own origin (https://www.tradeloop.pro): NEXT_PUBLIC_SITE_URL,
+// else worked out from the app's address when that is on its own subdomain.
+// Unset → empty, so links stay same-origin (previews, localhost).
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? (/^https?:\/\/app\./.test(APP_URL) ? APP_URL.replace("://app.", "://www.") : "")).replace(/\/+$/, "")
+
+// A link to a page of the public site ("/pricing"), from wherever it is shown —
+// the Help Center and the affiliate program live on other addresses.
+export const siteHref = (path: string) => `${SITE_URL}${path === "/" && SITE_URL ? "" : path}`
+
 // The affiliate portal's own origin (e.g. https://affiliate.tradeloop.pro),
 // where it sits at the root: /payouts rather than /affiliate/payouts. Unset →
 // the portal lives under /affiliate on the app's origin (previews, localhost).

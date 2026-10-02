@@ -1,4 +1,5 @@
 import { pool } from "@/lib/db"
+import { ticketIdFromRef } from "@/lib/support/request"
 import { ownerEmails } from "@/lib/subscription"
 import { PLAN_PRICING, type PlanTier } from "@/lib/whop"
 import { RATE_LIMIT_PATTERN } from "@/lib/sync-runs"
@@ -520,27 +521,42 @@ export async function listSecurityEvents(filters: { type?: string; q?: string; u
 
 // --- Support -------------------------------------------------------------------------
 
-export async function listTickets(status: string | undefined) {
+// `search`: a ticket number (SUP-10291), or part of the sender's email, name
+// or the subject. A ticket sent without an account has no user: its own email
+// and name are the sender's.
+export async function listTickets(status: string | undefined, search = "") {
   const params: unknown[] = []
-  let where = ""
+  const where: string[] = []
   if (status === "open" || status === "waiting" || status === "closed") {
     params.push(status)
-    where = `where t.status = $1`
+    where.push(`t.status = $${params.length}`)
   }
-  return q<{ id: number; subject: string; status: string; priority: boolean; kind: string; lastMessageAt: Date; createdAt: Date; userId: string; email: string | null; name: string | null; messages: string; lastFromStaff: boolean | null }>(
-    `select t.id, t.subject, t.status, t.priority, t.kind, t."lastMessageAt", t."createdAt", t."userId", u.email, u.name,
+  const term = search.trim().slice(0, 100)
+  if (term) {
+    const id = ticketIdFromRef(term)
+    if (id != null) {
+      params.push(id)
+      where.push(`t.id = $${params.length}`)
+    } else {
+      params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
+      const p = `$${params.length}`
+      where.push(`(t.subject ilike ${p} or t.email ilike ${p} or t.name ilike ${p} or u.email ilike ${p} or u.name ilike ${p})`)
+    }
+  }
+  return q<{ id: number; subject: string; status: string; priority: boolean; kind: string; category: string | null; lastMessageAt: Date; createdAt: Date; userId: string | null; email: string | null; name: string | null; messages: string; lastFromStaff: boolean | null }>(
+    `select t.id, t.subject, t.status, t.priority, t.kind, t.category, t."lastMessageAt", t."createdAt", t."userId", coalesce(u.email, t.email) as email, coalesce(t.name, u.name) as name,
        (select count(*) from support_messages m where m."ticketId" = t.id) as messages,
        (select m."fromStaff" from support_messages m where m."ticketId" = t.id order by m."createdAt" desc limit 1) as "lastFromStaff"
      from support_tickets t left join "user" u on u.id = t."userId"
-     ${where}
+     ${where.length ? `where ${where.join(" and ")}` : ""}
      order by (t.status = 'open') desc, t.priority desc, t."lastMessageAt" desc limit 200`,
     params
   )
 }
 
 export async function getTicket(id: number) {
-  const [ticket] = await q<{ id: number; subject: string; status: string; priority: boolean; kind: string; createdAt: Date; userId: string; email: string | null; name: string | null }>(
-    `select t.id, t.subject, t.status, t.priority, t.kind, t."createdAt", t."userId", u.email, u.name from support_tickets t left join "user" u on u.id = t."userId" where t.id = $1`,
+  const [ticket] = await q<{ id: number; subject: string; status: string; priority: boolean; kind: string; category: string | null; page: string | null; createdAt: Date; userId: string | null; email: string | null; name: string | null }>(
+    `select t.id, t.subject, t.status, t.priority, t.kind, t.category, t.page, t."createdAt", t."userId", coalesce(u.email, t.email) as email, coalesce(t.name, u.name) as name from support_tickets t left join "user" u on u.id = t."userId" where t.id = $1`,
     [id]
   )
   if (!ticket) return null

@@ -8,6 +8,7 @@ import { TicketFlags, TicketStatus } from "@/components/ticket-status"
 import { TicketThread } from "@/components/ticket-thread"
 import { StaffReplyForm } from "@/components/admin/staff-reply-form"
 import { fmtDate } from "@/components/admin/ui"
+import { categoryLabel, ticketRef } from "@/lib/support/request"
 
 export default async function AdminTicketPage({ params }: { params: Promise<{ id: string }> }) {
   const admin = await requireAdmin({ support: ["view"] })
@@ -21,13 +22,26 @@ export default async function AdminTicketPage({ params }: { params: Promise<{ id
       <Link href="/admin/support" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> Support
       </Link>
+      <p className="mb-1 font-mono text-xs text-muted-foreground">{ticketRef(ticket.id)}</p>
       <div className="mb-1 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">{ticket.subject}</h1>
         <TicketStatus status={ticket.status} forStaff />
         <TicketFlags priority={ticket.priority} kind={ticket.kind} />
       </div>
       <p className="mb-5 text-sm text-muted-foreground">
-        From <Link href={`/admin/users/${ticket.userId}`} className="text-foreground hover:text-primary">{ticket.email ?? ticket.userId}</Link> · opened {fmtDate(ticket.createdAt)}
+        From{" "}
+        {ticket.userId ? (
+          <Link href={`/admin/users/${ticket.userId}`} className="text-foreground hover:text-primary">{ticket.email ?? ticket.userId}</Link>
+        ) : (
+          <span className="text-foreground">{ticket.name ? `${ticket.name} <${ticket.email}>` : ticket.email}</span>
+        )}
+        {!ticket.userId && " (no account — your reply is emailed to them)"} · opened {fmtDate(ticket.createdAt)}
+        {ticket.category && ` · ${categoryLabel(ticket.category)}`}
+        {ticket.page && (
+          <>
+            {" "}· sent from <span className="font-mono text-xs">{ticket.page}</span>
+          </>
+        )}
       </p>
       <TicketThread
         viewer="staff"
@@ -36,7 +50,7 @@ export default async function AdminTicketPage({ params }: { params: Promise<{ id
           body: m.body,
           fromStaff: m.fromStaff,
           createdAt: m.createdAt,
-          authorLabel: m.fromStaff ? `${m.authorName || m.authorEmail || "Staff"} (staff)` : m.authorName || m.authorEmail || "User",
+          authorLabel: m.fromStaff ? `${m.authorName || m.authorEmail || "Staff"} (staff)` : m.authorName || m.authorEmail || ticket.name || ticket.email || "User",
         }))}
       />
       {roleCan(admin.role, { support: ["reply"] }) && (

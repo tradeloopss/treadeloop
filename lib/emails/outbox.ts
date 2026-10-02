@@ -21,11 +21,11 @@ const STUCK_MS = 10 * 60_000
 type Row = typeof emailEvents.$inferSelect
 
 // One attempt for a row this caller has claimed.
-async function attempt(row: Pick<Row, "id" | "key" | "sender" | "recipient" | "subject" | "html" | "text" | "attempts">): Promise<"sent" | "queued" | "failed"> {
+async function attempt(row: Pick<Row, "id" | "key" | "sender" | "recipient" | "subject" | "html" | "text" | "attempts" | "replyTo">): Promise<"sent" | "queued" | "failed"> {
   try {
     // The provider is given the event's key too, so even a retry of a send
     // whose answer was lost can't deliver a second copy.
-    await sendEmail({ to: row.recipient, from: row.sender, subject: row.subject, text: row.text, html: row.html, idempotencyKey: row.key })
+    await sendEmail({ to: row.recipient, from: row.sender, replyTo: row.replyTo, subject: row.subject, text: row.text, html: row.html, idempotencyKey: row.key })
     await db.update(emailEvents).set({ status: "sent", sentAt: new Date(), lastError: null }).where(eq(emailEvents.id, row.id))
     return "sent"
   } catch (e) {
@@ -45,12 +45,12 @@ export type Delivery = "sent" | "queued" | "failed" | "duplicate" | "skipped"
 // Emails one event. `key` identifies the event ("payout_sent:42"); the unique
 // index on it is what makes a second call — a retried job, two workers, a
 // double click — send nothing.
-export async function deliver(input: { key: string; to: string; doc: EmailDoc; affiliateId?: number | null }): Promise<Delivery> {
+export async function deliver(input: { key: string; to: string; doc: EmailDoc; affiliateId?: number | null; replyTo?: string | null }): Promise<Delivery> {
   if (!emailConfigured()) return "skipped"
   const { html, text } = renderEmail(input.doc)
   const [row] = await db
     .insert(emailEvents)
-    .values({ key: input.key.slice(0, 200), template: input.doc.template, sender: senderAddress(input.doc.sender), recipient: input.to, subject: input.doc.subject, html, text, status: "sending", attempts: 1, affiliateId: input.affiliateId ?? null })
+    .values({ key: input.key.slice(0, 200), template: input.doc.template, sender: senderAddress(input.doc.sender), recipient: input.to, subject: input.doc.subject, html, text, status: "sending", attempts: 1, affiliateId: input.affiliateId ?? null, replyTo: input.replyTo ?? null })
     .onConflictDoNothing({ target: emailEvents.key })
     .returning()
   if (!row) return "duplicate"

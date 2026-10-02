@@ -5,7 +5,7 @@ import { HELP, findArticle } from "@/lib/help/content"
 import { ArticleBody, headingSlug } from "@/components/help/help-ui"
 import { HelpFeedback } from "@/components/help/help-feedback"
 import { BrandMark } from "@/components/brand-mark"
-import { appHref } from "@/lib/urls"
+import { ContactSupportTrigger } from "@/components/support/contact-support"
 
 export function generateStaticParams() {
   return HELP.flatMap((c) => c.articles.map((a) => ({ category: c.slug, slug: a.slug })))
@@ -75,10 +75,10 @@ export default async function ArticlePage({ params }: { params: Promise<{ catego
 
       <div className="mt-10 rounded-2xl border bg-card p-5">
         <p className="text-sm font-medium">Still need a hand?</p>
-        <p className="mt-1 text-sm text-muted-foreground">Open a support ticket from inside the app and our team will help.</p>
-        <a href={appHref("/support")} className="mt-3 inline-flex rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
+        <p className="mt-1 text-sm text-muted-foreground">Send us a message and our team will help — no account needed.</p>
+        <ContactSupportTrigger className="mt-3 inline-flex cursor-pointer rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
           Contact support
-        </a>
+        </ContactSupportTrigger>
       </div>
 
       {others.length > 0 && (

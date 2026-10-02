@@ -46,7 +46,7 @@ import { isAdminRole, type AdminRole } from "@/lib/admin/access"
 import { isOwnerEmail } from "@/lib/subscription"
 import { syncRithmicConnection } from "@/lib/rithmic-sync"
 import { setRithmicSyncIntervalMs, RITHMIC_SYNC_INTERVAL_OPTIONS } from "@/lib/app-settings"
-import { sendEmail } from "@/lib/email"
+import { emailSupportReply } from "@/lib/support/service"
 import { importCsvText, logImport } from "@/lib/trade-importer"
 import * as whop from "@/lib/admin/whop"
 
@@ -336,25 +336,23 @@ export async function staffReply(ticketId: number, body: string, status: "waitin
     const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId))
     if (!ticket) throw new Error("Request not found")
 
-    await db.insert(supportMessages).values({ ticketId, authorId: admin.id, fromStaff: true, body: text })
+    const [message] = await db.insert(supportMessages).values({ ticketId, authorId: admin.id, fromStaff: true, body: text }).returning({ id: supportMessages.id })
     await db.update(supportTickets).set({ status, lastMessageAt: new Date() }).where(eq(supportTickets.id, ticketId))
     await logAdminAction(admin, "support.reply", ticket.userId, { ticketId, status })
 
-    const target = await getTarget(ticket.userId)
-    const link = `${process.env.BETTER_AUTH_URL ?? ""}/support/${ticketId}`
+    // Answered to the account when there is one, else to the address the
+    // request came from. Sent as TradeLoop Support, once, through the outbox.
+    const account = ticket.userId ? await getTarget(ticket.userId) : null
+    const to = account?.email ?? ticket.email
+    const where = account ? "the user will see it in the app" : "it is on the ticket"
+    if (!to) return `Reply saved — ${where}, but there is no email address to send it to.`
     try {
-      await sendEmail({
-        to: target.email,
-        subject: `Re: ${ticket.subject}`,
-        text: `TradeLoop support replied to your request "${ticket.subject}":
-
-${text}
-
-Reply here: ${link}`,
-      })
-      return "Reply sent."
+      const sent = await emailSupportReply({ ticketId, messageId: message.id, subject: ticket.subject, reply: text, to, name: ticket.name ?? account?.name ?? null, signedIn: !!account })
+      if (sent === "sent") return `Reply sent to ${to}.`
+      if (sent === "queued") return `Reply saved — the email to ${to} didn't go out yet and will be retried.`
+      return `Reply saved — ${where}, but the email didn't go out${sent === "skipped" ? " (email isn't set up on this deployment)" : ""}.`
     } catch (err) {
-      return `Reply saved — the user will see it in the app, but the email didn't go out: ${err instanceof Error ? err.message : err}`
+      return `Reply saved — ${where}, but the email didn't go out: ${err instanceof Error ? err.message : err}`
     }
   })
 }

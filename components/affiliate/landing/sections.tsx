@@ -1,6 +1,5 @@
 import { BadgeDollarSign, Headset, Link2, type LucideIcon, Megaphone, ShieldCheck, Sprout, Wallet } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { BrandMark } from "@/components/brand-mark"
 import { Eyebrow, HandNote, containerClass } from "./parts"
 
 // --- The application ---------------------------------------------------------------
@@ -68,17 +67,18 @@ export function AffiliateBenefits({ items }: { items: WhyItem[] }) {
           Your Success Matters
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">At TradeLoop, we provide the tools, resources, and support you need to turn your audience into income.</p>
-        {/* four across from a phone up; two by two only on the narrowest screens */}
-        <ul className="mx-auto mt-8 grid max-w-5xl grid-cols-2 gap-x-3 gap-y-6 min-[420px]:grid-cols-4 sm:gap-x-6">
+        {/* Four across on a phone (icon over a short title) and on a desktop (title on ONE line, text under it);
+            two by two on the narrowest screens and on tablets, where four wouldn't fit side by side. */}
+        <ul className="mt-8 grid grid-cols-2 gap-x-3 gap-y-6 min-[420px]:grid-cols-4 sm:grid-cols-2 sm:gap-x-8 lg:grid-cols-4 lg:gap-x-6">
           {items.map((item) => {
             const Icon = WHY_ICONS[item.icon]
             return (
-              <li key={item.title} className="flex flex-col items-center gap-2.5 sm:flex-row sm:items-start sm:gap-3 sm:text-start lg:px-2">
+              <li key={item.title} className="flex flex-col items-center gap-2.5 sm:flex-row sm:items-start sm:gap-3 sm:text-start">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-background text-primary">
                   <Icon className="size-5" aria-hidden />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold leading-tight sm:text-sm">{item.title}</p>
+                  <p className="text-xs font-semibold leading-tight sm:text-sm lg:whitespace-nowrap">{item.title}</p>
                   <p className="mt-1 hidden text-[13px] leading-relaxed text-muted-foreground sm:block">{item.body}</p>
                 </div>
               </li>
@@ -87,28 +87,5 @@ export function AffiliateBenefits({ items }: { items: WhyItem[] }) {
         </ul>
       </div>
     </section>
-  )
-}
-
-// --- Footer -------------------------------------------------------------------------
-
-export function AffiliateFooter({ homeHref, links }: { homeHref: string; links: { label: string; href: string }[] }) {
-  return (
-    <footer className="border-t">
-      <div className={cn(containerClass, "flex flex-col items-center gap-4 py-7 text-xs text-muted-foreground sm:flex-row sm:justify-between")}>
-        <a href={homeHref} className="flex items-center gap-2 rounded-md text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/40">
-          <BrandMark className="size-6" />
-          <span className="text-sm font-semibold tracking-tight">TradeLoop</span>
-        </a>
-        <p>© {new Date().getFullYear()} TradeLoop. Built for better trading.</p>
-        <nav aria-label="Footer" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-          {links.map((l) => (
-            <a key={l.label} href={l.href} className="rounded outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40">
-              {l.label}
-            </a>
-          ))}
-        </nav>
-      </div>
-    </footer>
   )
 }

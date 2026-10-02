@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { BrandMark } from "@/components/brand-mark"
+import { SiteFooter } from "@/components/site-footer"
 import { getLocale } from "@/lib/i18n/server"
 
 export async function generateMetadata() {
@@ -11,17 +12,20 @@ export async function generateMetadata() {
 export default async function PrivacyPage() {
   const locale = await getLocale()
   return (
-    <div className="min-h-svh bg-gradient-to-b from-background to-accent/20 px-4 py-16">
-      <div className="mx-auto mb-10 flex max-w-3xl items-center justify-center gap-2">
-        <Link href="/" className="flex items-center gap-2">
-          <BrandMark className="size-8" />
-          <span className="text-lg font-semibold tracking-tight">TradeLoop</span>
-        </Link>
-      </div>
+    <div className="flex min-h-svh flex-col">
+      <div className="flex-1 bg-gradient-to-b from-background to-accent/20 px-4 py-16">
+        <div className="mx-auto mb-10 flex max-w-3xl items-center justify-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
+            <BrandMark className="size-8" />
+            <span className="text-lg font-semibold tracking-tight">TradeLoop</span>
+          </Link>
+        </div>
 
-      <div className="mx-auto max-w-3xl space-y-8 rounded-2xl border bg-card p-8 sm:p-10">
-        {locale === "ar" ? <PrivacyArabic /> : <PrivacyEnglish />}
+        <div className="mx-auto max-w-3xl space-y-8 rounded-2xl border bg-card p-8 sm:p-10">
+          {locale === "ar" ? <PrivacyArabic /> : <PrivacyEnglish />}
+        </div>
       </div>
+      <SiteFooter />
     </div>
   )
 }

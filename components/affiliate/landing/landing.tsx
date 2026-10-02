@@ -5,7 +5,8 @@ import { ApplyForm } from "@/components/affiliate/apply-form"
 import { AffiliateNavbar } from "./nav"
 import { AffiliateHero } from "./hero"
 import { AffiliateTierProgression } from "./tiers"
-import { AffiliateApplication, AffiliateBenefits, AffiliateFooter } from "./sections"
+import { SiteFooter } from "@/components/site-footer"
+import { AffiliateApplication, AffiliateBenefits } from "./sections"
 
 // The public affiliate page, drawn from plain data (app/affiliate/apply/page.tsx
 // loads it). Order matters: hero → how the tiers work → the application → why
@@ -150,22 +151,13 @@ export function AffiliateLanding({ user, affiliate, program, tiers, payoutMethod
           items={[
             { icon: "commission", title: "Competitive Commissions", body: `Earn up to ${topRate}% of what the customers you refer pay${recurring ? ", payment after payment" : ""}.` },
             { icon: "marketing", title: "Marketing Resources", body: "Get banners, tracking links, and promotional materials." },
-            { icon: "support", title: "Dedicated Affiliate Support", body: "Our team is here to help you every step of the way." },
+            { icon: "support", title: "Dedicated Support", body: "Our team is here to help you every step of the way." },
             { icon: "trust", title: "Transparent Tracking", body: "Every click, referral and commission is visible in your dashboard as it happens." },
           ]}
         />
       </main>
 
-      <AffiliateFooter
-        homeHref={urls.site}
-        links={[
-          { label: "Pricing", href: `${urls.site}/pricing` },
-          { label: "Help", href: urls.help },
-          { label: "Program terms", href: urls.terms },
-          { label: "Privacy", href: `${urls.site}/privacy` },
-          { label: "Terms", href: `${urls.site}/terms` },
-        ]}
-      />
+      <SiteFooter affiliate supportCategory="affiliate" />
     </div>
   )
 }

@@ -1,6 +1,8 @@
 import type React from "react"
 import Link from "next/link"
 import { BrandMark } from "@/components/brand-mark"
+import { SiteFooter } from "@/components/site-footer"
+import { ContactSupportTrigger } from "@/components/support/contact-support"
 import { appHref } from "@/lib/urls"
 
 export const metadata = {
@@ -20,7 +22,7 @@ export default function HelpLayout({ children }: { children: React.ReactNode }) 
           </Link>
           <nav className="ms-auto flex items-center gap-4 text-sm">
             <Link href="/help" className="hidden text-muted-foreground hover:text-foreground sm:inline">Guides</Link>
-            <a href={appHref("/support")} className="hidden text-muted-foreground hover:text-foreground sm:inline">Contact</a>
+            <ContactSupportTrigger className="hidden cursor-pointer text-muted-foreground hover:text-foreground sm:inline">Contact</ContactSupportTrigger>
             <a href={appHref("/dashboard")} className="rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-opacity hover:opacity-90">
               Open app
             </a>
@@ -30,14 +32,7 @@ export default function HelpLayout({ children }: { children: React.ReactNode }) 
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:py-10">{children}</main>
 
-      <footer className="border-t">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-6 text-sm text-muted-foreground">
-          <span>© TradeLoop</span>
-          <a href={appHref("/support")} className="hover:text-foreground">Contact support</a>
-          <a href={appHref("/terms")} className="hover:text-foreground">Terms</a>
-          <a href={appHref("/privacy")} className="hover:text-foreground">Privacy</a>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

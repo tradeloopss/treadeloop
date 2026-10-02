@@ -29,13 +29,6 @@ export default async function AffiliateTermsPage() {
         { label: "Affiliates", href: programHref, active: true },
         { label: "Help", href: help },
       ]}
-      footer={[
-        { label: "Pricing", href: `${SITE_URL}/pricing` },
-        { label: "Help", href: help },
-        { label: "Affiliate program", href: programHref },
-        { label: "Privacy", href: `${SITE_URL}/privacy` },
-        { label: "Terms", href: `${SITE_URL}/terms` },
-      ]}
       urls={{ site: SITE_URL, program: programHref, apply: `${programHref}#apply`, signIn: appHref("/sign-in?next=/affiliate/apply"), signUp: appHref("/sign-up?next=/affiliate/apply"), app: appHref("/dashboard") }}
     />
   )

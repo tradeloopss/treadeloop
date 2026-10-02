@@ -8,6 +8,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
 import { LocaleProvider } from '@/components/locale-provider'
 import { AffiliateTracker } from '@/components/affiliate/tracker'
+import { ContactSupportProvider } from '@/components/support/contact-support'
 import { dirFor } from '@/lib/i18n'
 import { getLocale, getT } from '@/lib/i18n/server'
 import { loadMessages } from '@/lib/i18n/messages'
@@ -67,7 +68,8 @@ export default async function RootLayout({
         <LocaleProvider locale={locale} messages={messages}>
           <DirectionProvider direction={dir}>
             <ThemeProvider>
-              {children}
+              {/* "Contact support" anywhere on the site opens one window, signed in or not. */}
+              <ContactSupportProvider>{children}</ContactSupportProvider>
               <Toaster richColors position="top-center" dir={dir} />
               {/* Records ?ref= referral-link visits (no-op on every other page load). */}
               <AffiliateTracker />

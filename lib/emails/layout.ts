@@ -9,7 +9,7 @@
 // readable with images blocked (the logo has alt text and sits next to the
 // wordmark as text).
 
-export type Sender = "affiliate" | "payments"
+export type Sender = "affiliate" | "payments" | "support"
 export type Tone = "success" | "info" | "warning" | "danger" | "neutral"
 
 // A value that may be missing. Rows and sections with nothing to show are
@@ -163,24 +163,46 @@ function blockText(b: Block): string {
   }
 }
 
-const FOOTER_LINKS: [string, string][] = [
-  ["Affiliate Dashboard", appUrl("/affiliate")],
-  ["Support", appUrl("/affiliate/support")],
-  ["Payouts", appUrl("/affiliate/payouts")],
-]
-const LEGAL_LINKS: [string, string][] = [
-  ["Manage Email Preferences", appUrl("/affiliate/settings")],
-  ["Privacy Policy", siteUrl("/privacy")],
-  ["Terms", siteUrl("/terms")],
-]
-const REASON = "You are receiving this email because you have an account or affiliate relationship with TradeLoop."
+// What sits under the card. The affiliate program's emails link into the
+// portal; support's don't assume the reader is an affiliate, or has an account.
+type Footer = { links: [string, string][]; legal: [string, string][]; reason: string }
+const HELP_URL = /^https:\/\//.test(process.env.NEXT_PUBLIC_HELP_URL ?? "") ? process.env.NEXT_PUBLIC_HELP_URL!.replace(/\/+$/, "") : siteUrl("/help")
+const PROGRAM_FOOTER: Footer = {
+  links: [
+    ["Affiliate Dashboard", appUrl("/affiliate")],
+    ["Support", appUrl("/affiliate/support")],
+    ["Payouts", appUrl("/affiliate/payouts")],
+  ],
+  legal: [
+    ["Manage Email Preferences", appUrl("/affiliate/settings")],
+    ["Privacy Policy", siteUrl("/privacy")],
+    ["Terms", siteUrl("/terms")],
+  ],
+  reason: "You are receiving this email because you have an account or affiliate relationship with TradeLoop.",
+}
+const FOOTERS: Record<Sender, Footer> = {
+  affiliate: PROGRAM_FOOTER,
+  payments: PROGRAM_FOOTER,
+  support: {
+    links: [
+      ["Help Center", HELP_URL],
+      ["TradeLoop", siteUrl("")],
+    ],
+    legal: [
+      ["Privacy Policy", siteUrl("/privacy")],
+      ["Terms", siteUrl("/terms")],
+    ],
+    reason: "You are receiving this email because a support request was sent to TradeLoop with this address.",
+  },
+}
 
-export const SENDER_NAMES: Record<Sender, string> = { affiliate: "TradeLoop Affiliates", payments: "TradeLoop Payments" }
+export const SENDER_NAMES: Record<Sender, string> = { affiliate: "TradeLoop Affiliates", payments: "TradeLoop Payments", support: "TradeLoop Support" }
 
 // --- the whole email ----------------------------------------------------------
 
 export function renderEmail(doc: EmailDoc): { html: string; text: string } {
   const year = new Date().getUTCFullYear()
+  const { links: FOOTER_LINKS, legal: LEGAL_LINKS, reason: REASON } = FOOTERS[doc.sender]
   const link = ([label, url]: [string, string]) => `<a href="${esc(url)}" target="_blank" style="color:${C.muted};text-decoration:underline">${esc(label)}</a>`
   const body = [
     para(doc.greeting),

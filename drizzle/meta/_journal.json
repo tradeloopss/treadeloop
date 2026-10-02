@@ -239,6 +239,13 @@
       "when": 1790990000000,
       "tag": "0033_affiliate_tiers_perks",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791000000000,
+      "tag": "0034_support_requests",
+      "breakpoints": true
     }
   ]
 }
