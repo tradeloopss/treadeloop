@@ -21,7 +21,8 @@ const Req = () => (
 
 const BLANK = { firstName: "", lastName: "", country: "", website: "", audienceSize: "", trafficSource: "", promotionMethod: "", reason: "" }
 
-export function ApplyForm({ email, defaults, countries }: { email: string; defaults: Partial<typeof BLANK>; countries: { code: string; name: string }[] }) {
+// `termsHref`: the program terms page.
+export function ApplyForm({ email, defaults, countries, termsHref }: { email: string; defaults: Partial<typeof BLANK>; countries: { code: string; name: string }[]; termsHref: string }) {
   const router = useRouter()
   const [form, setForm] = useState({ ...BLANK, ...defaults })
   const [socials, setSocials] = useState<Record<string, string>>({})
@@ -140,10 +141,11 @@ export function ApplyForm({ email, defaults, countries }: { email: string; defau
         <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" required />
         <span>
           I agree to the{" "}
-          <a href="#terms" className="font-medium text-primary hover:underline">
+          {/* a new tab: what has been typed into the form stays where it is */}
+          <a href={termsHref} target="_blank" rel="noopener" className="font-medium text-primary hover:underline">
             affiliate program terms
-          </a>{" "}
-          below, including no self-referrals, no spam, and no bidding on TradeLoop brand keywords.
+          </a>
+          , including no self-referrals, no spam, and no bidding on TradeLoop brand keywords.
         </span>
       </label>
 

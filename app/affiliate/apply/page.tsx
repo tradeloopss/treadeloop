@@ -41,6 +41,7 @@ export default async function AffiliateApplyPage() {
         // The Help Center's own address, or /help on the public site (never on this host, where it isn't served).
         help: HELP_URL.startsWith("http") ? HELP_URL : `${SITE_URL}${HELP_URL}`,
         self: affiliateHref("/affiliate/apply"),
+        terms: affiliateHref("/affiliate/terms"),
         signIn: appHref("/sign-in?next=/affiliate/apply"),
         signUp: appHref("/sign-up?next=/affiliate/apply"),
         app: appHref("/dashboard"),

@@ -23,7 +23,7 @@ function appOrigin(hostname: string) {
 // The affiliate portal's pages, as they appear on affiliate.<domain> (the
 // first path segment). The portal's root is the overview. Keep in sync with
 // the folders under app/affiliate.
-const AFFILIATE_SECTIONS = new Set(["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "onboarding", "export"])
+const AFFILIATE_SECTIONS = new Set(["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "terms", "onboarding", "export"])
 const isAffiliatePath = (pathname: string) => pathname === "/affiliate" || pathname.startsWith("/affiliate/")
 // "/affiliate/payouts" → "/payouts"; "/affiliate" → "/"
 const stripAffiliate = (pathname: string) => pathname.slice("/affiliate".length) || "/"

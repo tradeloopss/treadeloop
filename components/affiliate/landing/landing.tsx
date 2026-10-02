@@ -2,16 +2,14 @@ import { ArrowRight, Clock, ShieldAlert, UserPlus, XCircle } from "lucide-react"
 import type { TierRow } from "@/lib/affiliates/engine"
 import { money, type ProgramSettings } from "@/lib/affiliates/types"
 import { ApplyForm } from "@/components/affiliate/apply-form"
-import { ProgramTerms } from "@/components/affiliate/program-terms"
 import { AffiliateNavbar } from "./nav"
 import { AffiliateHero } from "./hero"
 import { AffiliateTierProgression } from "./tiers"
 import { AffiliateApplication, AffiliateBenefits, AffiliateFooter } from "./sections"
-import { containerClass } from "./parts"
 
 // The public affiliate page, drawn from plain data (app/affiliate/apply/page.tsx
 // loads it). Order matters: hero → how the tiers work → the application → why
-// join. The tiers are a ladder an affiliate climbs automatically, never a
+// join. (The program terms are a page of their own: ./terms.tsx.) The tiers are a ladder an affiliate climbs automatically, never a
 // choice, so the only thing on this page that can be applied for is the
 // program itself.
 
@@ -28,7 +26,8 @@ export type LandingProps = {
   // the visitor's country, to prefill the form
   country: string
   countries: { code: string; name: string }[]
-  urls: { site: string; help: string; self: string; signIn: string; signUp: string; app: string }
+  // `terms`: the program terms, on their own page
+  urls: { site: string; help: string; self: string; terms: string; signIn: string; signUp: string; app: string }
 }
 
 // Where an application stands, in place of the form.
@@ -135,6 +134,7 @@ export function AffiliateLanding({ user, affiliate, program, tiers, payoutMethod
             <div className="mt-5">
               <ApplyForm
                 email={user.email}
+                termsHref={urls.terms}
                 countries={countries}
                 defaults={
                   affiliate
@@ -154,21 +154,6 @@ export function AffiliateLanding({ user, affiliate, program, tiers, payoutMethod
             { icon: "trust", title: "Transparent Tracking", body: "Every click, referral and commission is visible in your dashboard as it happens." },
           ]}
         />
-
-        <section id="terms" aria-labelledby="terms-heading" className="scroll-mt-16">
-          <div className={`${containerClass} py-12 sm:py-16`}>
-            <div className="mx-auto max-w-3xl rounded-2xl border bg-card">
-              <div className="border-b px-5 py-4 sm:px-6">
-                <h2 id="terms-heading" className="text-base font-semibold tracking-tight">
-                  Program terms
-                </h2>
-              </div>
-              <div className="p-5 sm:p-6">
-                <ProgramTerms program={program} startRate={startRate} scheduled={activeTiers.some((t) => t.introMonths != null)} />
-              </div>
-            </div>
-          </div>
-        </section>
       </main>
 
       <AffiliateFooter
@@ -176,7 +161,7 @@ export function AffiliateLanding({ user, affiliate, program, tiers, payoutMethod
         links={[
           { label: "Pricing", href: `${urls.site}/pricing` },
           { label: "Help", href: urls.help },
-          { label: "Program terms", href: "#terms" },
+          { label: "Program terms", href: urls.terms },
           { label: "Privacy", href: `${urls.site}/privacy` },
           { label: "Terms", href: `${urls.site}/terms` },
         ]}

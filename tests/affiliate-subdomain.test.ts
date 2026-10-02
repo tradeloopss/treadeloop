@@ -19,7 +19,7 @@ test("affiliate.<domain>: the portal sits at the root, with clean addresses", as
   assert.equal((await visit("https://affiliate.tradeloop.pro/payouts")).rewrite, "https://affiliate.tradeloop.pro/affiliate/payouts")
   assert.equal((await visit("https://affiliate.tradeloop.pro/referrals?status=active&page=2")).rewrite, "https://affiliate.tradeloop.pro/affiliate/referrals?status=active&page=2")
   assert.equal((await visit("https://affiliate.tradeloop.pro/export/payouts")).rewrite, "https://affiliate.tradeloop.pro/affiliate/export/payouts")
-  for (const section of ["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "onboarding"]) {
+  for (const section of ["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "terms", "onboarding"]) {
     const r = await visit(`https://affiliate.tradeloop.pro/${section}`)
     assert.deepEqual([r.status, r.rewrite], [200, `https://affiliate.tradeloop.pro/affiliate/${section}`], section)
   }
@@ -43,6 +43,9 @@ test("the old address moves to the subdomain; everything else is left alone", as
   assert.equal((await visit("https://app.tradeloop.pro/affiliate/payouts?stripe=return")).location, "https://affiliate.tradeloop.pro/payouts?stripe=return")
   assert.equal((await visit("https://www.tradeloop.pro/affiliate/apply")).location, "https://affiliate.tradeloop.pro/apply")
   assert.equal((await visit("https://tradeloop.pro/affiliate/apply")).location, "https://affiliate.tradeloop.pro/apply")
+  // the program terms have a page of their own there; the site's own /terms is a different page and stays on www
+  assert.equal((await visit("https://www.tradeloop.pro/affiliate/terms")).location, "https://affiliate.tradeloop.pro/terms")
+  assert.deepEqual(await visit("https://www.tradeloop.pro/terms"), { status: 200, location: null, rewrite: null })
   // not the portal: unchanged behaviour
   assert.deepEqual(await visit("https://app.tradeloop.pro/dashboard"), { status: 200, location: null, rewrite: null })
   assert.deepEqual(await visit("https://app.tradeloop.pro/admin/affiliates/payouts"), { status: 200, location: null, rewrite: null })
