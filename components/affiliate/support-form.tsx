@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { contactAffiliateSupport } from "@/app/actions/affiliate"
 import { selectClass } from "./ui"
+import { appHref } from "@/lib/urls"
 
 const TOPICS = ["A commission or balance", "A payout", "Tracking or a missing referral", "My account", "Something else"]
 
@@ -26,7 +27,7 @@ export function AffiliateSupportForm() {
         <p className="mt-3 text-sm font-medium">Message sent</p>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">We usually reply within one business day. You&apos;ll get the answer by email and in your support requests.</p>
         <div className="mt-4 flex gap-2">
-          <Link href={`/support/${ticketId}`} className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          <Link href={appHref(`/support/${ticketId}`)} className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             View request
           </Link>
           <Button variant="outline" onClick={() => (setTicketId(null), setMessage(""))}>

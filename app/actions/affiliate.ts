@@ -11,7 +11,7 @@ import { claimAttribution } from "@/lib/affiliates/attribution"
 import { createCampaign, createLink, setCampaignStatus, setLinkStatus, updateCampaign, type CampaignInput } from "@/lib/affiliates/campaigns"
 import { createCoupon, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
 import { addPayoutMethod, cancelOwnPayout, removePayoutMethod, renameMethod, requestPayout, setAutoPayout, setDefaultMethod, setMethodEnabled, startStripeOnboarding, type Actor } from "@/lib/affiliates/payouts"
-import { referralDetail, type ReferralDetail } from "@/lib/affiliates/queries"
+import { payoutsFor, referralDetail, type ReferralDetail } from "@/lib/affiliates/queries"
 import { ATTRIBUTION_COOKIE, attributionCookieDomain } from "@/lib/affiliates/token"
 
 // Everything an affiliate (or applicant) can do. The acting affiliate always
@@ -210,15 +210,25 @@ export async function saveAutoPayout(input: { enabled: boolean; threshold: numbe
   })
 }
 
+// What the request window shows once a payout exists — as the server stored
+// it, not as the browser asked for it.
+export type RequestedPayout = { id: number; amount: number; fee: number; net: number; status: string; sending: boolean; methodType: string; methodLabel: string; network: string | null; asset: string | null }
+
 // `key` is generated when the request dialog opens: a double-click or a retry
-// with the same key returns the payout that was already created.
-export async function submitPayoutRequest(input: { amount: number; methodId: number; key: string }): Promise<ActionResult> {
-  return run(async () => {
+// with the same key returns the payout that was already created. The amount,
+// the fee, the eligibility and the destination are all decided on the server
+// (payouts.createPayout); nothing the browser says about them is trusted.
+export async function requestPayoutNow(input: { amount: number; methodId: number; key: string }): Promise<{ ok: true; payout: RequestedPayout } | { ok: false; error: string }> {
+  try {
     const { affiliateId, actor } = await payoutActor()
     const result = await requestPayout({ affiliateId, amount: Number(input.amount), methodId: Number(input.methodId), idempotencyKey: String(input.key), actor })
-    if (!result.created) return "That payout was already requested."
-    return result.sending ? "Payout approved. It's being sent to your wallet and completes once the network confirms it." : "Payout requested."
-  })
+    const [p] = (await payoutsFor(affiliateId)).filter((row) => row.id === result.id)
+    revalidatePath("/affiliate", "layout")
+    if (!p) return { ok: false, error: "Your payout was requested, but it couldn't be shown. Refresh the page to see it." }
+    return { ok: true, payout: { id: p.id, amount: p.amount, fee: p.fee, net: p.net, status: p.status, sending: result.sending, methodType: p.methodType, methodLabel: p.methodLabel, network: p.network, asset: p.asset } }
+  } catch (err) {
+    return { ok: false, error: describe(err) }
+  }
 }
 
 export async function cancelPayoutRequest(id: number): Promise<ActionResult> {

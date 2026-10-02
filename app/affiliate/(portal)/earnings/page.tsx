@@ -9,6 +9,7 @@ import { money, signedMoney } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
 import { FilterSelect, Pager, Panel } from "@/components/admin/ui"
 import { Empty, Kpi, KpiGrid, LEDGER_TYPE_LABELS, StatusBadge, TableShell, THead, fmtDay, linkButtonClass, primaryLinkClass, tdClass, thClass } from "@/components/affiliate/ui"
+import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Earnings" }
 
@@ -42,14 +43,14 @@ export default async function AffiliateEarningsPage({ searchParams }: { searchPa
         title="Earnings"
         description="Every commission, reversal and payout — your balance is the sum of this ledger."
         action={
-          <a href={`/affiliate/export/commissions${exportQuery ? `?${exportQuery}` : ""}`} className={linkButtonClass}>
+          <a href={affiliateHref(`/affiliate/export/commissions${exportQuery ? `?${exportQuery}` : ""}`)} className={linkButtonClass}>
             <Download className="size-4" aria-hidden /> Export CSV
           </a>
         }
       />
       <div className="flex flex-col gap-4 p-4 sm:p-6">
         <KpiGrid>
-          <Kpi label="Available" value={money(balances.available)} note={balances.available >= program.minPayout ? <Link href="/affiliate/payouts" className="font-medium text-primary hover:underline">Request a payout</Link> : `Minimum payout ${money(program.minPayout)}`} />
+          <Kpi label="Available" value={money(balances.available)} note={balances.available >= program.minPayout ? <Link href={affiliateHref("/affiliate/payouts")} className="font-medium text-primary hover:underline">Request a payout</Link> : `Minimum payout ${money(program.minPayout)}`} />
           <Kpi label="Pending" value={money(balances.pending)} note={`In the ${program.holdDays}-day hold`} />
           <Kpi label="Lifetime earned" value={money(balances.lifetimeEarned)} note={`${rule.ratePercent}% ${program.commissionType === "recurring" ? (rule.durationMonths ? `for ${rule.durationMonths} months per customer` : "on every payment") : "on the first payment"}`} />
           <Kpi label="Paid out" value={money(balances.lifetimePaid)} note={balances.processing > 0 ? `${money(balances.processing)} in progress` : "All time"} />
@@ -79,7 +80,7 @@ export default async function AffiliateEarningsPage({ searchParams }: { searchPa
                 Apply
               </button>
               {filtered && (
-                <Link href="/affiliate/earnings" className="h-9 content-center text-sm text-muted-foreground hover:text-foreground">
+                <Link href={affiliateHref("/affiliate/earnings")} className="h-9 content-center text-sm text-muted-foreground hover:text-foreground">
                   Clear
                 </Link>
               )}
@@ -87,7 +88,7 @@ export default async function AffiliateEarningsPage({ searchParams }: { searchPa
           </div>
           {ledger.rows.length === 0 ? (
             <div className="rounded-xl border bg-card">
-              <Empty icon={CircleDollarSign} title={filtered ? "Nothing matches these filters" : "No earnings yet"} action={filtered ? undefined : <Link href="/affiliate/links" className={primaryLinkClass}>Get your link</Link>}>
+              <Empty icon={CircleDollarSign} title={filtered ? "Nothing matches these filters" : "No earnings yet"} action={filtered ? undefined : <Link href={affiliateHref("/affiliate/links")} className={primaryLinkClass}>Get your link</Link>}>
                 {filtered ? "Try a different type or status." : "Your first commission appears here as soon as a referred customer pays."}
               </Empty>
             </div>

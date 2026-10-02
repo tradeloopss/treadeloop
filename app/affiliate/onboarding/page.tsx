@@ -6,12 +6,13 @@ import { methodAvailable } from "@/lib/affiliates/providers"
 import { methodList, money } from "@/lib/affiliates/types"
 import { BrandMark } from "@/components/brand-mark"
 import { OnboardingForm } from "@/components/affiliate/apply-form"
+import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Set up your affiliate account" }
 
 export default async function AffiliateOnboardingPage() {
   const { affiliate } = await requireAffiliate({ allowUnonboarded: true })
-  if (affiliate.onboardedAt) redirect("/affiliate")
+  if (affiliate.onboardedAt) redirect(affiliateHref("/affiliate"))
   const [program, rule, payoutSettings] = await Promise.all([getProgram(), currentRule(affiliate.id), getPayoutSettings()])
 
   const facts: [string, string][] = [

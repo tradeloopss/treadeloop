@@ -14,6 +14,7 @@ import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
 import { Kpi, KpiGrid, linkButtonClass } from "@/components/affiliate/ui"
 import { AddPayoutMethodButton, AutoPayoutPanel, MethodCards, PayoutHistory, RequestPayout, type MethodDialogConfig } from "@/components/affiliate/payouts"
+import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Payouts" }
 
@@ -88,7 +89,7 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             {payouts.length > 0 && (
-              <a href="/affiliate/export/payouts" className={linkButtonClass}>
+              <a href={affiliateHref("/affiliate/export/payouts")} className={linkButtonClass}>
                 <Download className="size-4" aria-hidden /> Export CSV
               </a>
             )}
@@ -108,7 +109,23 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Available to withdraw</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{money(balances.available)}</p>
             <div className="mt-4">
-              <RequestPayout available={balances.available} min={limits.min} max={limits.max} methods={methodViews} blocked={blocked} eta={program.payoutEta} feePolicy={settings.feePolicy} fees={settings.fees} approval={settings.approval} instantUpTo={instantTypes.length ? settings.cryptoAutoMax : null} instantTypes={instantTypes} prices={prices} />
+              <RequestPayout
+                available={balances.available}
+                pendingBalance={balances.pending}
+                min={limits.min}
+                max={limits.max}
+                methods={methodViews}
+                blocked={blocked}
+                eta={program.payoutEta}
+                feePolicy={settings.feePolicy}
+                fees={settings.fees}
+                approval={settings.approval}
+                instantUpTo={instantTypes.length ? settings.cryptoAutoMax : null}
+                instantTypes={instantTypes}
+                prices={prices}
+                autoPayoutOn={autoOn && settings.autoPayouts && !settings.paused}
+                methodConfig={config}
+              />
             </div>
           </section>
           <KpiGrid className="lg:col-span-2">
@@ -140,7 +157,7 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
           }}
         />
 
-        <section className="flex flex-col gap-3">
+        <section id="payout-history" className="flex scroll-mt-4 flex-col gap-3">
           <h2 className="text-sm font-semibold">Payout history</h2>
           <PayoutHistory
             payouts={payouts.map((p) => ({ id: p.id, amount: p.amount, fee: p.fee, net: p.net, methodType: p.methodType, methodLabel: p.methodLabel, status: p.status, mode: p.mode, network: p.network, asset: p.asset, transactionHash: p.transactionHash, failureReason: p.failureReason, requestedAt: p.requestedAt.toISOString(), completedAt: p.completedAt ? p.completedAt.toISOString() : null }))}

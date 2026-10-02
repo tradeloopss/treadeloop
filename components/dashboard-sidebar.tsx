@@ -47,6 +47,7 @@ import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { LOCALE_CHOICE_OFFERED } from "@/lib/i18n"
 import { useT } from "@/components/locale-provider"
+import { affiliateHref } from "@/lib/urls"
 
 type NavLink = { href: string; label: string; icon: typeof LayoutDashboard; gate?: "pro" | "soon" }
 
@@ -387,7 +388,7 @@ export function DashboardSidebar({
                 <Plug className="size-4" />
                 {t("Settings")}
               </DropdownMenuItem>
-              <DropdownMenuItem render={<Link href="/affiliate" />}>
+              <DropdownMenuItem render={<Link href={affiliateHref("/affiliate")} />}>
                 <Handshake className="size-4" />
                 {t("Affiliate program")}
               </DropdownMenuItem>

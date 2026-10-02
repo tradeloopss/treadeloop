@@ -17,14 +17,27 @@ function isMarketingPath(pathname: string) {
 function appOrigin(hostname: string) {
   const env = process.env.NEXT_PUBLIC_APP_URL
   if (env) return env.replace(/\/+$/, "")
-  return `https://app.${hostname.replace(/^www\./, "")}`
+  return `https://app.${hostname.replace(/^(www|affiliate|help)\./, "")}`
 }
+
+// The affiliate portal's pages, as they appear on affiliate.<domain> (the
+// first path segment). The portal's root is the overview. Keep in sync with
+// the folders under app/affiliate.
+const AFFILIATE_SECTIONS = new Set(["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "onboarding", "export"])
+const isAffiliatePath = (pathname: string) => pathname === "/affiliate" || pathname.startsWith("/affiliate/")
+// "/affiliate/payouts" → "/payouts"; "/affiliate" → "/"
+const stripAffiliate = (pathname: string) => pathname.slice("/affiliate".length) || "/"
 
 // Runs on every page request. It does two things:
 //
 // 1. Subdomain host routing (a NO-OP on previews and localhost — only active
 //    once real `help.` / `app.` subdomains point here):
 //      help.<domain>  → the /help center, with clean URLs (help.tradeloop.pro/faq)
+//      affiliate.<domain> → the affiliate portal at the root
+//                       (affiliate.tradeloop.pro/payouts). Any other page asked
+//                       for there belongs to the app and is sent to it. Once
+//                       NEXT_PUBLIC_AFFILIATE_URL is set, /affiliate/* on the
+//                       other hosts is sent to the portal's own address.
 //      app.<domain>   → the app; the root sends you to the dashboard
 //      apex / www.    → the marketing site only; app + auth routes (e.g.
 //                       /dashboard, /sign-in) 307 to app.<domain> so the old
@@ -58,18 +71,44 @@ export function proxy(request: NextRequest) {
     hostname.endsWith(".vercel.app") ||
     /^\d+\.\d+\.\d+\.\d+$/.test(hostname)
   const isApexOrWww = !isLocalOrPreview && (sub === "www" || labels.length === 2)
+
+  // The affiliate subdomain: the portal at the root, with clean URLs.
+  let affiliateRewrite: URL | null = null
+  if (sub === "affiliate" && !isLocalOrPreview) {
+    // The in-app form of the address works too, and lands on the clean one.
+    if (isAffiliatePath(url.pathname)) {
+      const to = url.clone()
+      to.pathname = stripAffiliate(url.pathname)
+      return NextResponse.redirect(to)
+    }
+    const section = url.pathname.split("/")[1] ?? ""
+    // Not a portal page: it is a page of the app (sign-in, the dashboard…).
+    if (url.pathname !== "/" && !AFFILIATE_SECTIONS.has(section)) {
+      return NextResponse.redirect(new URL(`${url.pathname}${url.search}`, appOrigin(hostname)))
+    }
+    affiliateRewrite = url.clone()
+    affiliateRewrite.pathname = url.pathname === "/" ? "/affiliate" : `/affiliate${url.pathname}`
+  }
+  // Everywhere else, the portal's in-app address moves to its own subdomain
+  // once that is configured (never on previews or localhost).
+  const affiliateOrigin = process.env.NEXT_PUBLIC_AFFILIATE_URL?.replace(/\/+$/, "")
+  if (affiliateOrigin && sub !== "affiliate" && !isLocalOrPreview && isAffiliatePath(url.pathname)) {
+    return NextResponse.redirect(new URL(`${stripAffiliate(url.pathname)}${url.search}`, affiliateOrigin))
+  }
+
   if (isApexOrWww && !isMarketingPath(url.pathname)) {
     return NextResponse.redirect(new URL(`${url.pathname}${url.search}`, appOrigin(hostname)))
   }
   // The help subdomain serves the /help routes under clean paths.
   const rewriteTo =
-    sub === "help" && !(url.pathname === "/help" || url.pathname.startsWith("/help/"))
+    affiliateRewrite ??
+    (sub === "help" && !(url.pathname === "/help" || url.pathname.startsWith("/help/"))
       ? (() => {
           const to = url.clone()
           to.pathname = url.pathname === "/" ? "/help" : `/help${url.pathname}`
           return to
         })()
-      : null
+      : null)
 
   // --- Locale ------------------------------------------------------------
   const chosen = request.cookies.get(LOCALE_COOKIE)?.value

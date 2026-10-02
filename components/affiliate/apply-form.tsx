@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { applyToProgram, finishOnboarding } from "@/app/actions/affiliate"
 import { AUDIENCE_SIZES, SOCIAL_KEYS, SOCIAL_LABELS, TRAFFIC_SOURCES } from "@/lib/affiliates/types"
 import { selectClass } from "./ui"
+import { affiliateHref } from "@/lib/urls"
 
 const BLANK = { firstName: "", lastName: "", country: "", website: "", audienceSize: "", trafficSource: "", promotionMethod: "", reason: "" }
 
@@ -153,7 +154,7 @@ export function OnboardingForm({ suggested, siteHost }: { suggested: string; sit
         try {
           const res = await finishOnboarding({ code, acceptTerms: terms })
           if (res.ok) {
-            router.push("/affiliate")
+            router.push(affiliateHref("/affiliate"))
             router.refresh()
           } else setError(res.error)
         } catch {

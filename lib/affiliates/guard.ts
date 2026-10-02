@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { getAffiliateByUser } from "./queries"
+import { affiliateHref, appHref } from "@/lib/urls"
 
 // Who is asking. The affiliate is ALWAYS resolved from the signed-in session —
 // portal pages and actions never accept an affiliate id from the request, which
@@ -24,10 +25,13 @@ export type PortalContext = { user: NonNullable<Awaited<ReturnType<typeof getSes
 //   approved, not set up  → onboarding
 export async function requireAffiliate(opts: { allowUnonboarded?: boolean } = {}): Promise<PortalContext> {
   const user = await getSessionUser()
-  if (!user) redirect("/sign-in?next=/affiliate")
+  // "via" tells the sign-in page this visitor was just turned away by the
+  // portal: if they do have a session there, it is one this host can't see, and
+  // sending them straight back would loop.
+  if (!user) redirect(appHref("/sign-in?next=/affiliate&via=affiliate"))
   const affiliate = await getAffiliateByUser(user.id)
-  if (!affiliate || affiliate.status !== "approved") redirect("/affiliate/apply")
-  if (!affiliate.onboardedAt && !opts.allowUnonboarded) redirect("/affiliate/onboarding")
+  if (!affiliate || affiliate.status !== "approved") redirect(affiliateHref("/affiliate/apply"))
+  if (!affiliate.onboardedAt && !opts.allowUnonboarded) redirect(affiliateHref("/affiliate/onboarding"))
   return { user, affiliate }
 }
 

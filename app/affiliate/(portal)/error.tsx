@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import Link from "next/link"
 import { TriangleAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { affiliateHref } from "@/lib/urls"
 
 // A portal page failed to load. The sidebar (in the layout) stays usable, and
 // the page can be retried without leaving it.
@@ -21,7 +22,7 @@ export default function PortalError({ error, retry }: { error: Error & { digest?
       {error.digest && <p className="mt-2 font-mono text-xs text-muted-foreground">Reference: {error.digest}</p>}
       <div className="mt-4 flex gap-2">
         <Button onClick={() => retry()}>Try again</Button>
-        <Link href="/affiliate/support" className="inline-flex h-8 items-center rounded-lg border px-2.5 text-sm font-medium hover:bg-muted">
+        <Link href={affiliateHref("/affiliate/support")} className="inline-flex h-8 items-center rounded-lg border px-2.5 text-sm font-medium hover:bg-muted">
           Contact support
         </Link>
       </div>

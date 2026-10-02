@@ -17,6 +17,8 @@ function firstFile(base) {
 }
 
 export async function resolve(specifier, context, next) {
+  // Next's bundler resolves this without the extension; plain Node needs it.
+  if (specifier === "next/server") return next("next/server.js", context)
   if (specifier.startsWith("@/")) {
     const found = firstFile(ROOT + specifier.slice(2))
     if (found) return next(found, context)

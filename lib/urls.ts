@@ -6,6 +6,24 @@ export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? ""
 // A link into the app. Same-origin (relative) unless NEXT_PUBLIC_APP_URL is set.
 export const appHref = (path: string) => `${APP_URL}${path}`
 
+// The affiliate portal's own origin (e.g. https://affiliate.tradeloop.pro),
+// where it sits at the root: /payouts rather than /affiliate/payouts. Unset →
+// the portal lives under /affiliate on the app's origin (previews, localhost).
+export const AFFILIATE_URL = (process.env.NEXT_PUBLIC_AFFILIATE_URL ?? "").replace(/\/+$/, "")
+
+// A link to a portal page, from its in-app path ("/affiliate/payouts"). The
+// in-app path is what the code and the database use everywhere; this turns it
+// into the address people see.
+export function affiliateHref(path: string): string {
+  if (!AFFILIATE_URL || !/^\/affiliate(?=\/|\?|#|$)/.test(path)) return path
+  const rest = path.slice("/affiliate".length)
+  return `${AFFILIATE_URL}${rest.startsWith("/") ? rest : `/${rest}`}`
+}
+
+// Any link stored by the program (a notification's target): a portal page, or
+// a page of the app itself.
+export const portalHref = (path: string) => (/^\/affiliate(?=\/|\?|#|$)/.test(path) ? affiliateHref(path) : appHref(path))
+
 // The Help Center base. Defaults to /help on the current origin; set
 // NEXT_PUBLIC_HELP_URL to https://help.tradeloop.pro once the subdomain is live.
 export const HELP_URL = process.env.NEXT_PUBLIC_HELP_URL ?? "/help"

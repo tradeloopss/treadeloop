@@ -13,6 +13,7 @@ import { BarList, Panel } from "@/components/admin/ui"
 import { Empty, Kpi, KpiGrid, RangeTabs, StatusBadge, TableShell, THead, fmtDay, primaryLinkClass, tdClass, thClass } from "@/components/affiliate/ui"
 import { PerformanceChart } from "@/components/affiliate/performance-chart"
 import { ReferralLinkCard } from "@/components/affiliate/link-card"
+import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Overview" }
 
@@ -107,9 +108,9 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
         )}
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <Panel title="Top campaigns" description="All time, by commission." action={<Link href="/affiliate/campaigns" className="text-xs font-medium text-primary hover:underline">All campaigns</Link>}>
+          <Panel title="Top campaigns" description="All time, by commission." action={<Link href={affiliateHref("/affiliate/campaigns")} className="text-xs font-medium text-primary hover:underline">All campaigns</Link>}>
             {topCampaigns.length === 0 ? (
-              <Empty icon={Target} title="No campaigns yet" action={<Link href="/affiliate/campaigns" className={primaryLinkClass}>Create a campaign</Link>}>
+              <Empty icon={Target} title="No campaigns yet" action={<Link href={affiliateHref("/affiliate/campaigns")} className={primaryLinkClass}>Create a campaign</Link>}>
                 Give each channel its own link to see which one converts.
               </Empty>
             ) : (
@@ -136,7 +137,7 @@ export default async function AffiliateOverviewPage({ searchParams }: { searchPa
             )}
           </Panel>
 
-          <Panel title="Recent referrals" action={<Link href="/affiliate/referrals" className="text-xs font-medium text-primary hover:underline">All referrals</Link>}>
+          <Panel title="Recent referrals" action={<Link href={affiliateHref("/affiliate/referrals")} className="text-xs font-medium text-primary hover:underline">All referrals</Link>}>
             {recent.length === 0 ? (
               <Empty icon={Users} title="No referrals yet">When someone signs up through your link they&apos;ll appear here.</Empty>
             ) : (

@@ -7,6 +7,7 @@ import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
 import { Panel } from "@/components/admin/ui"
 import { AffiliateSupportForm } from "@/components/affiliate/support-form"
+import { appHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Support" }
 
@@ -52,7 +53,7 @@ export default async function AffiliateSupportPage() {
           <Panel title="Your requests">
             <p className="text-sm text-muted-foreground">
               Replies arrive by email and in{" "}
-              <Link href="/support" className="font-medium text-primary hover:underline">
+              <Link href={appHref("/support")} className="font-medium text-primary hover:underline">
                 your support requests
               </Link>
               .

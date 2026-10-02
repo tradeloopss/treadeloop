@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/page-header"
 import { TwoFactorPanel } from "@/components/two-factor-panel"
 import { AffiliateSettings } from "@/components/affiliate/settings"
 import { fmtDay } from "@/components/affiliate/ui"
+import { appHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Settings" }
 
@@ -55,7 +56,7 @@ export default async function AffiliateSettingsPage() {
                 {hasPassword ? (
                   <>
                     To change your password,{" "}
-                    <Link href="/forgot-password" className="font-medium text-primary hover:underline">
+                    <Link href={appHref("/forgot-password")} className="font-medium text-primary hover:underline">
                       request a reset link
                     </Link>
                     .

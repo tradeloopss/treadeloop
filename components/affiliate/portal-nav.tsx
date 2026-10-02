@@ -7,6 +7,7 @@ import { Bell, ChartLine, CircleDollarSign, FolderOpen, LayoutDashboard, LifeBuo
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { markNotificationsRead } from "@/app/actions/affiliate"
+import { affiliateHref, portalHref } from "@/lib/urls"
 
 const ICONS = { overview: LayoutDashboard, analytics: ChartLine, referrals: Users, campaigns: Target, links: Link2, coupons: TicketPercent, earnings: CircleDollarSign, payouts: Wallet, resources: FolderOpen, announcements: Megaphone, support: LifeBuoy, settings: Settings }
 
@@ -16,15 +17,18 @@ export type PortalNavItem = { href: string; label: string; icon: keyof typeof IC
 // on a phone.
 export function PortalNav({ items }: { items: PortalNavItem[] }) {
   const pathname = usePathname()
+  // On the affiliate subdomain the portal sits at the root (/payouts); in the
+  // app it is under /affiliate. Items carry the in-app path, so compare in that form.
+  const here = /^\/affiliate(\/|$)/.test(pathname) ? pathname : `/affiliate${pathname === "/" ? "" : pathname}`
   return (
     <nav aria-label="Affiliate program" className="flex gap-1 overflow-x-auto p-3 md:flex-col md:overflow-visible">
       {items.map((item) => {
         const Icon = ICONS[item.icon]
-        const active = item.href === "/affiliate" ? pathname === "/affiliate" : pathname.startsWith(item.href)
+        const active = item.href === "/affiliate" ? here === "/affiliate" : here.startsWith(item.href)
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={affiliateHref(item.href)}
             aria-current={active ? "page" : undefined}
             className={cn("flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors", active ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
           >
@@ -82,7 +86,7 @@ export function NotificationsMenu({ items, unread }: { items: PortalNotification
               return (
                 <li key={n.id}>
                   {n.href ? (
-                    <Link href={n.href} className="block px-4 py-3 hover:bg-muted/50">
+                    <Link href={portalHref(n.href)} className="block px-4 py-3 hover:bg-muted/50">
                       {body}
                     </Link>
                   ) : (

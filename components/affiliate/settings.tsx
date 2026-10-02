@@ -11,6 +11,7 @@ import { CopyField } from "./copy"
 import { MethodMark } from "./payout-method-dialog"
 import { FieldRow, StatusBadge, selectClass } from "./ui"
 import { useAction } from "./use-action"
+import { affiliateHref } from "@/lib/urls"
 
 export type SettingsProfile = { firstName: string; lastName: string; email: string; country: string; website: string; socials: Record<string, string> }
 
@@ -149,7 +150,7 @@ export function AffiliateSettings({
               <h2 className="text-sm font-semibold">Payout methods</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">Where your earnings are sent. Adding, removing and automatic payouts live on the Payouts page.</p>
             </div>
-            <Link href="/affiliate/payouts" className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <Link href={affiliateHref("/affiliate/payouts")} className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
               Manage payout methods
             </Link>
           </div>

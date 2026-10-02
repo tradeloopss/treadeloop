@@ -9,6 +9,7 @@ import { BrandMark } from "@/components/brand-mark"
 import { ImpersonationBanner } from "@/components/impersonation-banner"
 import { NotificationsMenu, PortalNav, type PortalNavItem } from "@/components/affiliate/portal-nav"
 import { fmtAgo } from "@/components/admin/ui"
+import { affiliateHref, appHref } from "@/lib/urls"
 
 export default async function AffiliatePortalLayout({ children }: { children: React.ReactNode }) {
   const { user, affiliate } = await requireAffiliate()
@@ -37,7 +38,7 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside className="shrink-0 border-b bg-sidebar md:sticky md:top-0 md:h-svh md:w-60 md:border-e md:border-b-0">
           <div className="flex items-center justify-between gap-2 px-5 pt-5 md:pb-2">
-            <Link href="/affiliate" className="flex items-center gap-2">
+            <Link href={affiliateHref("/affiliate")} className="flex items-center gap-2">
               <BrandMark className="size-7" />
               <span className="font-semibold tracking-tight">Affiliates</span>
             </Link>
@@ -54,7 +55,7 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
                 {rule.ratePercent}%{rule.tier ? <span className="ms-1.5 font-normal text-muted-foreground">· {rule.tier.name}</span> : null}
               </p>
             </div>
-            <Link href="/dashboard" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+            <Link href={appHref("/dashboard")} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
               <ArrowLeft className="size-4 rtl:rotate-180" /> Back to app
             </Link>
             <p className="truncate px-3 pt-1 text-xs text-muted-foreground" title={user.email}>

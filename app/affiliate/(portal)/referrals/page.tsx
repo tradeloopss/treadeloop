@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header"
 import { FilterSelect, Pager } from "@/components/admin/ui"
 import { Kpi, KpiGrid, linkButtonClass } from "@/components/affiliate/ui"
 import { ReferralsTable } from "@/components/affiliate/referrals-table"
+import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Referrals" }
 
@@ -32,7 +33,7 @@ export default async function AffiliateReferralsPage({ searchParams }: { searchP
         title="Referrals"
         description="Everyone who signed up through you. Select a row for its full history."
         action={
-          <a href={`/affiliate/export/referrals${filters.status ? `?status=${filters.status}` : ""}`} className={linkButtonClass}>
+          <a href={affiliateHref(`/affiliate/export/referrals${filters.status ? `?status=${filters.status}` : ""}`)} className={linkButtonClass}>
             <Download className="size-4" aria-hidden /> Export CSV
           </a>
         }
@@ -57,7 +58,7 @@ export default async function AffiliateReferralsPage({ searchParams }: { searchP
             Apply
           </button>
           {filtered && (
-            <Link href="/affiliate/referrals" className="h-9 content-center text-sm text-muted-foreground hover:text-foreground">
+            <Link href={affiliateHref("/affiliate/referrals")} className="h-9 content-center text-sm text-muted-foreground hover:text-foreground">
               Clear
             </Link>
           )}

@@ -12,6 +12,7 @@ import { methodList, money } from "@/lib/affiliates/types"
 import { BrandMark } from "@/components/brand-mark"
 import { ApplyForm } from "@/components/affiliate/apply-form"
 import { ProgramTerms } from "@/components/affiliate/program-terms"
+import { affiliateHref, appHref } from "@/lib/urls"
 
 // The one public page of the program — what it is, what it pays, and the
 // application. Indexable (the rest of /affiliate is not).
@@ -19,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const program = await getProgram()
   const title = "Affiliate Program"
   const description = `Earn ${program.defaultRate}% ${program.commissionType === "recurring" ? "recurring " : ""}commission for every trader you refer to TradeLoop, the trading journal and analytics platform. ${program.cookieDays}-day tracking, real-time dashboard, payouts from ${money(program.minPayout)}.`
-  return { title, description, robots: { index: true, follow: true }, alternates: { canonical: "/affiliate/apply" }, openGraph: { title: `${title} — TradeLoop`, description, type: "website" } }
+  return { title, description, robots: { index: true, follow: true }, alternates: { canonical: affiliateHref("/affiliate/apply") }, openGraph: { title: `${title} — TradeLoop`, description, type: "website" } }
 }
 
 function StatusCard({ icon: Icon, title, children, tone = "muted" }: { icon: typeof Clock; title: string; children: React.ReactNode; tone?: "muted" | "loss" }) {
@@ -37,7 +38,7 @@ function StatusCard({ icon: Icon, title, children, tone = "muted" }: { icon: typ
 export default async function AffiliateApplyPage() {
   const user = await getSessionUser()
   const affiliate = user ? await getAffiliateByUser(user.id) : null
-  if (affiliate?.status === "approved") redirect(affiliate.onboardedAt ? "/affiliate" : "/affiliate/onboarding")
+  if (affiliate?.status === "approved") redirect(affiliateHref(affiliate.onboardedAt ? "/affiliate" : "/affiliate/onboarding"))
 
   const [program, tiers, payoutSettings] = await Promise.all([getProgram(), loadTiers(), getPayoutSettings()])
   const payoutMethods = methodList(payoutSettings.methods.filter(methodAvailable))
@@ -57,11 +58,11 @@ export default async function AffiliateApplyPage() {
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">Affiliates</span>
           </Link>
           {user ? (
-            <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">
+            <Link href={appHref("/dashboard")} className="text-sm text-muted-foreground hover:text-foreground">
               Back to app
             </Link>
           ) : (
-            <Link href="/sign-in?next=/affiliate/apply" className="inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium hover:bg-muted">
+            <Link href={appHref("/sign-in?next=/affiliate/apply")} className="inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium hover:bg-muted">
               Sign in
             </Link>
           )}
@@ -78,10 +79,10 @@ export default async function AffiliateApplyPage() {
           </p>
           {!user && (
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/sign-up?next=/affiliate/apply" className="inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+              <Link href={appHref("/sign-up?next=/affiliate/apply")} className="inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
                 Create an account to apply
               </Link>
-              <Link href="/sign-in?next=/affiliate/apply" className="inline-flex h-10 items-center rounded-lg border px-5 text-sm font-medium hover:bg-muted">
+              <Link href={appHref("/sign-in?next=/affiliate/apply")} className="inline-flex h-10 items-center rounded-lg border px-5 text-sm font-medium hover:bg-muted">
                 I already have an account
               </Link>
             </div>

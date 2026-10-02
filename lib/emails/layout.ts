@@ -44,7 +44,18 @@ export type EmailDoc = {
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL ?? "https://app.tradeloop.pro").replace(/\/+$/, "")
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.tradeloop.pro").replace(/\/+$/, "")
 
-export const appUrl = (path = "") => `${APP_URL}${path}`
+// The affiliate portal's own address, when it has one (affiliate.tradeloop.pro).
+const AFFILIATE_URL = (process.env.NEXT_PUBLIC_AFFILIATE_URL ?? "").replace(/\/+$/, "")
+
+// A link into the product. Portal pages ("/affiliate/payouts") go to the
+// portal's own address when there is one; everything else to the app.
+export function appUrl(path = ""): string {
+  if (AFFILIATE_URL && /^\/affiliate(?=\/|\?|#|$)/.test(path)) {
+    const rest = path.slice("/affiliate".length)
+    return `${AFFILIATE_URL}${rest.startsWith("/") ? rest : `/${rest}`}`
+  }
+  return `${APP_URL}${path}`
+}
 export const siteUrl = (path = "") => `${SITE_URL}${path}`
 
 export const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!)
