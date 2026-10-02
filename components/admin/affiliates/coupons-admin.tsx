@@ -5,7 +5,7 @@ import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { disableAffiliateCoupon, enableAffiliateCoupon, generateAffiliateCoupon, refreshAffiliatePermanentCoupon, setAffiliateCouponAccess } from "@/app/actions/admin-affiliates"
+import { disableAffiliateCoupon, enableAffiliateCoupon, generateAffiliateCoupon, refreshAffiliatePermanentCoupon } from "@/app/actions/admin-affiliates"
 import { count } from "@/lib/affiliates/types"
 import { ConfirmButton } from "@/components/affiliate/confirm"
 import { CopyButton } from "@/components/affiliate/copy"
@@ -18,14 +18,13 @@ export type AdminCoupon = { id: number; code: string; percent: number; durationM
 
 const BLANK = { code: "", percent: "20", durationMonths: "1", plan: "", usageLimit: "", expiresAt: "" }
 
-// Everything an admin decides about one affiliate's coupons: whether the
-// Coupons section of their portal is open, how large a discount they may offer,
-// their permanent code, and coupons generated for them here.
+// One affiliate's coupons. Only an admin creates them: their permanent code,
+// and coupons generated here with any discount. The affiliate sees them in the
+// Coupons section of their portal, read-only.
 export function CouponAdmin({
   affiliateId,
   name,
   ready,
-  access,
   program,
   coupons,
 }: {
@@ -33,54 +32,24 @@ export function CouponAdmin({
   name: string
   // approved and set up: codes can be made for them
   ready: boolean
-  access: { couponsEnabled: boolean; maxCouponPercent: number | null }
-  program: { couponsEnabled: boolean; maxCouponPercent: number; permanentPercent: number; permanentMonths: number }
+  program: { permanentPercent: number; permanentMonths: number }
   coupons: AdminCoupon[]
 }) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(BLANK)
-  const [max, setMax] = useState(access.maxCouponPercent == null ? "" : String(access.maxCouponPercent))
   const { pending, run } = useAction()
   const set = (k: keyof typeof BLANK) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: k === "code" ? e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") : e.target.value }))
   const permanent = coupons.find((c) => c.permanent)
   const stale = !!permanent && program.permanentPercent > 0 && (permanent.percent !== program.permanentPercent || permanent.durationMonths !== program.permanentMonths)
-  const effective = access.maxCouponPercent ?? program.maxCouponPercent
 
   return (
     <div className="flex flex-col gap-4">
-      <ul className="divide-y rounded-lg border">
-        <li>
-          <label className="flex cursor-pointer items-center justify-between gap-4 px-3 py-3">
-            <span>
-              <span className="block text-sm font-medium text-foreground">Coupons section</span>
-              <span className="block text-xs text-muted-foreground">
-                {access.couponsEnabled ? `Open: ${name} can create their own coupons, up to ${effective}% off.` : "Closed: they only have their permanent code and the coupons you generate."}
-                {access.couponsEnabled && !program.couponsEnabled ? " Coupons are switched off in the program rules, so this has no effect yet." : ""}
-              </span>
-            </span>
-            <input type="checkbox" role="switch" aria-label="Coupons section" checked={access.couponsEnabled} disabled={pending} onChange={(e) => run(() => setAffiliateCouponAccess(affiliateId, { couponsEnabled: e.target.checked }))} className="size-4 shrink-0 accent-[var(--primary)]" />
-          </label>
-        </li>
-      </ul>
-
-      <form
-        className="flex flex-wrap items-end gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          run(() => setAffiliateCouponAccess(affiliateId, { maxCouponPercent: max === "" ? null : Number(max) }))
-        }}
-      >
-        <label className={`${label} min-w-40 flex-1`}>
-          Largest discount they can offer (%)
-          <Input type="number" inputMode="numeric" min={1} max={100} step={1} value={max} onChange={(e) => setMax(e.target.value)} placeholder={`Program: ${program.maxCouponPercent}%`} />
-        </label>
-        <Button type="submit" variant="outline" disabled={pending || max === (access.maxCouponPercent == null ? "" : String(access.maxCouponPercent))}>
-          Save
-        </Button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{name} can&apos;t create coupons. The ones you generate here appear in the Coupons section of their dashboard, to read and copy.</p>
         <Button type="button" disabled={!ready} title={ready ? undefined : "Available once the affiliate is approved and set up"} onClick={() => (setForm(BLANK), setOpen(true))}>
           <Sparkles className="size-4" aria-hidden /> Generate coupon
         </Button>
-      </form>
+      </div>
 
       {coupons.length === 0 ? (
         <p className="text-sm text-muted-foreground">

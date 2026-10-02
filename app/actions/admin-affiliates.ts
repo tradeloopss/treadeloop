@@ -9,7 +9,7 @@ import { logAdminAction } from "@/lib/admin/audit"
 import type { Permissions } from "@/lib/admin/access"
 import { decideApplication, validateCode, type Decision } from "@/lib/affiliates/apply"
 import { addLedgerEntry, applyHoldPeriod, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
-import { adminCreateCoupon, refreshPermanentCoupon, setCouponAccess, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
+import { adminCreateCoupon, refreshPermanentCoupon, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
 import { TIER_STYLES, cleanPerks } from "@/lib/affiliates/engine"
 import { syncAllTierPerks, syncTierPerks } from "@/lib/affiliates/perks"
 import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
@@ -475,7 +475,7 @@ export async function resolveSignal(id: number, status: "reviewing" | "cleared" 
 export async function disableAffiliateCoupon(couponId: number): Promise<ActionResult> {
   return run(async () => {
     const admin = await assertAdmin(MANAGE)
-    await setCouponStatus(null, Number(couponId), "disabled")
+    await setCouponStatus(Number(couponId), "disabled")
     await logAdminAction(admin, "affiliate.coupon_disable", null, { couponId })
     return "Coupon disabled."
   })
@@ -484,21 +484,9 @@ export async function disableAffiliateCoupon(couponId: number): Promise<ActionRe
 export async function enableAffiliateCoupon(couponId: number): Promise<ActionResult> {
   return run(async () => {
     const admin = await assertAdmin(MANAGE)
-    await setCouponStatus(null, Number(couponId), "active")
+    await setCouponStatus(Number(couponId), "active")
     await logAdminAction(admin, "affiliate.coupon_enable", null, { couponId })
     return "Coupon enabled. It works at checkout again."
-  })
-}
-
-// Opens or closes the Coupons section of one affiliate's portal, and sets the
-// largest discount they may offer there.
-export async function setAffiliateCouponAccess(affiliateId: number, input: { couponsEnabled?: boolean; maxCouponPercent?: number | null }): Promise<ActionResult> {
-  return run(async () => {
-    const admin = await assertAdmin(MANAGE)
-    const result = await setCouponAccess(Number(affiliateId), { couponsEnabled: typeof input.couponsEnabled === "boolean" ? input.couponsEnabled : undefined, maxCouponPercent: input.maxCouponPercent === undefined ? undefined : input.maxCouponPercent })
-    await logAdminAction(admin, "affiliate.coupon_access", result.userId, { affiliateId, previous: result.previous, next: result.next })
-    if (typeof input.couponsEnabled === "boolean") return input.couponsEnabled ? "Coupons section opened for this affiliate." : "Coupons section closed for this affiliate. Their existing codes keep working."
-    return "Discount limit saved."
   })
 }
 

@@ -10,7 +10,6 @@ import { userHasPerk } from "@/lib/affiliates/perk-access"
 import { completeOnboarding, submitApplication, updateNotificationPrefs, updateProfile, type ApplicationInput } from "@/lib/affiliates/apply"
 import { claimAttribution } from "@/lib/affiliates/attribution"
 import { createCampaign, createLink, setCampaignStatus, setLinkStatus, updateCampaign, type CampaignInput } from "@/lib/affiliates/campaigns"
-import { createCoupon, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
 import { addPayoutMethod, cancelOwnPayout, removePayoutMethod, renameMethod, requestPayout, setAutoPayout, setDefaultMethod, setMethodEnabled, startStripeOnboarding, type Actor } from "@/lib/affiliates/payouts"
 import { payoutsFor, referralDetail, type ReferralDetail } from "@/lib/affiliates/queries"
 import { ATTRIBUTION_COOKIE, attributionCookieDomain } from "@/lib/affiliates/token"
@@ -106,22 +105,6 @@ export async function changeLinkStatus(id: number, status: "active" | "disabled"
     const { affiliate } = await assertAffiliate()
     await setLinkStatus(affiliate.id, Number(id), status === "disabled" ? "disabled" : "active")
     return status === "disabled" ? "Link disabled." : "Link enabled."
-  })
-}
-
-export async function addCoupon(input: CouponInput): Promise<ActionResult> {
-  return run(async () => {
-    const { affiliate } = await assertAffiliate()
-    await createCoupon(affiliate.id, input)
-    return "Coupon created. It works at checkout right away."
-  })
-}
-
-export async function changeCouponStatus(id: number, status: "active" | "disabled"): Promise<ActionResult> {
-  return run(async () => {
-    const { affiliate } = await assertAffiliate()
-    await setCouponStatus(affiliate.id, Number(id), status === "disabled" ? "disabled" : "active")
-    return status === "disabled" ? "Coupon disabled." : "Coupon enabled."
   })
 }
 

@@ -99,7 +99,7 @@ export default async function AffiliateApplyPage() {
 
         <section className="grid gap-3 sm:grid-cols-3" aria-label="How it works">
           {[
-            { icon: Link2, title: "1. Share your link", body: `Get a personal link and coupon code. Clicks are remembered for ${program.cookieDays} days.` },
+            { icon: Link2, title: "1. Share your link", body: `Get a personal link to share. Clicks are remembered for ${program.cookieDays} days.` },
             { icon: CircleDollarSign, title: "2. Earn on every payment", body: `${startRate}% to start, rising with the paying customers you bring in.` },
             { icon: MailCheck, title: "3. Get paid", body: `Commissions clear after ${program.holdDays} days. Withdraw by ${payoutMethods}.` },
           ].map((s) => (

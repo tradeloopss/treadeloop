@@ -474,7 +474,7 @@ test("codes, UTM tags, devices and masking", () => {
 
 test("program settings are clamped, never trusted as submitted", () => {
   assert.deepEqual(normalizeProgram(null), DEFAULT_PROGRAM)
-  const p = normalizeProgram({ defaultRate: 500, cookieDays: -3, holdDays: 9999, minPayout: 0, commissionType: "hack", attribution: "x", durationMonths: "", maxCouponPercent: 1000, autoApprove: "yes" })
+  const p = normalizeProgram({ defaultRate: 500, cookieDays: -3, holdDays: 9999, minPayout: 0, commissionType: "hack", attribution: "x", durationMonths: "", autoApprove: "yes" })
   assert.equal(p.defaultRate, 90)
   assert.equal(p.cookieDays, 1)
   assert.equal(p.holdDays, 180)
@@ -482,7 +482,6 @@ test("program settings are clamped, never trusted as submitted", () => {
   assert.equal(p.commissionType, "recurring")
   assert.equal(p.attribution, "first_touch")
   assert.equal(p.durationMonths, null)
-  assert.equal(p.maxCouponPercent, 100)
   assert.equal(p.autoApprove, false)
   assert.equal(normalizeProgram({ durationMonths: 12 }).durationMonths, 12)
   assert.equal(parseRange("nonsense"), "30d")

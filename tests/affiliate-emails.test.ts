@@ -3,7 +3,6 @@ import assert from "node:assert/strict"
 import { affiliateRef, applicationApproved, applicationDenied, applicationRef, emailPreviews, generalNotice, payoutDenied, payoutMethodChanged, payoutRequested, payoutSent, type PayoutFacts } from "@/lib/emails/affiliate-emails"
 import { renderEmail } from "@/lib/emails/layout"
 import { MAX_EMAIL_ATTEMPTS, retryDelayMs, senderAddress } from "@/lib/emails/policy"
-import { couponAccess } from "@/lib/affiliates/engine"
 import { DEFAULT_PROGRAM, normalizeProgram } from "@/lib/affiliates/types"
 
 const NOW = new Date("2026-10-02T14:05:00Z")
@@ -142,18 +141,13 @@ test("a failed delivery is retried further apart each time, then given up on", (
 
 // ------------------------------------------------------------------ coupons
 
-test("the Coupons section is closed unless an admin opened it for that affiliate", () => {
-  const program = { couponsEnabled: true, maxCouponPercent: 30 }
-  // the default for every affiliate
-  assert.deepEqual(couponAccess({ couponsEnabled: false, maxCouponPercent: null }, program), { enabled: false, maxPercent: 30 })
-  assert.deepEqual(couponAccess({ couponsEnabled: true, maxCouponPercent: null }, program), { enabled: true, maxPercent: 30 })
-  // their own ceiling wins over the program's, either way
-  assert.deepEqual(couponAccess({ couponsEnabled: true, maxCouponPercent: 95 }, program), { enabled: true, maxPercent: 95 })
-  assert.equal(couponAccess({ couponsEnabled: true, maxCouponPercent: 10 }, program).maxPercent, 10)
-  assert.equal(couponAccess({ couponsEnabled: true, maxCouponPercent: 500 }, program).maxPercent, 100)
-  assert.equal(couponAccess({ couponsEnabled: true, maxCouponPercent: 0 }, program).maxPercent, 30)
-  // the program switch still closes it for everyone
-  assert.equal(couponAccess({ couponsEnabled: true, maxCouponPercent: 95 }, { ...program, couponsEnabled: false }).enabled, false)
+test("coupon settings an affiliate could once be given no longer exist in the program", () => {
+  // coupons are created by an admin only: no master switch, no discount ceiling for affiliates
+  assert.ok(!("couponsEnabled" in DEFAULT_PROGRAM) && !("maxCouponPercent" in DEFAULT_PROGRAM))
+  // settings saved before that are read without them
+  const old = normalizeProgram({ couponsEnabled: true, maxCouponPercent: 95, permanentCouponPercent: 25 })
+  assert.ok(!("couponsEnabled" in old) && !("maxCouponPercent" in old))
+  assert.equal(old.permanentCouponPercent, 25)
 })
 
 test("the permanent code: 20% by default, configurable, and can be switched off", () => {

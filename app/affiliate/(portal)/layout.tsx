@@ -2,9 +2,8 @@ import type React from "react"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
-import { couponAccess } from "@/lib/affiliates/engine"
-import { currentRule, getProgram } from "@/lib/affiliates/program"
-import { notificationsFor, unreadCounts } from "@/lib/affiliates/queries"
+import { currentRule } from "@/lib/affiliates/program"
+import { hasCoupons, notificationsFor, unreadCounts } from "@/lib/affiliates/queries"
 import { BrandMark } from "@/components/brand-mark"
 import { ImpersonationBanner } from "@/components/impersonation-banner"
 import { NotificationsMenu, PortalNav, type PortalNavItem } from "@/components/affiliate/portal-nav"
@@ -14,9 +13,9 @@ import { affiliateHref, appHref } from "@/lib/urls"
 
 export default async function AffiliatePortalLayout({ children }: { children: React.ReactNode }) {
   const { user, affiliate } = await requireAffiliate()
-  const [unread, notifications, rule, program] = await Promise.all([unreadCounts(affiliate.id), notificationsFor(affiliate.id, 12), currentRule(affiliate.id), getProgram()])
-  // The Coupons section is open only for affiliates an admin opened it for.
-  const coupons = couponAccess(affiliate, program).enabled
+  // The Coupons section appears once the affiliate has a code to show there:
+  // their permanent one, or a coupon an admin generated for them.
+  const [unread, notifications, rule, coupons] = await Promise.all([unreadCounts(affiliate.id), notificationsFor(affiliate.id, 12), currentRule(affiliate.id), hasCoupons(affiliate.id)])
 
   const items: PortalNavItem[] = [
     { href: "/affiliate", label: "Overview", icon: "overview" },

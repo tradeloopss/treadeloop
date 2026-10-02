@@ -1503,10 +1503,11 @@ export const affiliates = pgTable(
     autoPayoutThreshold: numeric("autoPayoutThreshold"), // the affiliate's own threshold; null = the minimum
     minPayoutOverride: numeric("minPayoutOverride"), // admin: custom minimum; null = inherited
     maxPayoutOverride: numeric("maxPayoutOverride"), // admin: custom maximum; null = inherited
-    // The Coupons section of the portal (creating their own codes). Off for
-    // everyone until an admin opens it for this affiliate.
+    // No longer read: from when an affiliate could be allowed to create their
+    // own coupons. Coupons are now only ever created by an admin (or the system,
+    // for the permanent code); the columns are left in place.
     couponsEnabled: boolean("couponsEnabled").notNull().default(false),
-    maxCouponPercent: integer("maxCouponPercent"), // admin: the largest discount they may offer; null = the program's
+    maxCouponPercent: integer("maxCouponPercent"),
     // When the tier perk "a free TradeLoop account, for good" was given. Given
     // once: an admin who later revokes that access isn't overruled by the next run.
     freeAccountAt: timestamp("freeAccountAt"),

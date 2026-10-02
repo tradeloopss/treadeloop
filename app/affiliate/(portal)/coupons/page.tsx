@@ -1,25 +1,21 @@
 import type { Metadata } from "next"
-import { couponAccess } from "@/lib/affiliates/engine"
 import { requireAffiliate } from "@/lib/affiliates/guard"
-import { getProgram } from "@/lib/affiliates/program"
-import { campaignsWithStats, couponsWithStats } from "@/lib/affiliates/queries"
+import { couponsWithStats } from "@/lib/affiliates/queries"
 import { PageHeader } from "@/components/page-header"
-import { CouponsManager } from "@/components/affiliate/coupons"
+import { CouponsList } from "@/components/affiliate/coupons"
 
 export const metadata: Metadata = { title: "Coupons" }
 
+// Read-only: the codes the affiliate has been given (their permanent one, and
+// the coupons an admin generated for them). Nothing here creates or changes one.
 export default async function AffiliateCouponsPage() {
   const { affiliate } = await requireAffiliate()
-  const [coupons, campaigns, program] = await Promise.all([couponsWithStats(affiliate.id), campaignsWithStats(affiliate.id), getProgram()])
-  const access = couponAccess(affiliate, program)
+  const coupons = await couponsWithStats(affiliate.id)
   return (
     <div>
       <PageHeader title="Coupons" description="Discount codes that credit the sale to you." />
       <div className="p-4 sm:p-6">
-        <CouponsManager
-          enabled={access.enabled}
-          maxPercent={access.maxPercent}
-          campaigns={campaigns.filter((c) => c.status === "active").map((c) => ({ id: c.id, name: c.name }))}
+        <CouponsList
           coupons={coupons.map((c) => ({
             id: c.id,
             code: c.code,

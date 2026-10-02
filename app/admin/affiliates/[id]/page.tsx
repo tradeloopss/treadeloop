@@ -333,14 +333,13 @@ export default async function AdminAffiliateDetailPage({ params }: { params: Pro
               )}
             </Panel>
 
-            <Panel title="Coupons" description="Their permanent code, the codes you generate for them, and whether they can make their own.">
+            <Panel title="Coupons" description="Their permanent code and the codes you generate for them. Only admins create coupons.">
               {canManage && decided ? (
                 <CouponAdmin
                   affiliateId={a.id}
                   name={name}
                   ready={a.status === "approved" && !!a.onboardedAt}
-                  access={{ couponsEnabled: a.couponsEnabled, maxCouponPercent: a.maxCouponPercent }}
-                  program={{ couponsEnabled: d.program.couponsEnabled, maxCouponPercent: d.program.maxCouponPercent, permanentPercent: d.program.permanentCouponPercent, permanentMonths: d.program.permanentCouponMonths }}
+                  program={{ permanentPercent: d.program.permanentCouponPercent, permanentMonths: d.program.permanentCouponMonths }}
                   coupons={d.coupons.map((c) => ({ id: c.id, code: c.code, percent: c.discountValue, durationMonths: c.durationMonths, uses: c.uses, status: c.status, permanent: c.permanent, byAdmin: !c.permanent && !!c.createdBy && c.createdBy !== "affiliate" && c.createdBy !== "system" }))}
                 />
               ) : d.coupons.length === 0 ? (

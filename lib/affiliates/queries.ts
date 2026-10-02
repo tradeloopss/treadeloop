@@ -212,6 +212,13 @@ export async function couponsWithStats(affiliateId: number) {
   return rows.map((c) => ({ ...c, stats: stats.get(c.id) ?? emptyStat(), campaign: campaigns.find((x) => x.id === c.campaignId) ?? null }))
 }
 
+// Whether there is anything to show in the portal's Coupons section: the
+// affiliate's permanent code, or a coupon an admin generated for them.
+export async function hasCoupons(affiliateId: number): Promise<boolean> {
+  const [row] = await db.select({ id: affiliateCoupons.id }).from(affiliateCoupons).where(eq(affiliateCoupons.affiliateId, affiliateId)).limit(1)
+  return !!row
+}
+
 export async function defaultLink(affiliateId: number) {
   const [row] = await db.select().from(affiliateLinks).where(and(eq(affiliateLinks.affiliateId, affiliateId), eq(affiliateLinks.isDefault, true)))
   return row ?? null
