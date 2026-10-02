@@ -131,9 +131,11 @@ export async function saveProgramSettings(input: Record<string, unknown>): Promi
     const admin = await assertAdmin(MANAGE)
     const before = await getProgram()
     const saved = await saveProgram(input)
-    // A shorter holding period also applies to commissions still waiting.
+    // A shorter holding period also applies to commissions still waiting. (Run
+    // on an unchanged period too: it only ever brings a date forward, so saving
+    // again is a safe way to re-apply it.)
     let moved = 0
-    if (saved.holdDays < before.holdDays) {
+    if (saved.holdDays <= before.holdDays) {
       moved = await applyHoldPeriod(saved.holdDays)
       await releaseHolds()
     }
