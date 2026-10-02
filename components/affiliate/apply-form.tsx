@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { ArrowRight } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,6 +11,13 @@ import { applyToProgram, finishOnboarding } from "@/app/actions/affiliate"
 import { AUDIENCE_SIZES, SOCIAL_KEYS, SOCIAL_LABELS, TRAFFIC_SOURCES } from "@/lib/affiliates/types"
 import { selectClass } from "./ui"
 import { affiliateHref } from "@/lib/urls"
+
+const field = "flex flex-col gap-1.5 text-xs font-medium text-foreground/80"
+const Req = () => (
+  <span className="text-[var(--loss)]" aria-hidden>
+    *
+  </span>
+)
 
 const BLANK = { firstName: "", lastName: "", country: "", website: "", audienceSize: "", trafficSource: "", promotionMethod: "", reason: "" }
 
@@ -26,6 +34,7 @@ export function ApplyForm({ email, defaults, countries }: { email: string; defau
     <form
       className="grid gap-5"
       noValidate={false}
+      aria-label="Affiliate application"
       onSubmit={async (e) => {
         e.preventDefault()
         setPending(true)
@@ -43,23 +52,29 @@ export function ApplyForm({ email, defaults, countries }: { email: string; defau
         }
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          First name
-          <Input value={form.firstName} onChange={set("firstName")} maxLength={60} required autoComplete="given-name" />
+      <div className="grid gap-x-4 gap-y-3.5 sm:grid-cols-2">
+        <label className={field}>
+          <span>
+            First name <Req />
+          </span>
+          <Input value={form.firstName} onChange={set("firstName")} maxLength={60} required autoComplete="given-name" placeholder="Your first name" />
         </label>
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          Last name
-          <Input value={form.lastName} onChange={set("lastName")} maxLength={60} required autoComplete="family-name" />
+        <label className={field}>
+          <span>
+            Last name <Req />
+          </span>
+          <Input value={form.lastName} onChange={set("lastName")} maxLength={60} required autoComplete="family-name" placeholder="Your last name" />
         </label>
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          Email
+        <label className={field}>
+          Email address
           <Input value={email} readOnly disabled />
         </label>
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          Country
+        <label className={field}>
+          <span>
+            Country <Req />
+          </span>
           <select value={form.country} onChange={set("country")} className={selectClass} required autoComplete="country">
-            <option value="">Choose…</option>
+            <option value="">Select an option</option>
             {countries.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.name}
@@ -69,31 +84,40 @@ export function ApplyForm({ email, defaults, countries }: { email: string; defau
         </label>
       </div>
 
-      <fieldset className="grid gap-4 sm:grid-cols-2">
-        <legend className="mb-2 text-sm font-medium">Where you&apos;ll promote TradeLoop</legend>
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground sm:col-span-2">
-          Website (optional if you add a social profile)
-          <Input value={form.website} onChange={set("website")} maxLength={200} placeholder="https://" inputMode="url" autoComplete="url" />
+      <fieldset className="grid gap-x-4 gap-y-3.5 sm:grid-cols-2">
+        <legend className="mb-2.5 text-[13px] font-semibold text-foreground">
+          Website / social media <Req />
+          <span className="ms-1.5 font-normal text-muted-foreground">— at least one</span>
+        </legend>
+        <label className={`${field} sm:col-span-2`}>
+          Website
+          <Input value={form.website} onChange={set("website")} maxLength={200} placeholder="https:// (e.g. yourwebsite.com)" inputMode="url" autoComplete="url" />
         </label>
-        {SOCIAL_KEYS.map((k) => (
-          <label key={k} className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-            {SOCIAL_LABELS[k]}
-            <Input value={socials[k] ?? ""} onChange={(e) => setSocials((s) => ({ ...s, [k]: e.target.value }))} maxLength={120} placeholder="@handle or link" />
-          </label>
-        ))}
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          Main traffic source
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:col-span-2 sm:grid-cols-3">
+          {SOCIAL_KEYS.map((k) => (
+            <label key={k} className={field}>
+              {SOCIAL_LABELS[k]}
+              <Input value={socials[k] ?? ""} onChange={(e) => setSocials((s) => ({ ...s, [k]: e.target.value }))} maxLength={120} placeholder="@handle" />
+            </label>
+          ))}
+        </div>
+        <label className={field}>
+          <span>
+            Where does your audience come from? <Req />
+          </span>
           <select value={form.trafficSource} onChange={set("trafficSource")} className={selectClass} required>
-            <option value="">Choose…</option>
+            <option value="">Select an option</option>
             {TRAFFIC_SOURCES.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          Audience size
+        <label className={field}>
+          <span>
+            How large is your audience? <Req />
+          </span>
           <select value={form.audienceSize} onChange={set("audienceSize")} className={selectClass} required>
-            <option value="">Choose…</option>
+            <option value="">Select an option</option>
             {AUDIENCE_SIZES.map((s) => (
               <option key={s}>{s}</option>
             ))}
@@ -101,16 +125,18 @@ export function ApplyForm({ email, defaults, countries }: { email: string; defau
         </label>
       </fieldset>
 
-      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-        How will you promote TradeLoop?
-        <Textarea value={form.promotionMethod} onChange={set("promotionMethod")} rows={4} minLength={20} maxLength={1000} placeholder="e.g. A walkthrough video for my YouTube channel, plus a pinned link in my Discord." required />
+      <label className={field}>
+        <span>
+          How will you promote TradeLoop? <Req />
+        </span>
+        <Textarea value={form.promotionMethod} onChange={set("promotionMethod")} rows={3} minLength={20} maxLength={1000} placeholder="e.g. A walkthrough video for my YouTube channel, plus a pinned link in my Discord." required />
       </label>
-      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-        Why do you want to partner with us? (optional)
-        <Textarea value={form.reason} onChange={set("reason")} rows={3} maxLength={1000} />
+      <label className={field}>
+        Additional information (optional)
+        <Textarea value={form.reason} onChange={set("reason")} rows={2} maxLength={1000} placeholder="Tell us more about your audience, your content, or why you'd like to partner with us." />
       </label>
 
-      <label className="flex items-start gap-2.5 text-sm">
+      <label className="flex items-start gap-2.5 text-[13px] leading-relaxed">
         <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" required />
         <span>
           I agree to the{" "}
@@ -126,11 +152,15 @@ export function ApplyForm({ email, defaults, countries }: { email: string; defau
           {error}
         </p>
       )}
-      <div>
-        <Button type="submit" size="lg" disabled={pending || !terms}>
-          {pending ? "Sending application…" : "Submit application"}
-        </Button>
-      </div>
+      <Button type="submit" size="lg" className="h-11 w-full text-sm" disabled={pending || !terms} aria-busy={pending}>
+        {pending ? (
+          "Sending application…"
+        ) : (
+          <>
+            Submit Application <ArrowRight className="size-4 rtl:rotate-180" aria-hidden />
+          </>
+        )}
+      </Button>
     </form>
   )
 }

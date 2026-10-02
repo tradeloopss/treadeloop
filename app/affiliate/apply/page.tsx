@@ -1,23 +1,18 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import { redirect } from "next/navigation"
 import { headers } from "next/headers"
-import { CircleDollarSign, Clock, Link2, MailCheck, ShieldAlert, XCircle } from "lucide-react"
 import { getSessionUser } from "@/lib/affiliates/guard"
 import { countryOptions } from "@/lib/affiliates/countries"
-import { getPayoutSettings, getProgram, loadTiers } from "@/lib/affiliates/program"
+import { SITE_URL, getPayoutSettings, getProgram, loadTiers } from "@/lib/affiliates/program"
 import { methodAvailable } from "@/lib/affiliates/providers"
 import { getAffiliateByUser } from "@/lib/affiliates/queries"
 import { methodList, money } from "@/lib/affiliates/types"
-import { BrandMark } from "@/components/brand-mark"
-import { ThemeSwitch } from "@/components/affiliate/theme-switch"
-import { ApplyForm } from "@/components/affiliate/apply-form"
-import { ProgramTerms } from "@/components/affiliate/program-terms"
-import { TierCards } from "@/components/affiliate/tier-cards"
-import { affiliateHref, appHref } from "@/lib/urls"
+import { AffiliateLanding } from "@/components/affiliate/landing/landing"
+import { HELP_URL, affiliateHref, appHref } from "@/lib/urls"
 
-// The one public page of the program — what it is, what it pays, and the
-// application. Indexable (the rest of /affiliate is not).
+// The one public page of the program — what it is, how the tiers work, and the
+// application. Indexable (the rest of /affiliate is not). This file loads the
+// data; components/affiliate/landing/landing.tsx draws it.
 export async function generateMetadata(): Promise<Metadata> {
   const [program, tiers] = await Promise.all([getProgram(), loadTiers()])
   const rates = tiers.filter((t) => t.enabled).map((t) => t.ratePercent)
@@ -26,149 +21,30 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title, description, robots: { index: true, follow: true }, alternates: { canonical: affiliateHref("/affiliate/apply") }, openGraph: { title: `${title} — TradeLoop`, description, type: "website" } }
 }
 
-function StatusCard({ icon: Icon, title, children, tone = "muted" }: { icon: typeof Clock; title: string; children: React.ReactNode; tone?: "muted" | "loss" }) {
-  return (
-    <section className="rounded-xl border bg-card p-6 text-center sm:p-10" role="status">
-      <span className={`mx-auto flex size-12 items-center justify-center rounded-full ${tone === "loss" ? "bg-[var(--loss)]/12 text-[var(--loss)]" : "bg-primary/12 text-primary"}`}>
-        <Icon className="size-6" aria-hidden />
-      </span>
-      <h2 className="mt-4 text-lg font-semibold tracking-tight">{title}</h2>
-      <div className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">{children}</div>
-    </section>
-  )
-}
-
 export default async function AffiliateApplyPage() {
   const user = await getSessionUser()
   const affiliate = user ? await getAffiliateByUser(user.id) : null
   if (affiliate?.status === "approved") redirect(affiliateHref(affiliate.onboardedAt ? "/affiliate" : "/affiliate/onboarding"))
 
   const [program, tiers, payoutSettings] = await Promise.all([getProgram(), loadTiers(), getPayoutSettings()])
-  const payoutMethods = methodList(payoutSettings.methods.filter(methodAvailable))
-  const country = (await headers()).get("x-vercel-ip-country") ?? ""
-  const activeTiers = tiers.filter((t) => t.enabled).sort((a, b) => a.minCustomers - b.minCustomers)
-  // With tiers, what the program pays is what the tiers pay; the default rate only applies without them.
-  const topRate = activeTiers.length ? Math.max(...activeTiers.map((t) => t.ratePercent)) : program.defaultRate
-  const startRate = activeTiers.length ? activeTiers[0].ratePercent : program.defaultRate
-  const [firstName = "", ...rest] = (user?.name ?? "").trim().split(/\s+/)
-  const canApply = !!user && (!affiliate || affiliate.status === "rejected")
-
   return (
-    <div className="min-h-svh bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <BrandMark className="size-7" />
-            <span className="font-semibold tracking-tight">TradeLoop</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">Affiliates</span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <ThemeSwitch compact />
-            {user ? (
-              <Link href={appHref("/dashboard")} className="text-sm text-muted-foreground hover:text-foreground">
-                Back to app
-              </Link>
-            ) : (
-              <Link href={appHref("/sign-in?next=/affiliate/apply")} className="inline-flex h-8 items-center rounded-lg border px-3 text-sm font-medium hover:bg-muted">
-                Sign in
-              </Link>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
-        <section>
-          <h1 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
-            Earn up to {topRate}% {program.commissionType === "recurring" ? "recurring commission" : "commission"} referring traders to TradeLoop
-          </h1>
-          <p className="mt-3 max-w-2xl text-base text-muted-foreground">
-            Share your link. When a trader you referred subscribes, you earn a share of {program.commissionType === "recurring" ? (program.durationMonths ? `every payment for their first ${program.durationMonths} months` : "every payment they make") : "their first payment"} — tracked in a real-time dashboard and paid out from {money(program.minPayout)}.
-          </p>
-          {!user && (
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link href={appHref("/sign-up?next=/affiliate/apply")} className="inline-flex h-10 items-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-                Create an account to apply
-              </Link>
-              <Link href={appHref("/sign-in?next=/affiliate/apply")} className="inline-flex h-10 items-center rounded-lg border px-5 text-sm font-medium hover:bg-muted">
-                I already have an account
-              </Link>
-            </div>
-          )}
-        </section>
-
-        <section className="grid gap-3 sm:grid-cols-3" aria-label="How it works">
-          {[
-            { icon: Link2, title: "1. Share your link", body: `Get a personal link to share. Clicks are remembered for ${program.cookieDays} days.` },
-            { icon: CircleDollarSign, title: "2. Earn on every payment", body: `${startRate}% to start, rising with the paying customers you bring in.` },
-            { icon: MailCheck, title: "3. Get paid", body: `Commissions clear after ${program.holdDays} days. Withdraw by ${payoutMethods}.` },
-          ].map((s) => (
-            <div key={s.title} className="rounded-xl border bg-card p-5">
-              <s.icon className="size-5 text-primary" aria-hidden />
-              <h2 className="mt-3 text-sm font-semibold">{s.title}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{s.body}</p>
-            </div>
-          ))}
-        </section>
-
-        {activeTiers.length > 0 && (
-          <section aria-labelledby="tiers-heading">
-            <h2 id="tiers-heading" className="text-sm font-semibold">
-              Commission tiers
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">You move up automatically as your paying customers grow — and each tier unlocks more.</p>
-            <TierCards tiers={activeTiers} couponPercent={program.permanentCouponPercent} className="mt-3" />
-          </section>
-        )}
-
-        {affiliate?.status === "pending" || affiliate?.status === "review" ? (
-          <StatusCard icon={Clock} title={affiliate.status === "review" ? "Your application is being reviewed" : "Application received"}>
-            Thanks, {affiliate.firstName}. We review every application by hand and will email {affiliate.email} as soon as there&apos;s a decision — usually within a few business days.
-          </StatusCard>
-        ) : affiliate?.status === "suspended" ? (
-          <StatusCard icon={ShieldAlert} title="Your affiliate account is suspended" tone="loss">
-            Your links aren&apos;t tracking and the dashboard is unavailable while the account is suspended. If you think this is a mistake, contact{" "}
-            <a href="mailto:support@tradeloop.pro" className="font-medium text-primary hover:underline">
-              support@tradeloop.pro
-            </a>
-            .
-          </StatusCard>
-        ) : affiliate?.status === "rejected" ? (
-          <StatusCard icon={XCircle} title="We couldn't approve your application" tone="loss">
-            {affiliate.rejectionReason ? <span className="block">{affiliate.rejectionReason}</span> : null}
-            <span className="mt-1 block">You&apos;re welcome to apply again below with more detail about your audience.</span>
-          </StatusCard>
-        ) : null}
-
-        {canApply && user && (
-          <section className="rounded-xl border bg-card">
-            <div className="border-b px-5 py-4">
-              <h2 className="text-sm font-semibold">{affiliate ? "Apply again" : "Apply to the program"}</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">{program.autoApprove ? "You'll get access as soon as you submit." : "Takes about two minutes. We review applications within a few business days."}</p>
-            </div>
-            <div className="p-5">
-              <ApplyForm
-                email={user.email}
-                countries={countryOptions()}
-                defaults={
-                  affiliate
-                    ? { firstName: affiliate.firstName, lastName: affiliate.lastName, country: affiliate.country ?? "", website: affiliate.website ?? "", audienceSize: affiliate.audienceSize ?? "", trafficSource: affiliate.trafficSource ?? "", promotionMethod: affiliate.promotionMethod ?? "", reason: affiliate.reason ?? "" }
-                    : { firstName, lastName: rest.join(" "), country: /^[A-Z]{2}$/.test(country) ? country : "" }
-                }
-              />
-            </div>
-          </section>
-        )}
-
-        <section id="terms" className="scroll-mt-6 rounded-xl border bg-card">
-          <div className="border-b px-5 py-4">
-            <h2 className="text-sm font-semibold">Program terms</h2>
-          </div>
-          <div className="p-5">
-            <ProgramTerms program={program} startRate={startRate} scheduled={activeTiers.some((t) => t.introMonths != null)} />
-          </div>
-        </section>
-      </main>
-    </div>
+    <AffiliateLanding
+      user={user ? { name: user.name ?? "", email: user.email } : null}
+      affiliate={affiliate}
+      program={program}
+      tiers={tiers}
+      payoutMethods={methodList(payoutSettings.methods.filter(methodAvailable))}
+      country={(await headers()).get("x-vercel-ip-country") ?? ""}
+      countries={countryOptions()}
+      urls={{
+        site: SITE_URL,
+        // The Help Center's own address, or /help on the public site (never on this host, where it isn't served).
+        help: HELP_URL.startsWith("http") ? HELP_URL : `${SITE_URL}${HELP_URL}`,
+        self: affiliateHref("/affiliate/apply"),
+        signIn: appHref("/sign-in?next=/affiliate/apply"),
+        signUp: appHref("/sign-up?next=/affiliate/apply"),
+        app: appHref("/dashboard"),
+      }}
+    />
   )
 }
