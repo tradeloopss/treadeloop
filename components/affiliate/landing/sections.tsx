@@ -67,9 +67,9 @@ export function AffiliateBenefits({ items }: { items: WhyItem[] }) {
           Your Success Matters
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">At TradeLoop, we provide the tools, resources, and support you need to turn your audience into income.</p>
-        {/* Four across on a phone (icon over a short title) and on a desktop (title on ONE line, text under it);
-            two by two on the narrowest screens and on tablets, where four wouldn't fit side by side. */}
-        <ul className="mt-8 grid grid-cols-2 gap-x-3 gap-y-6 min-[420px]:grid-cols-4 sm:grid-cols-2 sm:gap-x-8 lg:grid-cols-4 lg:gap-x-6">
+        {/* Every title stays on ONE line at every width. That decides the layout: two by two on phones
+            and tablets (four across would break "Competitive Commissions" in two), four across on a desktop. */}
+        <ul className="mt-8 grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-8 lg:grid-cols-4 lg:gap-x-6">
           {items.map((item) => {
             const Icon = WHY_ICONS[item.icon]
             return (
@@ -78,7 +78,7 @@ export function AffiliateBenefits({ items }: { items: WhyItem[] }) {
                   <Icon className="size-5" aria-hidden />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold leading-tight sm:text-sm lg:whitespace-nowrap">{item.title}</p>
+                  <p className="text-[11px] font-semibold leading-tight whitespace-nowrap min-[360px]:text-xs sm:text-sm">{item.title}</p>
                   <p className="mt-1 hidden text-[13px] leading-relaxed text-muted-foreground sm:block">{item.body}</p>
                 </div>
               </li>
