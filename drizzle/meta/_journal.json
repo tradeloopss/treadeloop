@@ -225,6 +225,13 @@
       "when": 1790970000000,
       "tag": "0031_affiliate_method_hold_waiver",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790980000000,
+      "tag": "0032_affiliate_hold_period",
+      "breakpoints": true
     }
   ]
 }

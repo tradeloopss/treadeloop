@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateCommissions, affiliateConversions, affiliateReferrals, affiliates } from "@/lib/db/schema"
 import { decideCommission, ledgerBalances, planReversal, refundShare, resolveRule, round2, tierFor, type Balances, type ReversalKind } from "./engine"
@@ -244,6 +244,10 @@ export async function handleAffiliateMembership(input: { userId: string | null |
 // under a fraud lock keeps their commissions at "approved" until an admin
 // resolves it. Run by the daily job and lazily when an affiliate opens the
 // portal (scoped to them), so nothing depends on the cron having fired.
+//
+// Only what was EARNED moves here. A payout's own ledger row — the reservation —
+// also starts as "pending" (awaiting approval), and it follows the payout's
+// status and nothing else (payouts.transition).
 export async function releaseHolds(opts: { affiliateId?: number; now?: Date } = {}): Promise<{ approved: number; released: number }> {
   const now = opts.now ?? new Date()
   const scope = opts.affiliateId != null ? eq(affiliateCommissions.affiliateId, opts.affiliateId) : undefined
@@ -251,14 +255,14 @@ export async function releaseHolds(opts: { affiliateId?: number; now?: Date } = 
   const approved = await db
     .update(affiliateCommissions)
     .set({ status: "approved", approvedAt: now })
-    .where(and(eq(affiliateCommissions.status, "pending"), or(isNull(affiliateCommissions.holdUntil), lte(affiliateCommissions.holdUntil, now)), scope))
+    .where(and(eq(affiliateCommissions.status, "pending"), ne(affiliateCommissions.type, "payout"), or(isNull(affiliateCommissions.holdUntil), lte(affiliateCommissions.holdUntil, now)), scope))
     .returning({ id: affiliateCommissions.id })
 
   const clear = db.select({ id: affiliates.id }).from(affiliates).where(and(eq(affiliates.status, "approved"), eq(affiliates.fraudLock, false)))
   const released = await db
     .update(affiliateCommissions)
     .set({ status: "available", availableAt: now })
-    .where(and(eq(affiliateCommissions.status, "approved"), inArray(affiliateCommissions.affiliateId, clear), scope))
+    .where(and(eq(affiliateCommissions.status, "approved"), ne(affiliateCommissions.type, "payout"), inArray(affiliateCommissions.affiliateId, clear), scope))
     .returning({ affiliateId: affiliateCommissions.affiliateId, amount: affiliateCommissions.amount })
 
   const byAffiliate = new Map<number, number>()
@@ -276,6 +280,28 @@ export async function releaseHolds(opts: { affiliateId?: number; now?: Date } = 
     })
   }
   return { approved: approved.length, released: released.length }
+}
+
+// The holding period was shortened: commissions still waiting follow the new
+// period (counted from when they were earned) instead of the date they were
+// given at the time. Only ever brings a date forward — a longer period applies
+// to new payments, never pushes back what an affiliate was already told.
+// Returns how many were brought forward; releaseHolds() then clears those due.
+export async function applyHoldPeriod(holdDays: number): Promise<number> {
+  const days = Math.max(0, Math.min(180, Math.round(holdDays)))
+  const due = sql`${affiliateCommissions.createdAt} + make_interval(days => ${days}::int)`
+  const rows = await db
+    .update(affiliateCommissions)
+    .set({ holdUntil: due })
+    .where(and(eq(affiliateCommissions.status, "pending"), ne(affiliateCommissions.type, "payout"), isNull(affiliateCommissions.reversesId), isNotNull(affiliateCommissions.holdUntil), sql`${affiliateCommissions.holdUntil} > ${due}`))
+    .returning({ id: affiliateCommissions.id })
+  // A partial refund rides through the hold with the commission it nets
+  // against, so it keeps that commission's date — never its own.
+  await db.execute(sql`
+    update "affiliate_commissions" r set "holdUntil" = o."holdUntil"
+    from "affiliate_commissions" o
+    where r."reversesId" = o."id" and r."status" = 'pending' and r."type" <> 'payout' and o."holdUntil" is not null and r."holdUntil" is distinct from o."holdUntil"`)
+  return rows.length
 }
 
 // --- Admin actions ----------------------------------------------------------

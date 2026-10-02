@@ -8,7 +8,7 @@ import { assertAdmin } from "@/lib/admin/guard"
 import { logAdminAction } from "@/lib/admin/audit"
 import type { Permissions } from "@/lib/admin/access"
 import { decideApplication, validateCode, type Decision } from "@/lib/affiliates/apply"
-import { addLedgerEntry, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
+import { addLedgerEntry, applyHoldPeriod, approveCommission, releaseHolds, reverseCommission } from "@/lib/affiliates/commissions"
 import { adminCreateCoupon, refreshPermanentCoupon, setCouponAccess, setCouponStatus, type CouponInput } from "@/lib/affiliates/coupons"
 import { runAutoPayouts } from "@/lib/affiliates/auto-payouts"
 import { adminPayoutAction, adminRemoveMethodHold, adminSetMethodStatus, revealPayoutDestination, setAffiliatePayoutControls, submitCryptoTransaction, trackPayout, type Actor, type AdminAction } from "@/lib/affiliates/payouts"
@@ -129,8 +129,16 @@ export async function setAffiliateCode(affiliateId: number, code: string): Promi
 export async function saveProgramSettings(input: Record<string, unknown>): Promise<ActionResult> {
   return run(async () => {
     const admin = await assertAdmin(MANAGE)
+    const before = await getProgram()
     const saved = await saveProgram(input)
-    await logAdminAction(admin, "affiliate.program", null, saved)
+    // A shorter holding period also applies to commissions still waiting.
+    let moved = 0
+    if (saved.holdDays < before.holdDays) {
+      moved = await applyHoldPeriod(saved.holdDays)
+      await releaseHolds()
+    }
+    await logAdminAction(admin, "affiliate.program", null, { ...saved, ...(moved ? { pendingCommissionsBroughtForward: moved } : {}) })
+    if (moved) return `Program rules saved. ${moved} pending commission${moved === 1 ? "" : "s"} now follow${moved === 1 ? "s" : ""} the ${saved.holdDays}-day holding period.`
     return "Program rules saved. They apply to payments from now on."
   })
 }

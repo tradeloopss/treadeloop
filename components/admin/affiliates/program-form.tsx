@@ -61,7 +61,7 @@ export function ProgramForm({ program, canManage }: { program: ProgramSettings; 
           <label className={label}>
             Holding period (days)
             <Input type="number" min={0} max={180} step={1} value={form.holdDays} onChange={num("holdDays")} required />
-            <span>Match your refund window.</span>
+            <span>Match your refund window. Shortening it also brings forward commissions still pending; lengthening it only affects new payments.</span>
           </label>
           <label className={label}>
             Minimum payout (USD)
