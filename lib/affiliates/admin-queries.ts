@@ -23,7 +23,7 @@ import { EARNED, PAGE_SIZE, ledgerWhere, performance, type LedgerFilters } from 
 import { rangeStart, type Range } from "./types"
 import { EXPORT_LIMIT } from "./csv"
 import { CRYPTO } from "./crypto"
-import { assetPriceUsd, exchangeConfig, withdrawalQuota, type Quota } from "./kucoin"
+import { assetPriceUsd, exchangeConfig, exchangeSourceIp, withdrawalQuota, type Quota } from "./kucoin"
 import { AUTO_SENDERS, EXCHANGE_PROVIDER, HOT_PROVIDER } from "./providers"
 import { payoutWallet, walletBalances, type WalletBalances } from "./tron-wallet"
 
@@ -486,6 +486,7 @@ export async function exchangeStatus() {
     ready: config.ready,
     problem: config.ready ? (quotas.find((q) => q.error)?.error ?? null) : config.problem,
     relay: process.env.KUCOIN_RELAY?.trim() || null,
+    sourceIp: exchangeSourceIp(),
     networks: specs.map((spec, i) => ({ type: spec.type, asset: spec.asset, network: spec.networkLabel, quota: quotas[i].value, priceUsd: prices[i].value })),
     waiting: Number(waiting?.v ?? 0),
     waitingCount: waiting?.n ?? 0,

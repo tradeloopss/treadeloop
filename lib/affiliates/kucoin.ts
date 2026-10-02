@@ -12,6 +12,11 @@ import https from "node:https"
 //   KUCOIN_RELAY   host:port of the static-IP relay the key is restricted to.
 //       The relay passes the TLS stream through untouched (it never sees the
 //       key), and the certificate is still verified as api.kucoin.com here.
+//   KUCOIN_SOURCE_IP   the address KuCoin sees requests come from — the one the
+//       key has to be restricted to. It is NOT always the relay's own address:
+//       the relay reaches KuCoin over its IPv6 address, because its IPv4 one is
+//       wrongly listed as "US" in the location data KuCoin uses and US addresses
+//       are refused. Shown to admins only; not a secret.
 //   KUCOIN_API_KEY_VERSION   optional, "3" unless KuCoin issued an older key.
 //
 // What can leave is bounded twice: by the limits checked before every send
@@ -49,6 +54,19 @@ export class ExchangeUnreachable extends Error {
     super(message)
     this.name = "ExchangeUnreachable"
   }
+}
+
+// The address to put on the API key: what KuCoin sees, else the relay's own.
+export const exchangeSourceIp = () => process.env.KUCOIN_SOURCE_IP?.trim() || process.env.KUCOIN_RELAY?.trim().split(":")[0] || null
+
+// What to do about a refusal that is about WHERE the request came from, in
+// words an admin can act on. KuCoin's own message is kept; this is added to it.
+export function refusalHint(code: string, message: string): string | null {
+  const ip = exchangeSourceIp()
+  if (code === "400006" || /invalid request ip/i.test(message)) return `Add the address in this message to the API key's IP list in KuCoin (API Management → edit the key), then it is sent on the next run.`
+  if (/unavailable in the u\.?s|restricted (country|region|location)|non-restricted country/i.test(message))
+    return `KuCoin places the address this request came from in a country it doesn't serve. The key must be restricted to ${ip ?? "the sync server's address"}, and requests must leave from that address.`
+  return null
 }
 
 const hmac = (secret: string, text: string) => createHmac("sha256", secret).update(text).digest("base64")
@@ -111,7 +129,11 @@ async function call<T>(method: "GET" | "POST", path: string, opts: { body?: Reco
     json = JSON.parse(raw.text)
   } catch {}
   if (raw.status >= 500 || !json || json.code == null) throw new ExchangeUnreachable(`KuCoin gave no usable answer (HTTP ${raw.status}).`)
-  if (String(json.code) !== "200000") throw new ExchangeRefused(String(json.code), String(json.msg ?? "The request was refused.").slice(0, 300))
+  if (String(json.code) !== "200000") {
+    const said = String(json.msg ?? "The request was refused.").slice(0, 300)
+    const hint = refusalHint(String(json.code), said)
+    throw new ExchangeRefused(String(json.code), hint ? `${said} — ${hint}` : said)
+  }
   return json.data as T
 }
 

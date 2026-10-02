@@ -33,7 +33,7 @@ import {
 import { createHmac } from "node:crypto"
 import { CRYPTO, aptosAddressProblem, cryptoSpec, cryptoSpecByNetwork, explorerTxUrl as cryptoExplorerUrl, formatAsset, isCryptoMethod, litecoinAddressProblem } from "@/lib/affiliates/crypto"
 import { ledgerBalances } from "@/lib/affiliates/engine"
-import { matchWithdrawal, signedHeaders, withdrawalRemark, type Withdrawal } from "@/lib/affiliates/kucoin"
+import { exchangeSourceIp, matchWithdrawal, refusalHint, signedHeaders, withdrawalRemark, type Withdrawal } from "@/lib/affiliates/kucoin"
 import { abaValid, bankScheme, bicValid, ibanValid, validateMethod } from "@/lib/affiliates/method-validation"
 import { StripeError, stripeAccountState, stripeFailurePermanent } from "@/lib/affiliates/stripe-connect"
 import { judgeTransaction, usdtTransfers, type TxInfo } from "@/lib/affiliates/tron-chain"
@@ -726,6 +726,31 @@ test("exchange requests are signed over the time, the method, the path and the e
   // the secret and the passphrase never travel
   assert.ok(!JSON.stringify(h).includes("secret-1") && !JSON.stringify(h).includes("phrase-1"))
   assert.equal(signedHeaders({ ...input, version: "2" })["KC-API-KEY-VERSION"], "2")
+})
+
+test("a refusal about where the request came from says what to do about it", () => {
+  const before = { relay: process.env.KUCOIN_RELAY, ip: process.env.KUCOIN_SOURCE_IP }
+  try {
+    process.env.KUCOIN_RELAY = "2.26.120.18:8443"
+    delete process.env.KUCOIN_SOURCE_IP
+    // the address to put on the key: what KuCoin sees, else the relay's own
+    assert.equal(exchangeSourceIp(), "2.26.120.18")
+    process.env.KUCOIN_SOURCE_IP = " 2a0a:6044:6200:2dd:: "
+    assert.equal(exchangeSourceIp(), "2a0a:6044:6200:2dd::")
+
+    // the key isn't restricted to the address KuCoin saw
+    assert.match(refusalHint("400006", "Invalid request ip, the current clientIp is:2a0a:6044:6200:2dd::")!, /API key's IP list/)
+    assert.match(refusalHint("400100", "Invalid request ip")!, /API key's IP list/)
+    // KuCoin places the address in a country it doesn't serve
+    const geo = refusalHint("400302", "Our services are currently unavailable in the U.S. To ensure a seamless experience, please access the platform from a non-restricted country/region using a supported IP address. (current ip: 2.26.120.18 and current area: US)")!
+    assert.match(geo, /country it doesn't serve/)
+    assert.ok(geo.includes("2a0a:6044:6200:2dd::"))
+    // anything else is left as KuCoin said it
+    assert.equal(refusalHint("400003", "The API key does not exist or site mismatch."), null)
+    assert.equal(refusalHint("260100", "Insufficient balance"), null)
+  } finally {
+    for (const [k, v] of [["KUCOIN_RELAY", before.relay], ["KUCOIN_SOURCE_IP", before.ip]] as const) v == null ? delete process.env[k] : (process.env[k] = v)
+  }
 })
 
 test("a withdrawal whose answer was lost is recognised in the account's history", () => {

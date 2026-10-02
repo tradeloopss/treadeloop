@@ -30,7 +30,6 @@ export default async function AdminAffiliatePayoutSettingsPage() {
   const exchangeSending = settings.cryptoAutoSend && exchange.ready && !settings.paused
   const sending = settings.cryptoAutoSend && wallet.ready && !exchange.ready && !settings.paused
   const anySending = exchangeSending || sending
-  const relayIp = exchange.relay?.split(":")[0] ?? null
   const trx = wallet.balances ? wallet.balances.trxSun / 1_000_000 : null
   // Roughly what one USDT transfer burns when the wallet has no staked energy.
   const lowTrx = trx != null && wallet.balances!.energyAvailable < 65_000 && trx < 30
@@ -102,6 +101,11 @@ export default async function AdminAffiliatePayoutSettingsPage() {
                 <Kpi label="Sent automatically today" value={money(wallet.sentToday)} note={`${wallet.sentTodayCount} payout${wallet.sentTodayCount === 1 ? "" : "s"} · limit ${money(settings.cryptoAutoDaily)}`} />
                 <Kpi label="Waiting on the account" value={money(exchange.waiting)} note={`${exchange.waitingCount} payout${exchange.waitingCount === 1 ? "" : "s"} queued or needing a retry`} />
               </KpiGrid>
+              {exchange.sourceIp && (
+                <p className="text-xs text-muted-foreground">
+                  KuCoin sees requests come from <span className="break-all font-mono text-foreground">{exchange.sourceIp}</span> (the sync server, in Germany). The API key&apos;s IP list in KuCoin has to contain exactly this address.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Withdrawals come out of the account&apos;s <span className="font-medium text-foreground">Funding</span> balance, and KuCoin&apos;s fee is paid on top, so the affiliate receives the full amount. Keep a working float there — a few days of payouts — not your reserves. Litecoin payouts need LTC in the account: they are converted from US dollars at the market price when sent.
               </p>
@@ -114,7 +118,7 @@ export default async function AdminAffiliatePayoutSettingsPage() {
                   In KuCoin, create an API key with the <span className="font-medium text-foreground">General</span> and <span className="font-medium text-foreground">Withdrawal</span> permissions only — no trading.
                 </li>
                 <li>
-                  Restrict the key to this IP address: <span className="font-mono text-xs text-foreground">{relayIp ?? "the sync server's address (KUCOIN_RELAY)"}</span>. KuCoin requires a fixed IP for withdrawals.
+                  Restrict the key to this IP address: <span className="break-all font-mono text-xs text-foreground">{exchange.sourceIp ?? "the sync server's address (KUCOIN_RELAY)"}</span>. KuCoin requires a fixed IP for withdrawals.
                 </li>
                 <li>
                   Set <span className="font-mono text-xs">KUCOIN_API_KEY</span>, <span className="font-mono text-xs">KUCOIN_API_SECRET</span> and <span className="font-mono text-xs">KUCOIN_API_PASSPHRASE</span> in the server environment (mark them Sensitive), then redeploy.
