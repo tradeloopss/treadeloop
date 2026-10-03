@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { Download } from "lucide-react"
+import { Download, Wallet } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
 import { loadPayoutPage } from "@/lib/affiliates/payout-view"
 import { PAYOUT_STATUS_LABELS, payoutInFlight, type PayoutStatus } from "@/lib/affiliates/payout-engine"
@@ -9,7 +9,7 @@ import { affiliateHref } from "@/lib/urls"
 import { AutoPayoutPanel } from "@/components/affiliate/payouts"
 import { AvailableToWithdrawCard } from "@/components/affiliate/available-card"
 import { PayoutDetailsProvider, PayoutFlow, PayoutHistoryList } from "@/components/affiliate/v2/payout-flow"
-import { CardLink, PageFrame, V2Card, ghostBtnClass } from "@/components/affiliate/v2/ui"
+import { CardLink, LinkSection, PageFrame, V2Card, ghostBtnClass } from "@/components/affiliate/v2/ui"
 
 export const metadata: Metadata = { title: "Payout" }
 
@@ -79,9 +79,17 @@ export default async function AffiliateV2Payouts({ searchParams }: { searchParam
                 />
               }
               aside={
-                <V2Card title="Payout History" action={payouts.length > 0 ? <CardLink href="/affiliate/v2/payouts?tab=history">View All</CardLink> : undefined}>
-                  <PayoutHistoryList payouts={data.payoutViews} limit={5} />
-                </V2Card>
+                <>
+                  <V2Card title="Payout History" action={payouts.length > 0 ? <CardLink href="/affiliate/v2/payouts?tab=history">View All</CardLink> : undefined}>
+                    <PayoutHistoryList payouts={data.payoutViews} limit={5} />
+                  </V2Card>
+                  {/* The way to the Wallet. (With the Wallet switched off, to the one screen of it that stays: payout methods.) */}
+                  {config.features.wallet ? (
+                    <LinkSection icon={Wallet} title="Manage Wallet" description="Your balances, payout methods and transaction history." href="/affiliate/v2/wallet" cta="Go to Wallet" />
+                  ) : (
+                    <LinkSection icon={Wallet} title="Manage Payout Methods" description="Add, edit or remove where your payouts are sent." href="/affiliate/v2/wallet/methods" cta="Open Payout Methods" />
+                  )}
+                </>
               }
             />
             <AutoPayoutPanel auto={data.auto} />

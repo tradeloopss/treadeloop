@@ -43,6 +43,25 @@ export function BackLink({ href, children }: { href: string; children: React.Rea
   )
 }
 
+// A small section whose whole point is to send you somewhere else: what is
+// there, and one button to go ("Manage Wallet" under the Payout History).
+export function LinkSection({ icon, title, description, href, cta, className }: { icon: LucideIcon; title: string; description: string; href: string; cta: string; className?: string }) {
+  return (
+    <section className={cn("v2-card flex min-w-0 flex-col gap-3.5 p-4 sm:p-5", className)}>
+      <div className="flex items-center gap-3">
+        <IconTile icon={icon} />
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <Link href={affiliateHref(href)} className="group inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-primary/40 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none active:translate-y-px">
+        {cta} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden />
+      </Link>
+    </section>
+  )
+}
+
 export function IconTile({ icon: Icon, className, size = "md" }: { icon: LucideIcon; className?: string; size?: "sm" | "md" | "lg" }) {
   return (
     <span className={cn("v2-icon flex shrink-0 items-center justify-center rounded-xl", size === "sm" ? "size-8" : size === "lg" ? "size-12 rounded-2xl" : "size-10", className)} aria-hidden>
