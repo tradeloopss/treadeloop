@@ -21,8 +21,9 @@ const ART = appHref("/art/payout-wallet.webp")
 // the button stay the first things read.
 const MASK = "linear-gradient(to right, transparent, #000 30%), linear-gradient(to top, transparent, #000 14%)"
 const FADE = { maskImage: MASK, maskComposite: "intersect", WebkitMaskImage: MASK, WebkitMaskComposite: "source-in" } as const
-// On a phone it sits between the amount and the button: its top edge fades too.
-const MASK_PHONE = `${MASK}, linear-gradient(to bottom, transparent, #000 26%)`
+// On a phone the card is kept short: the artwork sits behind the amount, at
+// the top right, and fades out sooner so the figure stays clean.
+const MASK_PHONE = "linear-gradient(to right, transparent, #000 46%), linear-gradient(to top, transparent, #000 22%)"
 const FADE_PHONE = { maskImage: MASK_PHONE, maskComposite: "intersect", WebkitMaskImage: MASK_PHONE, WebkitMaskComposite: "source-in" } as const
 
 // Faint candlesticks in the corner, like the design's backdrop.
@@ -74,8 +75,8 @@ export function AvailableToWithdrawCard({
       className={cn("relative isolate overflow-hidden rounded-[22px] border border-white/10 bg-[#08102a] text-white shadow-[0_22px_60px_-28px_rgba(99,70,255,0.7)]", className)}
     >
       <div aria-hidden className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,#08102a_0%,#0a1238_48%,#051654_100%)]" />
-      <div aria-hidden className="absolute -bottom-28 -start-24 -z-10 size-[440px] rounded-full bg-[radial-gradient(circle,rgba(104,40,235,0.72),transparent_66%)]" />
-      <svg aria-hidden viewBox="0 0 150 90" className="absolute start-3 bottom-[5.25rem] -z-10 h-16 w-36 opacity-[0.13] sm:h-24 sm:w-56" preserveAspectRatio="none">
+      <div aria-hidden className="absolute -bottom-24 -start-20 -z-10 size-[300px] rounded-full bg-[radial-gradient(circle,rgba(104,40,235,0.72),transparent_66%)] sm:-bottom-28 sm:-start-24 sm:size-[440px]" />
+      <svg aria-hidden viewBox="0 0 150 90" className="absolute start-3 bottom-[5.25rem] -z-10 hidden h-24 w-56 opacity-[0.13] sm:block" preserveAspectRatio="none">
         {CANDLES.map(([x, top, body, wick]) => (
           <g key={x} fill="#8b7bff">
             <rect x={x + 3.2} y={top - wick / 3} width="1.2" height={body + wick} rx="0.6" />
@@ -86,27 +87,26 @@ export function AvailableToWithdrawCard({
       {/* From sm up the artwork sits behind the content, filling the card above the button. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none absolute end-0 top-0 -z-10 hidden h-[calc(100%-4.5rem)] w-auto max-w-none opacity-55 select-none sm:block" style={FADE} />
+      {/* On a phone: smaller, behind the amount. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none absolute -end-6 top-1 -z-10 h-[112px] w-auto max-w-none opacity-55 select-none sm:hidden" style={FADE_PHONE} />
 
-      <div className="flex flex-col p-5 sm:min-h-[clamp(300px,25vw,372px)] sm:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+      <div className="flex flex-col p-4 sm:min-h-[clamp(300px,25vw,372px)] sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2.5 sm:gap-y-3">
           <div className="min-w-0">
-            <p className="text-sm text-white/70 sm:text-lg">Available to withdraw</p>
-            <p className="mt-1 text-[40px] leading-none font-bold tracking-tight tabular-nums sm:mt-1.5 sm:text-[56px]">{money(amount)}</p>
-            {status && <p className="mt-2.5 inline-flex max-w-full items-center rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/85">{status}</p>}
+            <p className="text-[13px] text-white/70 sm:text-lg">Available to withdraw</p>
+            <p className="mt-0.5 text-[34px] leading-none font-bold tracking-tight tabular-nums sm:mt-1.5 sm:text-[56px]">{money(amount)}</p>
+            {status && <p className="mt-2 inline-flex max-w-full items-center rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/85 sm:mt-2.5">{status}</p>}
           </div>
-          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-[#101a45]/70 py-1.5 ps-1.5 pe-3.5 text-[13px] font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md sm:py-2 sm:ps-2 sm:pe-4 sm:text-[15px]">
-            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#4f6bff,#7c3aed)] sm:size-7" aria-hidden>
-              <Zap className="size-3.5 fill-white stroke-white" />
+          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-[#101a45]/70 py-1 ps-1 pe-3 text-xs font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md sm:py-2 sm:ps-2 sm:pe-4 sm:text-[15px]">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#4f6bff,#7c3aed)] sm:size-7" aria-hidden>
+              <Zap className="size-3 fill-white stroke-white sm:size-3.5" />
             </span>
             {arrival}
           </p>
         </div>
 
-        {/* On a phone the artwork is part of the flow, tucked just behind the button. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none -mx-5 mt-3 -mb-4 w-[calc(100%+2.5rem)] max-w-none opacity-55 select-none sm:hidden" style={FADE_PHONE} />
-
-        <div className="relative mt-auto sm:pt-6">
+        <div className="relative mt-auto pt-3.5 sm:pt-6">
           <RequestPayout
             {...request}
             trigger={(open, hint) => (
@@ -114,7 +114,7 @@ export function AvailableToWithdrawCard({
                 <button
                   type="button"
                   onClick={() => open()}
-                  className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(90deg,#8b3dff_0%,#5d5bf7_45%,#1f7bff_100%)] text-base font-semibold text-white shadow-[0_14px_34px_-14px_rgba(84,92,255,0.9)] transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none active:translate-y-px motion-reduce:transition-none"
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(90deg,#8b3dff_0%,#5d5bf7_45%,#1f7bff_100%)] text-[15px] font-semibold sm:h-14 sm:rounded-2xl sm:text-base text-white shadow-[0_14px_34px_-14px_rgba(84,92,255,0.9)] transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none active:translate-y-px motion-reduce:transition-none"
                 >
                   Request Payout <ArrowRight className="size-5" aria-hidden />
                 </button>
