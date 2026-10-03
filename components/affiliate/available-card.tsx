@@ -16,7 +16,9 @@ import { cn } from "@/lib/utils"
 // address: on the affiliate subdomain a root-relative file takes a redirect.
 const ART = appHref("/art/payout-wallet.webp")
 
-// The artwork fades into the card on its left and along its bottom edge.
+// The artwork fades into the card on its left and along its bottom edge, and
+// is shown at reduced strength (opacity-55 on both <img>s) so the amount and
+// the button stay the first things read.
 const MASK = "linear-gradient(to right, transparent, #000 30%), linear-gradient(to top, transparent, #000 14%)"
 const FADE = { maskImage: MASK, maskComposite: "intersect", WebkitMaskImage: MASK, WebkitMaskComposite: "source-in" } as const
 // On a phone it sits between the amount and the button: its top edge fades too.
@@ -83,7 +85,7 @@ export function AvailableToWithdrawCard({
       </svg>
       {/* From sm up the artwork sits behind the content, filling the card above the button. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none absolute end-0 top-0 -z-10 hidden h-[calc(100%-4.5rem)] w-auto max-w-none select-none sm:block" style={FADE} />
+      <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none absolute end-0 top-0 -z-10 hidden h-[calc(100%-4.5rem)] w-auto max-w-none opacity-55 select-none sm:block" style={FADE} />
 
       <div className="flex flex-col p-5 sm:min-h-[clamp(300px,25vw,372px)] sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
@@ -102,7 +104,7 @@ export function AvailableToWithdrawCard({
 
         {/* On a phone the artwork is part of the flow, tucked just behind the button. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none -mx-5 mt-3 -mb-4 w-[calc(100%+2.5rem)] max-w-none select-none sm:hidden" style={FADE_PHONE} />
+        <img src={ART} alt="" aria-hidden width={1252} height={456} decoding="async" className="pointer-events-none -mx-5 mt-3 -mb-4 w-[calc(100%+2.5rem)] max-w-none opacity-55 select-none sm:hidden" style={FADE_PHONE} />
 
         <div className="relative mt-auto sm:pt-6">
           <RequestPayout
