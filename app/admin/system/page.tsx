@@ -41,7 +41,8 @@ export default async function AdminSystemPage() {
 
         <div className="grid gap-6 xl:grid-cols-2">
           <Panel title="Page render time, last 24h" description="Server time to build each page, sampled on 1 in 4 requests. Doesn't include the network or the browser.">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm">
               <thead>
                 <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Route</th>
@@ -64,10 +65,12 @@ export default async function AdminSystemPage() {
                 {timings.length === 0 && <EmptyRow colSpan={5}>No page timings recorded in the last 24 hours.</EmptyRow>}
               </tbody>
             </table>
+            </div>
           </Panel>
 
           <Panel title="Largest tables" description="Size on disk including indexes. Many sequential scans on a big table usually means a missing index.">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm">
               <thead>
                 <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Table</th>
@@ -89,6 +92,7 @@ export default async function AdminSystemPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </Panel>
         </div>
 
@@ -96,7 +100,8 @@ export default async function AdminSystemPage() {
           {dbHealth.slowQueries == null ? (
             <p className="text-sm text-muted-foreground">Statement statistics aren&apos;t available on this database (the pg_stat_statements extension is off). Supabase enables it by default in production.</p>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm">
               <thead>
                 <tr className="text-start text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Statement</th>
@@ -117,11 +122,13 @@ export default async function AdminSystemPage() {
                 {dbHealth.slowQueries.length === 0 && <EmptyRow colSpan={4}>No statement has run more than 5 times yet.</EmptyRow>}
               </tbody>
             </table>
+            </div>
           )}
         </Panel>
 
         <Panel title="Outside APIs, last 30 days" description="Every call the app makes to Anthropic and MetaApi. Anthropic cost is estimated from tokens at list price; MetaApi is a flat subscription.">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="text-start text-xs text-muted-foreground">
                 <th className="pb-2 font-medium">Service</th>
@@ -150,6 +157,7 @@ export default async function AdminSystemPage() {
               {api.usage.length === 0 && <EmptyRow colSpan={8}>No outside API calls recorded yet.</EmptyRow>}
             </tbody>
           </table>
+            </div>
           {api.recentErrors.length > 0 && (
             <div className="mt-4 border-t pt-4">
               <p className="mb-2 text-xs font-medium text-muted-foreground">Latest errors</p>

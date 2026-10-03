@@ -1331,6 +1331,9 @@ export const userSettings = pgTable("user_settings", {
   notifications: jsonb("notifications").$type<Record<string, unknown>>(),
   // { timeZone, dateFormat, weekStart, numberFormat, defaultAccountId }
   preferences: jsonb("preferences").$type<Record<string, unknown>>(),
+  // Staff only: their choices for the admin area (lib/admin/preferences.ts).
+  // { dashboard: modern | legacy, sidebar, notify, readAt, readKeys }
+  admin: jsonb("admin").$type<Record<string, unknown>>(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
 })

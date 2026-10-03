@@ -104,7 +104,7 @@ export async function getFunnel(days: number) {
 
 // Monthly-equivalent list price. Launch promos aren't subtracted, so these
 // revenue numbers are estimates at list price.
-function monthlyPrice(plan: string, billing: string | null) {
+export function monthlyPrice(plan: string, billing: string | null) {
   const pricing = PLAN_PRICING[plan as PlanTier]
   if (!pricing) return 0
   return billing === "annual" ? pricing.annualPrice : pricing.monthlyPrice

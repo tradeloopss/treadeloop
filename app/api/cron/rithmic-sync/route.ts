@@ -10,6 +10,7 @@ import { cronAuthorized } from "@/lib/cron-auth"
 import { runAllConnections } from "@/lib/rithmic-auto-sync"
 import { runRithmicOrderCommands } from "@/lib/rithmic-sync"
 import { normalizeDueConnections } from "@/lib/metatrader-sync"
+import { recordHeartbeat } from "@/lib/heartbeat"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -33,9 +34,12 @@ export async function POST(req: Request) {
       console.error("[cron/rithmic-sync] MT5 normalize fallback failed:", err)
       return null
     })
+    // The clock's pulse, for the admin System Health panel.
+    await recordHeartbeat("rithmic_sync")
     return Response.json({ ok: true, ms: Date.now() - startedAt, at: new Date().toISOString(), ...summary, orders: orders.processed, mt5 })
   } catch (err) {
     console.error("[cron/rithmic-sync] run failed:", err)
+    await recordHeartbeat("rithmic_sync", ["sync pass"])
     return Response.json({ ok: false, ms: Date.now() - startedAt, error: err instanceof Error ? err.message : "run failed" }, { status: 500 })
   }
 }

@@ -3,18 +3,18 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Activity, BookOpen, CreditCard, Database, FileUp, Gauge, Gift, Handshake, LifeBuoy, Lock, Megaphone, PlugZap, ScrollText, ShieldCheck, SlidersHorizontal, Users } from "lucide-react"
+import type { NavIcon } from "@/lib/admin/nav"
+import { NAV_ICONS } from "@/components/admin/shell/nav-icons"
 
-const ICONS = { overview: Gauge, users: Users, billing: CreditCard, brokers: PlugZap, analytics: Activity, announcements: Megaphone, audit: ScrollText, team: ShieldCheck, support: LifeBuoy, security: Lock, imports: FileUp, content: BookOpen, system: Database, propRules: SlidersHorizontal, cases: Gift, affiliates: Handshake }
+export type NavItem = { href: string; label: string; icon: NavIcon; badge?: number }
 
-export type NavItem = { href: string; label: string; icon: keyof typeof ICONS; badge?: number }
-
+// The previous (legacy) dashboard's sidebar links.
 export function AdminNav({ items }: { items: NavItem[] }) {
   const pathname = usePathname()
   return (
     <nav className="flex gap-1 overflow-x-auto p-3 md:flex-col md:overflow-visible">
       {items.map((item) => {
-        const Icon = ICONS[item.icon]
+        const Icon = NAV_ICONS[item.icon]
         const active = item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href)
         return (
           <Link

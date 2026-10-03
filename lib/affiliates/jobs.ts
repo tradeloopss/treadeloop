@@ -2,6 +2,7 @@ import { and, eq, gte, lt, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { affiliateClicks, affiliateReferrals, affiliates } from "@/lib/db/schema"
 import { getAppSetting, setAppSetting } from "@/lib/app-settings"
+import { recordHeartbeat } from "@/lib/heartbeat"
 import { emailConfigured } from "@/lib/email"
 import { generalNotice } from "@/lib/emails/affiliate-emails"
 import { deliver, pruneEmailEvents, retryDueEmails } from "@/lib/emails/outbox"
@@ -90,15 +91,19 @@ async function sendMonthlyReports(now: Date): Promise<number> {
 // a day (the sync VPS): transaction tracking and the automatic payout worker.
 export async function runPayoutJob(now = new Date()) {
   const out: Record<string, unknown> = {}
+  const failed: string[] = []
   // (emails: deliveries the provider didn't take the first time are retried here)
   for (const [name, fn] of [["holds", () => releaseHolds({ now })], ["tracking", () => trackPayouts({ olderThanSeconds: 0 })], ["autoPayouts", () => runAutoPayouts(now)], ["sending", () => sendQueuedAutomatic()], ["emails", () => retryDueEmails()]] as const) {
     try {
       out[name] = await fn()
     } catch (e) {
       out[name] = { error: e instanceof Error ? e.message : String(e) }
+      failed.push(name)
       console.error(`[affiliates] ${name} failed:`, e instanceof Error ? e.message : e)
     }
   }
+  // For the admin System Health panel: when the worker last ran, and whether cleanly.
+  await recordHeartbeat("affiliate_payouts", failed)
   return out
 }
 
