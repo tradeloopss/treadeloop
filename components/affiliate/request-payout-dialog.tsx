@@ -10,39 +10,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { requestPayoutNow, type RequestedPayout } from "@/app/actions/affiliate"
 import { cryptoSpec, formatAsset } from "@/lib/affiliates/crypto"
 import { DEFAULT_PAYOUT_SETTINGS, PAYOUT_STATUS_LABELS, quoteFee, type FeeRule, type PayoutStatus } from "@/lib/affiliates/payout-engine"
+import { cents, cleanAmount, describeMethod, fmtWhen, inHold, methodUnavailable, newKey, quickAmounts, readAmount, usable } from "@/lib/affiliates/payout-form"
 import { methodLabel, money } from "@/lib/affiliates/types"
 import { MethodMark, PayoutMethodDialog } from "./payout-method-dialog"
 import type { MethodDialogConfig, MethodView } from "./payouts"
 import { StatusBadge } from "./ui"
-
-const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "")
-const fmtWhen = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-const inHold = (m: MethodView) => !!m.holdUntil && new Date(m.holdUntil).getTime() > Date.now()
-const usable = (m: MethodView) => m.status === "active" && !inHold(m)
-const cents = (v: number) => Math.floor(v * 100 + 1e-6) / 100
-
-// What a method is called, and the line under it: "USDT" / "TRON (TRC-20) · TXYZ…8291".
-function describeMethod(m: MethodView) {
-  const coin = cryptoSpec(m.type)
-  return { name: m.nickname || (coin ? coin.assetName : methodLabel(m.type)), detail: coin ? `${coin.networkLabel} · ${m.label}` : `${m.nickname ? `${methodLabel(m.type)} · ` : ""}${m.label}` }
-}
-
-// The amount as typed → a number, or why it can't be requested. The server
-// applies the same rules again (payout-engine.manualPayoutProblem); this is the
-// answer without a round trip.
-function readAmount(text: string, limits: { min: number; max: number | null; available: number; minWhy?: string }): { value: number | null; problem: string | null } {
-  const raw = text.trim()
-  if (!raw) return { value: null, problem: "Enter an amount." }
-  if (!/^\d*\.?\d*$/.test(raw) || raw === ".") return { value: null, problem: "Enter a valid amount." }
-  const value = Number(raw)
-  if (!Number.isFinite(value)) return { value: null, problem: "Enter a valid amount." }
-  if ((raw.split(".")[1] ?? "").length > 2) return { value: null, problem: "Use at most two decimal places." }
-  if (value <= 0) return { value: null, problem: "The amount must be greater than $0." }
-  if (value < limits.min) return { value, problem: limits.minWhy ?? `The minimum payout is ${money(limits.min)}.` }
-  if (value > limits.available) return { value, problem: "That's more than your available balance." }
-  if (limits.max != null && value > limits.max) return { value, problem: `The most you can withdraw in one payout is ${money(limits.max)}.` }
-  return { value, problem: null }
-}
 
 type Tone = "warning" | "danger" | "info"
 const TONES: Record<Tone, string> = { warning: "border-[var(--chart-4)]/35 bg-[var(--chart-4)]/8 text-[var(--chart-4)]", danger: "border-[var(--loss)]/30 bg-[var(--loss)]/8 text-[var(--loss)]", info: "border-border bg-muted/50 text-muted-foreground" }
@@ -103,7 +75,7 @@ function MethodPicker({ methods, selected, onSelect, onAdd, canAdd, labelId, min
           {methods.map((m) => {
             const d = describeMethod(m)
             const ok = usable(m)
-            const why = ok ? null : m.status === "active" ? `Security hold until ${fmtWhen(m.holdUntil!)}` : m.status === "disabled" ? "Disabled" : m.status === "pending_verification" ? "Being verified" : "Not available"
+            const why = methodUnavailable(m)
             const isSelected = selected?.id === m.id
             return (
               <button
@@ -232,8 +204,7 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
     setOpen(true)
   }
   const onAmount = (text: string) => {
-    // "$1,245.32" pasted from somewhere is 1245.32; anything else odd is kept so the error can say so
-    setAmount(text.replace(/[$,\s]/g, "").slice(0, 14))
+    setAmount(cleanAmount(text))
     setTouched(true)
     setError(null)
   }
@@ -260,7 +231,7 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
     setAdding(true)
   }
 
-  const quick: [string, number][] = [["25%", cents(most * 0.25)], ["50%", cents(most * 0.5)], ["75%", cents(most * 0.75)], ["Max", most]]
+  const quick = quickAmounts(most)
   const showError = touched && !!problem
 
   return (

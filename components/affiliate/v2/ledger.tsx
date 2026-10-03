@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
 
 // Ledger rows (Earnings, Wallet → Transactions) and the commission detail window.
 
-export type LedgerView = { id: number; type: string; status: string; amount: number; baseAmount: number | null; ratePercent: number | null; ruleSource: string | null; holdUntil: string | null; note: string | null; createdAt: string; referral: string | null; plan: string | null }
+export type LedgerView = { id: number; type: string; status: string; amount: number; baseAmount: number | null; ratePercent: number | null; ruleSource: string | null; holdUntil: string | null; note: string | null; createdAt: string; referral: string | null; plan: string | null; payoutId?: number | null }
 
 const TYPE_LABELS: Record<string, string> = { subscription: "Commission", bonus: "Bonus", adjustment: "Adjustment", refund: "Refund", reversal: "Reversal", payout: "Withdrawal" }
 const RULE_LABELS: Record<string, string> = { affiliate: "Custom rate", campaign: "Campaign rate", coupon: "Coupon rate", tier: "Tier rate", default: "Standard rate" }

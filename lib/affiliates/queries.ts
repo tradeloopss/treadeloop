@@ -342,6 +342,8 @@ const ledgerColumns = {
   ruleSource: affiliateCommissions.ruleSource,
   holdUntil: affiliateCommissions.holdUntil,
   note: affiliateCommissions.note,
+  // a payout row's payout (the Wallet's transaction details)
+  payoutId: affiliateCommissions.payoutId,
   createdAt: affiliateCommissions.createdAt,
   referral: affiliateReferrals.publicId,
   plan: affiliateReferrals.plan,

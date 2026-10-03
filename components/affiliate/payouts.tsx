@@ -16,7 +16,7 @@ import { MethodMark, PayoutMethodDialog } from "./payout-method-dialog"
 import { Empty, StatusBadge, TableShell, THead, fmtDay, tdClass, thClass } from "./ui"
 import { useAction } from "./use-action"
 
-export type MethodView = { id: number; type: string; label: string; nickname: string | null; status: string; isDefault: boolean; holdUntil: string | null; metadata: Record<string, string> | null }
+export type MethodView = { id: number; type: string; label: string; nickname: string | null; status: string; isDefault: boolean; holdUntil: string | null; metadata: Record<string, string> | null; createdAt?: string }
 export type PayoutView = { id: number; amount: number; fee: number; net: number; methodType: string; methodLabel: string; status: string; mode: string; network: string | null; asset: string | null; transactionHash: string | null; failureReason: string | null; requestedAt: string; completedAt: string | null }
 // What the Add Payout Method window needs, passed down from the page.
 export type MethodDialogConfig = { methods: PayoutMethodType[]; countries: { code: string; name: string }[]; defaultCountry: string; holdHours: number; hasMethod: boolean }

@@ -8,7 +8,7 @@ export type DashboardVersion = "classic" | "v2"
 export type V2Rollout = "all" | "selected" | "percent"
 export type V2Feature = "wallet" | "goals" | "achievements" | "leaderboard"
 export const V2_FEATURES: { key: V2Feature; label: string; description: string }[] = [
-  { key: "wallet", label: "Wallet", description: "Balances, payment methods, withdrawals and transactions in one place." },
+  { key: "wallet", label: "Wallet", description: "Balances, payout methods and transaction history in one place." },
   { key: "goals", label: "Goals & challenges", description: "Monthly targets with progress from real results." },
   { key: "achievements", label: "Achievements", description: "Badges for milestones reached." },
   { key: "leaderboard", label: "Leaderboard", description: "Rankings of the affiliates who choose to appear on it." },

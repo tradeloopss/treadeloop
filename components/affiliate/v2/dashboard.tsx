@@ -160,22 +160,19 @@ export function ConversionFunnel({ t, className }: { t: FunnelTotals; className?
 
 // --- Wallet preview ---------------------------------------------------------------------
 
-export function WalletPreview({ available, pending, lifetime, walletHref, withdrawHref, className }: { available: number; pending: number; lifetime: number; walletHref: string; withdrawHref: string; className?: string }) {
+// The Wallet at a glance. Like the Wallet itself it only shows and links —
+// asking for a payout is the Payout page's (and the balance card's) job.
+export function WalletPreview({ available, pending, lifetime, walletHref, payoutHref, className }: { available: number; pending: number; lifetime: number; walletHref: string | null; payoutHref: string; className?: string }) {
   return (
-    <V2Card title="Wallet" subtitle="Manage your earnings and withdrawals." glow className={className}>
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">Total balance</p>
-          <p className="truncate text-2xl font-semibold tracking-tight tabular-nums">{money(available + pending)}</p>
-        </div>
-        <Link href={affiliateHref(withdrawHref)} className={cn(btnClass, "h-9 shrink-0")}>
-          Withdraw
-        </Link>
+    <V2Card title="Wallet" subtitle="Your balance at a glance." glow className={className}>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">Total balance</p>
+        <p className="truncate text-2xl font-semibold tracking-tight tabular-nums">{money(available + pending)}</p>
       </div>
       <dl className="mt-4 space-y-2 text-[13px]">
         {(
           [
-            [Wallet, "Available for withdrawal", available],
+            [Wallet, "Available balance", available],
             [RotateCcw, "Pending commission", pending],
             [CircleDollarSign, "Lifetime earned", lifetime],
           ] as const
@@ -187,8 +184,8 @@ export function WalletPreview({ available, pending, lifetime, walletHref, withdr
           </div>
         ))}
       </dl>
-      <Link href={affiliateHref(walletHref)} className="mt-4 inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-primary/40 text-sm font-semibold text-primary transition-colors hover:bg-primary/10">
-        View Wallet <ArrowRight className="size-4" aria-hidden />
+      <Link href={affiliateHref(walletHref ?? payoutHref)} className="mt-4 inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-primary/40 text-sm font-semibold text-primary transition-colors hover:bg-primary/10">
+        {walletHref ? "View Wallet" : "Go to Payout"} <ArrowRight className="size-4" aria-hidden />
       </Link>
     </V2Card>
   )

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Bell, CheckCheck, CircleDollarSign, Link2, Loader2, Plus, Search, Share2, Target, Wallet, Zap } from "lucide-react"
+import { Banknote, Bell, CheckCheck, CircleDollarSign, Link2, Loader2, Plus, Search, Share2, Target, Zap } from "lucide-react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { markNotificationsRead } from "@/app/actions/affiliate"
 import { searchAffiliatePortal } from "@/app/actions/affiliate-v2"
@@ -228,17 +228,18 @@ export function useShareLink(url: string) {
   }
 }
 
-export function QuickActions({ referralUrl, wallet, variant }: { referralUrl: string; wallet: boolean; variant: "header" | "fab" }) {
+// `noPayout`: on the Wallet nothing asks for a payout — not even this menu.
+export function QuickActions({ referralUrl, variant, noPayout = false }: { referralUrl: string; variant: "header" | "fab"; noPayout?: boolean }) {
   const router = useRouter()
   const share = useShareLink(referralUrl)
   const [, start] = useTransition()
   const items = [
     { key: "link", label: "Create link", icon: Link2, run: () => router.push(affiliateHref("/affiliate/v2/links?new=1")) },
     { key: "share", label: "Share referral", icon: Share2, run: () => start(share) },
-    { key: "withdraw", label: "Withdraw", icon: Wallet, run: () => router.push(affiliateHref(wallet ? "/affiliate/v2/wallet?withdraw=1" : "/affiliate/v2/payouts?withdraw=1")) },
+    { key: "payout", label: "Request payout", icon: Banknote, run: () => router.push(affiliateHref("/affiliate/v2/payouts")) },
     { key: "earnings", label: "View earnings", icon: CircleDollarSign, run: () => router.push(affiliateHref("/affiliate/v2/earnings")) },
     { key: "campaign", label: "Create campaign", icon: Target, run: () => router.push(affiliateHref("/affiliate/v2/campaigns?new=1")) },
-  ]
+  ].filter((i) => !(noPayout && i.key === "payout"))
   return (
     <DropdownMenu>
       <DropdownMenuTrigger

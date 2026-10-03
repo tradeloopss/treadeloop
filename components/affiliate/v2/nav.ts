@@ -37,7 +37,7 @@ export const V2_NAV: V2NavItem[] = [
   { key: "links", href: `${V2_BASE}/links`, label: "Links", icon: Link2 },
   { key: "coupons", href: `${V2_BASE}/coupons`, label: "Coupons", icon: Ticket },
   { key: "earnings", href: `${V2_BASE}/earnings`, label: "Earnings", icon: CircleDollarSign },
-  { key: "payouts", href: `${V2_BASE}/payouts`, label: "Payouts", icon: Banknote },
+  { key: "payouts", href: `${V2_BASE}/payouts`, label: "Payout", icon: Banknote },
   { key: "wallet", href: `${V2_BASE}/wallet`, label: "Wallet", icon: Wallet, isNew: true, feature: "wallet" },
   { key: "resources", href: `${V2_BASE}/resources`, label: "Resources", icon: FolderOpen },
   { key: "announcements", href: `${V2_BASE}/announcements`, label: "Announcements", icon: Megaphone },
@@ -72,8 +72,11 @@ export const V2_TITLES: Record<string, { title: string; description: string }> =
   links: { title: "Smart links", description: "Tracking links for every channel, with their results." },
   coupons: { title: "Coupons", description: "Your discount codes and how they perform." },
   earnings: { title: "Earnings", description: "Every commission, and where it is on its way to you." },
-  payouts: { title: "Payouts", description: "Withdraw your earnings and follow every payout." },
-  wallet: { title: "Wallet", description: "Manage your earnings and withdrawals." },
+  // Wallet = manage and track. Payout = withdraw. The two never share a button.
+  payouts: { title: "Payout", description: "Withdraw your earnings to your preferred method." },
+  wallet: { title: "Wallet", description: "Manage your balance, payout methods, and history." },
+  "wallet/methods": { title: "Payout Methods", description: "Add, edit, or remove where your payouts are sent." },
+  "wallet/transactions": { title: "Transaction History", description: "Everything that changed your balance." },
   resources: { title: "Resources", description: "Banners, copy and assets for promoting TradeLoop." },
   announcements: { title: "Announcements", description: "News and updates about the program." },
   goals: { title: "Goals & challenges", description: "This month's targets, measured on your real results." },
@@ -88,6 +91,12 @@ export const V2_TITLES: Record<string, { title: string; description: string }> =
 export const navKey = (pathname: string) => {
   const m = /^\/affiliate\/v2(?:\/([a-z-]+))?/.exec(inAppPath(pathname))
   return m?.[1] ?? "dashboard"
+}
+
+// The header's title: a page under another (wallet/methods) has its own when one is listed.
+export const titleKey = (pathname: string) => {
+  const m = /^\/affiliate\/v2\/([a-z-]+\/[a-z-]+)/.exec(inAppPath(pathname))
+  return m && V2_TITLES[m[1]] ? m[1] : navKey(pathname)
 }
 
 

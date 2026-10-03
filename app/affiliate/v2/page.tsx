@@ -61,7 +61,6 @@ export default async function AffiliateV2Dashboard({ searchParams }: { searchPar
   )
   const goals = monthlyGoals(config.goals, month, new Date())
   const badges = achievements({ ...stats, lifetimeEarned: balances.lifetimeEarned }, live.map((t) => ({ id: t.id, name: t.name, minCustomers: t.minCustomers, style: t.style ?? "plain" })))
-  const withdrawHref = config.features.wallet ? "/affiliate/v2/wallet?withdraw=1" : "/affiliate/v2/payouts?withdraw=1"
   const funnel = { clicks: current.clicks, signups: current.signups, trials: current.trials, customers: current.customers }
   const activity = notes.map((n) => ({ id: n.id, type: n.type, title: n.title, body: n.body, href: n.href, at: n.createdAt.toISOString() }))
   const periodTotal = Math.round(perf.series.points.reduce((s, p) => s + p.commission, 0) * 100) / 100
@@ -91,8 +90,8 @@ export default async function AffiliateV2Dashboard({ searchParams }: { searchPar
             className="col-span-2 sm:col-span-1"
             sub={balances.processing > 0 ? `${money(balances.processing)} being paid out` : `Minimum payout ${money(program.minPayout)}`}
             action={
-              <Link href={affiliateHref(withdrawHref)} className={cn(btnClass, "h-8 w-full text-xs sm:w-auto")}>
-                Withdraw Now <ArrowRight className="size-3.5" aria-hidden />
+              <Link href={affiliateHref("/affiliate/v2/payouts")} className={cn(btnClass, "h-8 w-full text-xs sm:w-auto")}>
+                Request Payout <ArrowRight className="size-3.5" aria-hidden />
               </Link>
             }
           />
@@ -127,7 +126,7 @@ export default async function AffiliateV2Dashboard({ searchParams }: { searchPar
             <MetricSwitcher points={perf.series.points} unit={perf.series.unit} height="h-40" />
           </V2Card>
           <ConversionFunnel t={funnel} />
-          <WalletPreview available={balances.available} pending={balances.pending} lifetime={balances.lifetimeEarned} walletHref={config.features.wallet ? "/affiliate/v2/wallet" : "/affiliate/v2/payouts"} withdrawHref={withdrawHref} />
+          <WalletPreview available={balances.available} pending={balances.pending} lifetime={balances.lifetimeEarned} walletHref={config.features.wallet ? "/affiliate/v2/wallet" : null} payoutHref="/affiliate/v2/payouts" />
         </div>
 
         {live.length > 0 && (

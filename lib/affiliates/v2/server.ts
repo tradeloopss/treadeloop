@@ -7,6 +7,7 @@ import { getAppSetting, setAppSetting } from "@/lib/app-settings"
 import { round2 } from "../engine"
 import { EARNED, bucketFor, type Bucket, type SeriesPoint, type Totals } from "../queries"
 import { DEFAULT_V2_CONFIG, effectiveVersion, normalizeV2Config, v2Open, type DashboardVersion, type V2Config } from "./config"
+import { balanceTrend, countsTowardBalance, type BalanceTrend } from "./wallet"
 import type { PortalContext } from "../guard"
 
 // The V2 dashboard's server side. Like everything the portal reads, every
@@ -196,8 +197,25 @@ export async function searchPortal(affiliateId: number, raw: string): Promise<Po
   return [
     ...refs.map((r) => ({ key: `r:${r.publicId}`, group: "Referrals", title: r.publicId, detail: [r.plan, r.status].filter(Boolean).join(" · "), href: `/affiliate/v2/referrals?open=${encodeURIComponent(r.publicId)}` })),
     ...campaigns.map((c) => ({ key: `c:${c.id}`, group: "Campaigns", title: c.name, detail: c.status, href: `/affiliate/v2/campaigns/${c.id}` })),
-    ...payouts.map((p) => ({ key: `p:${p.id}`, group: "Payouts", title: `Payout #${p.id}`, detail: `$${n(p.amount).toFixed(2)} · ${p.status}`, href: "/affiliate/v2/payouts" })),
+    ...payouts.map((p) => ({ key: `p:${p.id}`, group: "Payouts", title: `Payout #${p.id}`, detail: `$${n(p.amount).toFixed(2)} · ${p.status}`, href: `/affiliate/v2/payouts?payout=${p.id}` })),
   ]
+}
+
+// --- Wallet -----------------------------------------------------------------------------------
+
+// One read of the affiliate's ledger, grouped by day / type / status, giving
+// the Wallet both of the things it derives: the balance history behind the
+// Total Balance card, and how many rows each Transaction History filter holds.
+export async function walletLedgerSummary(affiliateId: number, now = new Date(), days = 30): Promise<{ trend: BalanceTrend; byType: Record<string, number> }> {
+  const day = sql<string>`to_char(${affiliateCommissions.createdAt}, 'YYYY-MM-DD')`
+  const rows = await db
+    .select({ day, type: affiliateCommissions.type, status: affiliateCommissions.status, amount: sql<string>`sum(${affiliateCommissions.amount})`, rows: sql<number>`count(*)::int` })
+    .from(affiliateCommissions)
+    .where(eq(affiliateCommissions.affiliateId, affiliateId))
+    .groupBy(day, affiliateCommissions.type, affiliateCommissions.status)
+  const byType: Record<string, number> = {}
+  for (const r of rows) byType[r.type] = (byType[r.type] ?? 0) + n(r.rows)
+  return { trend: balanceTrend(rows.filter((r) => countsTowardBalance(r.type, r.status)).map((r) => ({ day: r.day, amount: n(r.amount) })), now, days), byType }
 }
 
 // --- Feedback -------------------------------------------------------------------------------

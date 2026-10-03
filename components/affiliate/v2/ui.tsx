@@ -1,6 +1,6 @@
 import type React from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowRight, type LucideIcon } from "lucide-react"
+import { AlertTriangle, ArrowLeft, ArrowRight, type LucideIcon } from "lucide-react"
 import { RANGES, RANGE_LABELS, type Range } from "@/lib/affiliates/types"
 import { affiliateHref } from "@/lib/urls"
 import { cn } from "@/lib/utils"
@@ -30,6 +30,15 @@ export function CardLink({ href, children, className }: { href: string; children
   return (
     <Link href={affiliateHref(href)} className={cn("inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none", className)}>
       {children} <ArrowRight className="size-3.5" aria-hidden />
+    </Link>
+  )
+}
+
+// "← Wallet" at the top of a page that sits under another.
+export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={affiliateHref(href)} className="-ms-1 inline-flex h-9 w-fit items-center gap-1.5 rounded-lg px-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
+      <ArrowLeft className="size-4" aria-hidden /> {children}
     </Link>
   )
 }
@@ -126,13 +135,32 @@ const STATUS: Record<string, [string, Tone]> = {
   disabled: ["Disabled", "muted"],
   expired: ["Expired", "muted"],
 }
-export function statusText(status: string, kind?: "payout") {
-  if (kind === "payout" && status === "paid") return "Completed"
-  return STATUS[status]?.[0] ?? status.replace(/_/g, " ")
+// A payout, as the affiliate follows it: waiting, on its way, done, or not
+// going to happen. Completed is green, anything still in flight amber, anything
+// that failed red. "Retry required" is still in flight — it will be sent again.
+const PAYOUT_STATUS: Record<string, [string, Tone]> = {
+  pending: ["Pending", "warning"],
+  queued: ["Processing", "warning"],
+  processing: ["Processing", "warning"],
+  submitted: ["Processing", "warning"],
+  confirming: ["Processing", "warning"],
+  retry_required: ["Processing", "warning"],
+  on_hold: ["On hold", "muted"],
+  paid: ["Completed", "success"],
+  completed: ["Completed", "success"],
+  failed: ["Failed", "danger"],
+  rejected: ["Rejected", "danger"],
+  reversed: ["Reversed", "danger"],
+  cancelled: ["Cancelled", "muted"],
 }
-export function StatusChip({ status, kind, className }: { status: string; kind?: "payout"; className?: string }) {
-  const [, tone] = STATUS[kind === "payout" && status === "paid" ? "completed" : status] ?? [status, "muted" as Tone]
-  return <span className={cn("inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap capitalize", TONES[tone], className)}>{statusText(status, kind)}</span>
+const statusOf = (status: string, kind?: "payout"): [string, Tone] => (kind === "payout" ? PAYOUT_STATUS[status] : undefined) ?? STATUS[status] ?? [status.replace(/_/g, " "), "muted"]
+export function statusText(status: string, kind?: "payout") {
+  return statusOf(status, kind)[0]
+}
+// `label` says it in other words while keeping the status's colour ("Security hold").
+export function StatusChip({ status, kind, label, className }: { status: string; kind?: "payout"; label?: string; className?: string }) {
+  const [text, tone] = statusOf(status, kind)
+  return <span className={cn("inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap capitalize", TONES[tone], className)}>{label ?? text}</span>
 }
 
 // --- States ----------------------------------------------------------------------
@@ -220,9 +248,14 @@ export const fmtAgo = (v: Date | string | null | undefined) => {
 
 // Every V2 page's frame. The desktop header already shows the page's title;
 // on a phone (logo header) the page shows it itself. `action` sits beside it.
-export function PageFrame({ title, description, action, children, className }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+export function PageFrame({ title, description, action, back, children, className }: { title: string; description?: string; action?: React.ReactNode; back?: { href: string; label: string }; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("mx-auto w-full max-w-[1500px] space-y-4 p-4 sm:p-5 lg:space-y-5 lg:p-6", className)}>
+      {back && (
+        <div className="-mb-2 lg:-mb-3">
+          <BackLink href={back.href}>{back.label}</BackLink>
+        </div>
+      )}
       {(action || title) && (
         <div className={cn("flex flex-wrap items-end justify-between gap-3", !action && "md:hidden")}>
           <div className="min-w-0 md:hidden">

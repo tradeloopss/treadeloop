@@ -12,7 +12,7 @@ import { BrandMark } from "@/components/brand-mark"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { affiliateHref } from "@/lib/urls"
-import { V2_BOTTOM, V2_EXTRA, V2_MORE_GROUPS, V2_NAV, V2_TITLES, isActiveV2, navKey, type V2NavItem } from "./nav"
+import { V2_BOTTOM, V2_EXTRA, V2_MORE_GROUPS, V2_NAV, V2_TITLES, isActiveV2, navKey, titleKey, type V2NavItem } from "./nav"
 import { FeedbackDialog } from "./feedback"
 import { SwitchToClassicDialog } from "./switch"
 import { NotificationsBell, QuickActions, SearchButton, type V2Notification } from "./header-tools"
@@ -47,7 +47,7 @@ export function V2Shell({ affiliate, features, topRate, referralUrl, notificatio
   const byKey = (k: string) => all.find((i) => i.key === k)
   const bottom = V2_BOTTOM.map((k) => byKey(k) ?? (k === "wallet" ? byKey("payouts") : undefined)).filter((i): i is V2NavItem => !!i)
   const key = navKey(pathname)
-  const head = V2_TITLES[key]
+  const head = V2_TITLES[titleKey(pathname)]
   const name = `${affiliate.firstName} ${affiliate.lastName}`.trim()
   const signOut = async () => {
     await authClient.signOut().catch(() => null)
@@ -154,7 +154,7 @@ export function V2Shell({ affiliate, features, topRate, referralUrl, notificatio
               )}
             </div>
             <SearchButton features={features} />
-            <QuickActions referralUrl={referralUrl} wallet={features.wallet} variant="header" />
+            <QuickActions referralUrl={referralUrl} variant="header" noPayout={key === "wallet"} />
             <button type="button" onClick={() => setFeedback(true)} className="hidden h-10 items-center gap-1.5 rounded-xl border bg-card/70 px-3 text-sm font-medium hover:border-primary/40 xl:inline-flex" title="Send feedback about the beta">
               <MessageSquareHeart className="size-4 text-primary" aria-hidden /> Feedback
             </button>
@@ -193,7 +193,8 @@ export function V2Shell({ affiliate, features, topRate, referralUrl, notificatio
             </li>
           </ul>
         </nav>
-        <QuickActions referralUrl={referralUrl} wallet={features.wallet} variant="fab" />
+        {/* Not on the Payout page: its own button is the action there, and the two would overlap. */}
+        {key !== "payouts" && <QuickActions referralUrl={referralUrl} variant="fab" noPayout={key === "wallet"} />}
 
         <MoreMenu open={more} onOpenChange={setMore} items={all} name={name} pathname={pathname} onFeedback={() => setFeedback(true)} onClassic={() => setClassic(true)} onSignOut={signOut} topRate={topRate} />
         <FeedbackDialog open={feedback} onOpenChange={setFeedback} />

@@ -19,6 +19,9 @@ const when = (d: Date) => d.toLocaleString("en-US", { month: "short", day: "nume
 
 export type PayoutPageData = NonNullable<Awaited<ReturnType<typeof loadPayoutPage>>>
 
+// A payout as the browser gets it: display-safe facts, dates as text.
+export const toPayoutView = (p: Awaited<ReturnType<typeof payoutsFor>>[number]) => ({ id: p.id, amount: p.amount, fee: p.fee, net: p.net, methodType: p.methodType, methodLabel: p.methodLabel, status: p.status, mode: p.mode, network: p.network, asset: p.asset, transactionHash: p.transactionHash, failureReason: p.failureReason, requestedAt: p.requestedAt.toISOString(), completedAt: p.completedAt ? p.completedAt.toISOString() : null })
+
 export async function loadPayoutPage(affiliate: PortalContext["affiliate"], opts: { syncStripe?: boolean } = {}) {
   // Bring everything up to date before reading it: commissions whose hold has
   // passed, payouts whose transaction may have confirmed, and (after coming
@@ -68,7 +71,7 @@ export async function loadPayoutPage(affiliate: PortalContext["affiliate"], opts
 
   const offered = settings.methods.filter((m) => methodAvailable(m)) as PayoutMethodType[]
   const config = { methods: offered, countries: countryOptions(), defaultCountry: affiliate.country ?? "", holdHours: settings.methodHoldHours, hasMethod: methods.length > 0 }
-  const methodViews = methods.map((m) => ({ id: m.id, type: m.type, label: m.label, nickname: m.nickname, status: m.status, isDefault: m.isDefault, holdUntil: m.holdUntil ? m.holdUntil.toISOString() : null, metadata: m.metadata }))
+  const methodViews = methods.map((m) => ({ id: m.id, type: m.type, label: m.label, nickname: m.nickname, status: m.status, isDefault: m.isDefault, holdUntil: m.holdUntil ? m.holdUntil.toISOString() : null, metadata: m.metadata, createdAt: m.createdAt.toISOString() }))
   const autoOn = affiliate.autoPayout && affiliate.autoPayoutAllowed
   // Which crypto methods something is set up to send without review, and — for
   // an asset that isn't dollar-pegged — its price, for an estimate in the dialog.
@@ -91,7 +94,7 @@ export async function loadPayoutPage(affiliate: PortalContext["affiliate"], opts
     methods,
     methodViews,
     payouts,
-    payoutViews: payouts.map((p) => ({ id: p.id, amount: p.amount, fee: p.fee, net: p.net, methodType: p.methodType, methodLabel: p.methodLabel, status: p.status, mode: p.mode, network: p.network, asset: p.asset, transactionHash: p.transactionHash, failureReason: p.failureReason, requestedAt: p.requestedAt.toISOString(), completedAt: p.completedAt ? p.completedAt.toISOString() : null })),
+    payoutViews: payouts.map(toPayoutView),
     program,
     preview,
     settings,
