@@ -48,14 +48,16 @@ export function WalletSkeleton() {
   return (
     <div className={frame} aria-busy="true" aria-label="Loading your wallet">
       <Heading />
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-5 lg:gap-5">
-        <div className="v2-card-glow p-4 sm:p-5 lg:col-span-2">
-          <Shimmer className="h-4 w-24" />
-          <Shimmer className="mt-3 h-9 w-44" />
-          <Shimmer className="mt-3 h-4 w-32" />
-          <Shimmer className="mt-4 h-16 w-full rounded-xl" />
+      <div className="flex flex-col gap-3 sm:gap-4 lg:gap-5">
+        <div className="flex items-center justify-between gap-4 rounded-[22px] border border-white/10 bg-[#07113a] p-5 sm:px-8 sm:py-7">
+          <div>
+            <Shimmer className="h-4 w-28 bg-white/10" />
+            <Shimmer className="mt-3 h-10 w-48 bg-white/10 sm:h-12 sm:w-64" />
+            <Shimmer className="mt-3 h-4 w-40 bg-white/10" />
+          </div>
+          <Shimmer className="size-20 shrink-0 rounded-3xl bg-white/10 sm:size-28" />
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:col-span-3">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 lg:gap-5">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="v2-card space-y-2.5 p-3.5 sm:p-4">
               <div className="flex items-center gap-2">
@@ -102,29 +104,28 @@ export function PayoutSkeleton() {
             <Shimmer className="mt-3 h-10 w-48 bg-white/10" />
             <Shimmer className="mt-6 h-4 w-40 bg-white/10" />
           </div>
-          <div className="v2-card space-y-2 p-4 sm:p-5">
-            <Shimmer className="mb-3 h-5 w-52" />
-            <RowSkeleton />
-            <RowSkeleton />
-            <Shimmer className="mt-3 h-12 w-full rounded-xl" />
-          </div>
-          <div className="v2-card space-y-3 p-4 sm:p-5">
-            <Shimmer className="h-5 w-36" />
-            <Shimmer className="h-16 w-full rounded-2xl" />
-            <div className="grid grid-cols-4 gap-2">
-              {Array.from({ length: 4 }, (_, i) => (
-                <Shimmer key={i} className="h-11 rounded-xl" />
+          {/* the request window: its steps, the first step's choices, Continue */}
+          <div className="v2-card">
+            <div className="flex items-center gap-2 border-b px-4 py-3.5 sm:px-5">
+              {Array.from({ length: 3 }, (_, i) => (
+                <div key={i} className="flex flex-1 items-center gap-2 last:flex-none">
+                  <Shimmer className="size-7 shrink-0 rounded-full" />
+                  <Shimmer className="h-3 w-12" />
+                  {i < 2 && <Shimmer className="h-0.5 flex-1" />}
+                </div>
               ))}
+            </div>
+            <div className="space-y-2 p-4 sm:p-5">
+              <Shimmer className="h-3 w-20" />
+              <Shimmer className="mb-3 h-5 w-52" />
+              <RowSkeleton />
+              <RowSkeleton />
+              <Shimmer className="mt-3 h-12 w-full rounded-xl" />
+              <Shimmer className="mt-4 h-[52px] w-full rounded-2xl" />
             </div>
           </div>
         </div>
         <div className="space-y-4 lg:space-y-5">
-          <div className="v2-card-glow space-y-3 p-4 sm:p-5">
-            <Shimmer className="h-5 w-36" />
-            <Shimmer className="h-4 w-full" />
-            <Shimmer className="h-4 w-full" />
-            <Shimmer className="h-14 w-full rounded-2xl" />
-          </div>
           <div className="v2-card space-y-2 p-4 sm:p-5">
             <Shimmer className="mb-3 h-5 w-36" />
             <RowSkeleton />

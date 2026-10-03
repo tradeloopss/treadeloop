@@ -49,7 +49,7 @@ export default async function AffiliateV2Wallet({ searchParams }: { searchParams
         earned={balances.lifetimeEarned}
         paid={balances.lifetimePaid}
         processing={balances.processing}
-        trend={{ values: summary.trend.points.map((p) => p.total), change: summary.trend.change }}
+        change={summary.trend.change}
         initialHidden={jar.get(HIDE_BALANCE_COOKIE)?.value === "1"}
       />
 

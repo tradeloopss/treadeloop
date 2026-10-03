@@ -4,7 +4,7 @@ import type React from "react"
 import { createContext, useCallback, useContext, useEffect, useId, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Banknote, Check, ChevronRight, CircleCheck, ExternalLink, Info, LifeBuoy, Loader2, Plus, ShieldCheck, TriangleAlert, type LucideIcon } from "lucide-react"
+import { ArrowLeft, ArrowRight, Banknote, Check, ChevronRight, CircleCheck, ExternalLink, Info, LifeBuoy, Loader2, Plus, ShieldCheck, TriangleAlert, type LucideIcon } from "lucide-react"
 import { cancelPayoutRequest, requestPayoutNow, type RequestedPayout } from "@/app/actions/affiliate"
 import { MethodMark, PayoutMethodDialog } from "@/components/affiliate/payout-method-dialog"
 import type { PayoutView } from "@/components/affiliate/payouts"
@@ -12,7 +12,7 @@ import type { RequestPayoutProps } from "@/components/affiliate/request-payout-d
 import { useAction } from "@/components/affiliate/use-action"
 import { cryptoSpec, explorerTxUrl, formatAsset } from "@/lib/affiliates/crypto"
 import { DEFAULT_PAYOUT_SETTINGS, affiliateCanCancel, payoutInFlight, quoteFee } from "@/lib/affiliates/payout-engine"
-import { cents, cleanAmount, fmtWhen, inHold, methodUnavailable, newKey, quickAmounts, readAmount, usable } from "@/lib/affiliates/payout-form"
+import { cents, cleanAmount, describeMethod, fmtWhen, inHold, methodUnavailable, newKey, quickAmounts, readAmount, usable } from "@/lib/affiliates/payout-form"
 import { maskTxHash } from "@/lib/affiliates/tron"
 import { methodLabel, money } from "@/lib/affiliates/types"
 import { payoutRef } from "@/lib/affiliates/v2/wallet"
@@ -20,7 +20,7 @@ import { affiliateHref } from "@/lib/urls"
 import { cn } from "@/lib/utils"
 import { MethodSummary } from "./payout-methods"
 import { DetailRows, Sheet, sheetBtn, sheetBtnDanger, sheetBtnQuiet } from "./sheet"
-import { CardLink, EmptyState, StatusChip, V2Card, fmtDate } from "./ui"
+import { CardLink, EmptyState, StatusChip, fmtDate } from "./ui"
 
 // The Payout page: asking for money, and following what was asked for. Choose a
 // saved method, enter an amount, see exactly what arrives, confirm. Every figure
@@ -241,26 +241,56 @@ export function PayoutHistoryList({ payouts, limit }: { payouts: PayoutView[]; l
 
 // --- The request ------------------------------------------------------------------------
 
-function Step({ n, title, action, children }: { n: number; title: string; action?: React.ReactNode; children: React.ReactNode }) {
+// One window, three steps: where the money goes, how much, and what arrives.
+const STEPS = ["Method", "Amount", "Summary"] as const
+type StepN = 1 | 2 | 3
+
+// Where the form is. A finished step can be gone back to; a later one is only
+// reached by finishing the one before it.
+function Stepper({ step, onGo }: { step: StepN; onGo: (n: StepN) => void }) {
   return (
-    <V2Card
-      title={
-        <span className="flex items-center gap-2.5">
-          <span className="v2-nav-active flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold" aria-hidden>
-            {n}
-          </span>
-          <span>
-            <span className="sr-only">Step {n}: </span>
-            {title}
-          </span>
-        </span>
-      }
-      action={action}
-    >
-      {children}
-    </V2Card>
+    <ol className="flex items-center gap-2" aria-label="Payout request steps">
+      {STEPS.map((label, i) => {
+        const n = (i + 1) as StepN
+        const done = n < step
+        const current = n === step
+        return (
+          <li key={label} className={cn("flex min-w-0 items-center gap-2", i < STEPS.length - 1 && "flex-1")}>
+            <button
+              type="button"
+              disabled={!done}
+              onClick={() => onGo(n)}
+              aria-current={current ? "step" : undefined}
+              aria-label={`Step ${n}: ${label}${done ? " (done — go back)" : current ? " (current)" : ""}`}
+              className="flex shrink-0 items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60 enabled:cursor-pointer"
+            >
+              <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors motion-reduce:transition-none", done || current ? "v2-nav-active" : "border bg-muted/60 text-muted-foreground")} aria-hidden>
+                {done ? <Check className="size-3.5 stroke-[3]" /> : n}
+              </span>
+              <span className={cn("text-[13px] font-semibold", current ? "text-foreground" : "text-muted-foreground", !current && "max-[359px]:hidden")}>{label}</span>
+            </button>
+            {i < STEPS.length - 1 && <span aria-hidden className={cn("h-0.5 min-w-3 flex-1 rounded-full", done ? "v2-bar" : "bg-border")} />}
+          </li>
+        )
+      })}
+    </ol>
   )
 }
+
+function StepHead({ n, title, action }: { n: StepN; title: string; action?: React.ReactNode }) {
+  return (
+    <header className="mb-3 flex items-end justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Step {n} of 3</p>
+        <h2 className="text-[17px] leading-tight font-semibold tracking-tight">{title}</h2>
+      </div>
+      {action}
+    </header>
+  )
+}
+
+const nextBtn = "v2-btn inline-flex h-[52px] min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl px-4 text-[15px] font-semibold focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55"
+const backBtn = "inline-flex h-[52px] shrink-0 items-center justify-center gap-1.5 rounded-2xl border bg-card/60 px-4 text-[15px] font-semibold transition-colors hover:border-primary/45 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
 
 export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId = null }: { request: RequestPayoutProps; top?: React.ReactNode; aside?: React.ReactNode; manageHref: string; back: { href: string; label: string }; inFlightId?: number | null }) {
   const { available, min, max, methodMins = {}, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null, instantTypes = ["crypto_trc20"], prices = {}, autoPayoutOn = false, methodConfig } = request
@@ -279,6 +309,8 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<RequestedPayout | null>(null)
   const [pending, start] = useTransition()
+  // the step last asked for (the one shown is worked out from it, below)
+  const [at, setAt] = useState<StepN>(1)
 
   const live = methods.filter((m) => m.status !== "removed" && m.status !== "rejected")
   const ready = live.filter((m) => usable(m))
@@ -306,8 +338,6 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
   const locked = !!blocked || belowMin
   const canSubmit = !locked && !!method && valid && !pending
   const showError = touched && !!problem && !locked
-  // Under the button: why it can't be pressed yet.
-  const hint = blocked ?? (belowMin ? `You need at least ${money(min)} available to request a payout.` : live.length === 0 ? "Add a payout method to request a payout." : !method ? (held ? `Your payout method is in its security hold until ${fmtWhen(held.holdUntil!)}.` : "You don't have an active payout method.") : !amount.trim() ? "Enter an amount to continue." : problem)
   const arrival = instant
     ? "Sent to your wallet automatically, usually within minutes of your request."
     : automatic && coin && instantUpTo != null
@@ -351,6 +381,7 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
           setAmount("")
           setTouched(false)
           setKey("")
+          setAt(1)
           router.refresh()
         } else setError(res.error)
       } catch {
@@ -370,6 +401,17 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
   }
 
   const quick = quickAmounts(most)
+  // A method comes before the amount, and a valid amount before the summary —
+  // whatever was last shown, the window never sits on a step it can't stand on.
+  const step: StepN = locked || !method ? 1 : at === 3 && !valid ? 2 : at
+  const choose = (id: number) => {
+    pick(id)
+    setAt(2)
+  }
+  const toSummary = () => {
+    setTouched(true)
+    if (valid) setAt(3)
+  }
 
   return (
     <>
@@ -398,156 +440,203 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
             </Notice>
           ) : null}
 
-          {/* While nothing can be requested the choices are shown but switched off; adding a method still works. */}
-          <div role="group" aria-label="Request a payout" className="flex min-w-0 flex-col gap-4 lg:gap-5">
-
-            <Step n={1} title="Choose Payout Method" action={live.length > 0 ? <CardLink href={manageHref}>Manage</CardLink> : undefined}>
-              {live.length === 0 ? (
-                <div className="flex flex-col items-center gap-1 rounded-2xl border border-dashed px-4 py-6 text-center">
-                  <p className="text-sm font-semibold">No payout methods yet</p>
-                  <p className="text-sm text-muted-foreground">Add a payout method to receive your earnings.</p>
-                </div>
-              ) : (
-                <div role="radiogroup" aria-label="Payout method" id={ids.method} className={cn("flex flex-col gap-2", locked && "opacity-60")}>
-                  {live.map((m) => {
-                    const why = methodUnavailable(m)
-                    const on = method?.id === m.id
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={on}
-                        disabled={!!why || locked}
-                        title={why ?? undefined}
-                        onClick={() => pick(m.id)}
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-2xl border p-3 text-start transition-all focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none active:scale-[0.995] motion-reduce:transition-none",
-                          on ? "border-primary bg-primary/[0.07] shadow-[0_0_0_1px_var(--primary)]" : "bg-background/30 hover:border-primary/45",
-                          (why || locked) && "cursor-not-allowed hover:border-border",
-                          why && !locked && "opacity-60"
-                        )}
-                      >
-                        <MethodSummary method={m} />
-                        <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40")} aria-hidden>
-                          {on && <Check className="size-3 stroke-[3]" />}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              {live.length > 0 && !method && (
-                <p className="mt-2 text-xs text-[color-mix(in_oklch,var(--warning),black_18%)] dark:text-warning">{held ? `Your payout destination was changed recently. To protect your account it can be paid to from ${fmtWhen(held.holdUntil!)}.` : "None of your payout methods can be paid to right now. Enable one, or add another."}</p>
-              )}
-              {methodConfig && methodConfig.methods.length > 0 && (
-                <button type="button" onClick={addMethod} className="mt-3 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/45 text-sm font-semibold text-primary transition-colors hover:bg-primary/[0.07] focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none disabled:cursor-not-allowed">
-                  <Plus className="size-4" aria-hidden /> Add New Method
-                </button>
-              )}
-            </Step>
-
-            <Step n={2} title="Enter Amount">
-              <label htmlFor={ids.amount} className="sr-only">
-                Amount in US dollars
-              </label>
-              <div className={cn("flex h-16 items-center rounded-2xl border bg-background/50 ps-4 pe-3 transition-shadow focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40", showError ? "border-loss focus-within:border-loss focus-within:ring-loss/25" : "border-input", locked && "opacity-60")}>
-                <span className="text-2xl font-semibold text-muted-foreground select-none" aria-hidden>
-                  $
-                </span>
-                <input
-                  id={ids.amount}
-                  value={amount}
-                  onChange={(e) => onAmount(e.target.value)}
-                  onBlur={() => amount && setTouched(true)}
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder="0.00"
-                  disabled={locked}
-                  aria-invalid={showError}
-                  aria-describedby={ids.help}
-                  className="h-full min-w-0 flex-1 bg-transparent px-2 text-[28px] font-bold tracking-tight tabular-nums outline-none placeholder:font-semibold placeholder:text-muted-foreground/50"
-                />
-                <span className="text-xs font-semibold text-muted-foreground">USD</span>
-              </div>
-              <div role="group" aria-label="Quick amounts" className="mt-3 grid grid-cols-4 gap-2">
-                {quick.map(([name, v]) => {
-                  const on = value === v && v > 0
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      aria-pressed={on}
-                      disabled={locked || v < minNow || v <= 0}
-                      onClick={() => onAmount(v.toFixed(2))}
-                      className={cn("h-11 rounded-xl border text-sm font-semibold transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none", on ? "v2-nav-active border-transparent" : "bg-card/60 text-muted-foreground hover:border-primary/45 hover:text-foreground")}
-                    >
-                      {name}
-                    </button>
-                  )
-                })}
-              </div>
-              <div id={ids.help} className="mt-3 flex flex-col gap-1 text-xs">
-                {showError && (
-                  <p role="alert" className="flex items-center gap-1.5 font-medium text-loss">
-                    <TriangleAlert className="size-3.5 shrink-0" aria-hidden /> {problem}
-                  </p>
-                )}
-                <p className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 text-muted-foreground">
-                  <span>
-                    Minimum: <span className="font-semibold text-foreground tabular-nums">{floorBinds ? floorText : money(min)}</span>
-                    {max != null && (
-                      <>
-                        {" "}
-                        · Maximum: <span className="font-semibold text-foreground tabular-nums">{money(max)}</span>
-                      </>
-                    )}
-                  </span>
-                  <span>
-                    Available: <span className="font-semibold text-foreground tabular-nums">{money(available)}</span>
-                  </span>
-                </p>
-              </div>
-            </Step>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-20 lg:gap-5">
-          <V2Card title="Payout Summary" glow>
-            <dl className="text-sm">
-              <div className="flex items-center justify-between py-1.5">
-                <dt className="text-muted-foreground">Payout amount</dt>
-                <dd className="font-medium tabular-nums">{quote ? money(quote.amount) : "—"}</dd>
-              </div>
-              <div className="flex items-center justify-between py-1.5">
-                <dt className="text-muted-foreground">{quote?.estimated ? "Estimated fee" : "Fee"}</dt>
-                <dd className="font-medium tabular-nums">{quote ? (quote.fee > 0 ? `− ${money(quote.fee)}` : money(0)) : "—"}</dd>
-              </div>
-            </dl>
-            <div className="mt-1.5 flex items-end justify-between gap-3 border-t pt-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">You receive</p>
-                <p className="truncate text-xs text-muted-foreground">{method ? `${methodName(method.type)} · ${method.label}` : "Choose a payout method"}</p>
-              </div>
-              <p className={cn("shrink-0 text-2xl leading-none font-bold tracking-tight tabular-nums", quote ? "text-gain" : "text-muted-foreground")} aria-live="polite">
-                {receive}
-              </p>
+          {/* The request, in one window: method → amount → summary. */}
+          <section aria-label="Request a payout" className="v2-card flex min-w-0 flex-col">
+            <div className="border-b px-4 py-3.5 sm:px-5">
+              <Stepper step={step} onGo={setAt} />
             </div>
-            {coin && !coin.usdPegged && <p className="mt-2 text-xs text-muted-foreground">Your payout is {quote ? money(quote.net) : "set in US dollars"}; the exact amount of {coin.asset} follows the market price at the moment it is sent.</p>}
-            <p className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
-              <Info className="mt-px size-3.5 shrink-0" aria-hidden />
-              <span>
-                {arrival}
-                {autoPayoutOn ? " This is a one-off request; your automatic payouts continue as usual." : ""}
-              </span>
-            </p>
-            <button type="button" onClick={review} disabled={!canSubmit} className="v2-btn mt-4 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-semibold focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55">
-              Submit Payout Request <ArrowRight className="size-5" aria-hidden />
-            </button>
-            {!canSubmit && hint && !showError && <p className="mt-2 text-center text-xs text-muted-foreground">{hint}</p>}
-          </V2Card>
-          {aside}
+
+            <div key={step} className="v2-fade-up flex min-w-0 flex-col px-4 pt-4 pb-4 sm:px-5 sm:pb-5">
+              {step === 1 && (
+                <>
+                  <StepHead n={1} title="Choose Payout Method" action={live.length > 0 ? <CardLink href={manageHref}>Manage</CardLink> : undefined} />
+                  {live.length === 0 ? (
+                    <div className="flex flex-col items-center gap-1 rounded-2xl border border-dashed px-4 py-6 text-center">
+                      <p className="text-sm font-semibold">No payout methods yet</p>
+                      <p className="text-sm text-muted-foreground">Add a payout method to receive your earnings.</p>
+                    </div>
+                  ) : (
+                    // While nothing can be requested the choices are shown but switched off; adding a method still works.
+                    <div role="radiogroup" aria-label="Payout method" id={ids.method} className={cn("flex flex-col gap-2", locked && "opacity-60")}>
+                      {live.map((m) => {
+                        const why = methodUnavailable(m)
+                        const on = method?.id === m.id
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            disabled={!!why || locked}
+                            title={why ?? undefined}
+                            onClick={() => choose(m.id)}
+                            className={cn(
+                              "flex w-full items-center gap-3 rounded-2xl border p-3 text-start transition-all focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none active:scale-[0.995] motion-reduce:transition-none",
+                              on ? "border-primary bg-primary/[0.07] shadow-[0_0_0_1px_var(--primary)]" : "bg-background/30 hover:border-primary/45",
+                              (why || locked) && "cursor-not-allowed hover:border-border",
+                              why && !locked && "opacity-60"
+                            )}
+                          >
+                            <MethodSummary method={m} />
+                            <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40")} aria-hidden>
+                              {on && <Check className="size-3 stroke-[3]" />}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {live.length > 0 && !method && (
+                    <p className="mt-2 text-xs text-[color-mix(in_oklch,var(--warning),black_18%)] dark:text-warning">{held ? `Your payout destination was changed recently. To protect your account it can be paid to from ${fmtWhen(held.holdUntil!)}.` : "None of your payout methods can be paid to right now. Enable one, or add another."}</p>
+                  )}
+                  {methodConfig && methodConfig.methods.length > 0 && (
+                    <button type="button" onClick={addMethod} className="mt-3 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/45 text-sm font-semibold text-primary transition-colors hover:bg-primary/[0.07] focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none">
+                      <Plus className="size-4" aria-hidden /> Add New Method
+                    </button>
+                  )}
+                  <div className="mt-4 flex">
+                    <button type="button" onClick={() => setAt(2)} disabled={!method || locked} className={nextBtn}>
+                      Continue <ArrowRight className="size-5" aria-hidden />
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {step === 2 && method && (
+                <form
+                  noValidate
+                  className="flex min-w-0 flex-col"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    toSummary()
+                  }}
+                >
+                  <StepHead n={2} title="Enter Amount" />
+                  <button type="button" onClick={() => setAt(1)} aria-label={`Sending to ${describeMethod(method).name}, ${method.label}. Change payout method`} className="mb-3 flex w-full items-center gap-3 rounded-2xl border bg-background/30 p-2.5 text-start transition-colors hover:border-primary/45 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none">
+                    <MethodSummary method={method} />
+                    <span className="shrink-0 pe-1 text-xs font-semibold text-primary">Change</span>
+                  </button>
+                  <label htmlFor={ids.amount} className="sr-only">
+                    Amount in US dollars
+                  </label>
+                  <div className={cn("flex h-16 items-center rounded-2xl border bg-background/50 ps-4 pe-3 transition-shadow focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40", showError ? "border-loss focus-within:border-loss focus-within:ring-loss/25" : "border-input")}>
+                    <span className="text-2xl font-semibold text-muted-foreground select-none" aria-hidden>
+                      $
+                    </span>
+                    <input
+                      id={ids.amount}
+                      value={amount}
+                      onChange={(e) => onAmount(e.target.value)}
+                      onBlur={() => amount && setTouched(true)}
+                      inputMode="decimal"
+                      autoComplete="off"
+                      autoFocus
+                      placeholder="0.00"
+                      aria-invalid={showError}
+                      aria-describedby={ids.help}
+                      className="h-full min-w-0 flex-1 bg-transparent px-2 text-[28px] font-bold tracking-tight tabular-nums outline-none placeholder:font-semibold placeholder:text-muted-foreground/50"
+                    />
+                    <span className="text-xs font-semibold text-muted-foreground">USD</span>
+                  </div>
+                  <div role="group" aria-label="Quick amounts" className="mt-3 grid grid-cols-4 gap-2">
+                    {quick.map(([name, v]) => {
+                      const on = value === v && v > 0
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          aria-pressed={on}
+                          disabled={v < minNow || v <= 0}
+                          onClick={() => onAmount(v.toFixed(2))}
+                          className={cn("h-11 rounded-xl border text-sm font-semibold transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none", on ? "v2-nav-active border-transparent" : "bg-card/60 text-muted-foreground hover:border-primary/45 hover:text-foreground")}
+                        >
+                          {name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div id={ids.help} className="mt-3 flex flex-col gap-1 text-xs">
+                    {showError && (
+                      <p role="alert" className="flex items-center gap-1.5 font-medium text-loss">
+                        <TriangleAlert className="size-3.5 shrink-0" aria-hidden /> {problem}
+                      </p>
+                    )}
+                    <p className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 text-muted-foreground">
+                      <span>
+                        Minimum: <span className="font-semibold text-foreground tabular-nums">{floorBinds ? floorText : money(min)}</span>
+                        {max != null && (
+                          <>
+                            {" "}
+                            · Maximum: <span className="font-semibold text-foreground tabular-nums">{money(max)}</span>
+                          </>
+                        )}
+                      </span>
+                      <span>
+                        Available: <span className="font-semibold text-foreground tabular-nums">{money(available)}</span>
+                      </span>
+                    </p>
+                  </div>
+                  <div className="mt-4 flex gap-2.5">
+                    <button type="button" onClick={() => setAt(1)} className={backBtn}>
+                      <ArrowLeft className="size-4" aria-hidden /> Back
+                    </button>
+                    <button type="submit" disabled={!valid} className={nextBtn}>
+                      Continue <ArrowRight className="size-5" aria-hidden />
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {step === 3 && method && (
+                <>
+                  <StepHead n={3} title="Payout Summary" />
+                  <div className="flex items-center gap-3 rounded-2xl border bg-background/30 p-2.5">
+                    <MethodSummary method={method} />
+                  </div>
+                  <dl className="mt-3 text-sm">
+                    <div className="flex items-center justify-between py-1.5">
+                      <dt className="text-muted-foreground">Payout amount</dt>
+                      <dd className="font-medium tabular-nums">{quote ? money(quote.amount) : "—"}</dd>
+                    </div>
+                    <div className="flex items-center justify-between py-1.5">
+                      <dt className="text-muted-foreground">{quote?.estimated ? "Estimated fee" : "Fee"}</dt>
+                      <dd className="font-medium tabular-nums">{quote ? (quote.fee > 0 ? `− ${money(quote.fee)}` : money(0)) : "—"}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-1.5 flex items-end justify-between gap-3 border-t pt-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">You receive</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {methodName(method.type)} · {method.label}
+                      </p>
+                    </div>
+                    <p className={cn("shrink-0 text-2xl leading-none font-bold tracking-tight tabular-nums", quote ? "text-gain" : "text-muted-foreground")} aria-live="polite">
+                      {receive}
+                    </p>
+                  </div>
+                  {coin && !coin.usdPegged && <p className="mt-2 text-xs text-muted-foreground">Your payout is {quote ? money(quote.net) : "set in US dollars"}; the exact amount of {coin.asset} follows the market price at the moment it is sent.</p>}
+                  <p className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
+                    <Info className="mt-px size-3.5 shrink-0" aria-hidden />
+                    <span>
+                      {arrival}
+                      {autoPayoutOn ? " This is a one-off request; your automatic payouts continue as usual." : ""}
+                    </span>
+                  </p>
+                  <div className="mt-4 flex gap-2.5">
+                    <button type="button" onClick={() => setAt(2)} className={backBtn}>
+                      <ArrowLeft className="size-4" aria-hidden /> Back
+                    </button>
+                    <button type="button" onClick={review} disabled={!canSubmit} className={nextBtn}>
+                      <span className="truncate">Submit Payout Request</span> <ArrowRight className="size-5 shrink-0" aria-hidden />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
         </div>
+
+        {aside && <div className="flex min-w-0 flex-col gap-4 lg:gap-5">{aside}</div>}
       </div>
 
       {methodConfig && <PayoutMethodDialog open={adding} onOpenChange={setAdding} {...methodConfig} />}

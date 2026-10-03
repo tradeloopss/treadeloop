@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowDownLeft, ArrowUpRight, ChevronRight, CircleDollarSign, ExternalLink, Eye, EyeOff, Gift, Hourglass, History, Plus, Receipt, SendHorizontal, SlidersHorizontal, Undo2, Wallet, type LucideIcon } from "lucide-react"
+import { ArrowDown, ArrowDownLeft, ArrowUp, ArrowUpRight, ChevronRight, CircleDollarSign, ExternalLink, Eye, EyeOff, Gift, Hourglass, History, Plus, Receipt, SendHorizontal, SlidersHorizontal, Undo2, Wallet, type LucideIcon } from "lucide-react"
 import { PayoutMethodDialog } from "@/components/affiliate/payout-method-dialog"
 import type { MethodDialogConfig, MethodView, PayoutView } from "@/components/affiliate/payouts"
 import { cryptoSpec, explorerTxUrl } from "@/lib/affiliates/crypto"
@@ -24,33 +24,34 @@ const MASK = "••••••"
 
 // --- Balance ---------------------------------------------------------------------------
 
-// The balance over the period as one line. Drawn by hand (it is a dozen points):
-// no axes, no tooltips — the figures are on the card.
-function Sparkline({ values, className }: { values: number[]; className?: string }) {
+// The wallet on the Total Balance card: a flap, the body, and its clasp —
+// drawn here rather than loaded, so it is sharp at any size and costs nothing.
+function WalletArt({ className }: { className?: string }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "")
-  const W = 320
-  const H = 64
-  const PAD = 5
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min
-  const x = (i: number) => (values.length > 1 ? (i / (values.length - 1)) * W : W)
-  const y = (v: number) => (span > 0 ? PAD + (1 - (v - min) / span) * (H - PAD * 2) : H / 2)
-  const line = values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ")
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={className} aria-hidden>
+    <svg viewBox="0 0 168 150" className={className} aria-hidden>
       <defs>
-        <linearGradient id={`${id}a`} x1="0" y1="0" x2="0" y2={H} gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="var(--v2-violet-bright)" stopOpacity="0.32" />
-          <stop offset="1" stopColor="var(--v2-violet-bright)" stopOpacity="0" />
+        <linearGradient id={`${id}f`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#8fb0ff" />
+          <stop offset="1" stopColor="#4f7cff" />
         </linearGradient>
-        <linearGradient id={`${id}s`} x1="0" y1="0" x2={W} y2="0" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="var(--v2-violet-bright)" />
-          <stop offset="1" stopColor="var(--v2-cyan)" />
+        <linearGradient id={`${id}b`} x1="0" y1="0" x2="0.6" y2="1">
+          <stop offset="0" stopColor="#4d82ff" />
+          <stop offset="1" stopColor="#2a4fe6" />
+        </linearGradient>
+        <linearGradient id={`${id}c`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#8a9dfa" />
+          <stop offset="1" stopColor="#5f74ec" />
         </linearGradient>
       </defs>
-      <path d={`${line} L${W} ${H} L0 ${H} Z`} fill={`url(#${id}a)`} />
-      <path d={line} fill="none" stroke={`url(#${id}s)`} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      {/* the flap, peeking out behind the body */}
+      <rect x="26" y="10" width="112" height="70" rx="16" transform="rotate(-9 82 45)" fill={`url(#${id}f)`} />
+      {/* the body */}
+      <rect x="12" y="36" width="132" height="104" rx="22" fill={`url(#${id}b)`} />
+      <rect x="12.75" y="36.75" width="130.5" height="102.5" rx="21.25" fill="none" stroke="#fff" strokeOpacity="0.14" strokeWidth="1.5" />
+      {/* the clasp */}
+      <rect x="102" y="70" width="58" height="38" rx="15" fill={`url(#${id}c)`} />
+      <circle cx="124" cy="89" r="7.5" fill="#3a5ae8" stroke="#fff" strokeWidth="4.5" />
     </svg>
   )
 }
@@ -68,9 +69,9 @@ function BreakdownCard({ icon, label, value, sub }: { icon: LucideIcon; label: s
   )
 }
 
-export type WalletTrend = { values: number[]; change: number | null }
-
-export function WalletBalances({ available, pending, earned, paid, processing, trend, days = 30, initialHidden = false }: { available: number; pending: number; earned: number; paid: number; processing: number; trend: WalletTrend; days?: number; initialHidden?: boolean }) {
+// `change`: the balance against `days` days ago, as a fraction — null when
+// there was nothing then to compare with (so no percentage is made up).
+export function WalletBalances({ available, pending, earned, paid, processing, change, days = 30, initialHidden = false }: { available: number; pending: number; earned: number; paid: number; processing: number; change: number | null; days?: number; initialHidden?: boolean }) {
   const [hidden, setHidden] = useState(initialHidden)
   const toggle = () => {
     const next = !hidden
@@ -83,46 +84,48 @@ export function WalletBalances({ available, pending, earned, paid, processing, t
   }
   const show = (v: number) => (hidden ? MASK : money(v))
   const total = Math.round((available + pending) * 100) / 100
-  const change = trend.change
   const flat = change != null && Math.abs(change) < 0.0005
-  const pct = change == null ? null : `${Math.abs(change * 100) >= 100 ? Math.round(Math.abs(change * 100)) : Math.abs(change * 100).toFixed(1)}%`
+  const size = change == null ? 0 : Math.abs(change * 100)
+  const pct = change == null ? null : flat ? "0%" : `${change > 0 ? "+" : "−"}${size >= 100 ? Math.round(size) : size.toFixed(1)}%`
 
   return (
-    <div className="grid gap-3 sm:gap-4 lg:grid-cols-5 lg:gap-5">
-      <section aria-label="Total balance" className="v2-card-glow relative isolate flex flex-col overflow-hidden lg:col-span-2">
-        <div aria-hidden className="pointer-events-none absolute -end-16 -top-20 -z-10 size-56 rounded-full bg-[radial-gradient(circle,rgb(139_92_246/0.32),transparent_70%)]" />
-        <div className="flex items-start justify-between gap-3 px-4 pt-4 sm:px-5 sm:pt-5">
+    <div className="flex flex-col gap-3 sm:gap-4 lg:gap-5">
+      {/* Always the deep-blue card of the design, on a light page too. */}
+      <section aria-label="Total balance" className="relative isolate overflow-hidden rounded-[22px] border border-[#4a6dff]/30 bg-[#07113a] text-white shadow-[0_22px_56px_-30px_rgba(37,99,235,0.95),inset_0_1px_0_rgba(255,255,255,0.07)]">
+        <div aria-hidden className="absolute inset-0 -z-10 bg-[linear-gradient(100deg,#06103a_0%,#0a2186_44%,#0d2cb4_70%,#08196b_100%)]" />
+        <div aria-hidden className="absolute end-[3%] -bottom-[22%] -z-10 h-[62%] w-[36%] rounded-full bg-[radial-gradient(closest-side,rgba(72,126,255,0.6),transparent)] blur-xl" />
+        <div className="flex items-center justify-between gap-3 p-5 sm:gap-6 sm:px-8 sm:py-7">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Total Balance</p>
-            <p className="mt-1 truncate text-[34px] leading-none font-bold tracking-tight tabular-nums sm:text-[40px]" aria-live="polite">
+            <div className="flex items-center gap-1">
+              <p className="text-[15px] font-medium text-white/90 sm:text-lg">Total Balance</p>
+              <button type="button" onClick={toggle} aria-pressed={hidden} aria-label={hidden ? "Show balances" : "Hide balances"} className="inline-flex size-9 items-center justify-center rounded-full text-white/75 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none">
+                {hidden ? <EyeOff className="size-5" aria-hidden /> : <Eye className="size-5" aria-hidden />}
+              </button>
+            </div>
+            <p className="truncate text-[38px] leading-[1.08] font-bold tracking-tight tabular-nums sm:text-[54px]" aria-live="polite">
               {hidden ? <span aria-label="Hidden">{MASK}</span> : money(total)}
             </p>
+            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] sm:mt-2.5 sm:text-base">
+              {pct != null ? (
+                <>
+                  <span className={cn("inline-flex items-center gap-1 font-semibold tabular-nums", flat ? "text-[#a9b8ea]" : change! > 0 ? "text-[#2fe6a2]" : "text-[#ff8589]")}>
+                    {!flat && (change! > 0 ? <ArrowUp className="size-4 stroke-[2.6] sm:size-[18px]" aria-hidden /> : <ArrowDown className="size-4 stroke-[2.6] sm:size-[18px]" aria-hidden />)}
+                    <span className="sr-only">{flat ? "No change" : change! > 0 ? "Up" : "Down"}</span>
+                    {pct}
+                  </span>
+                  <span className="text-[#a9b8ea]">vs. last {days} days</span>
+                </>
+              ) : (
+                <span className="text-[#a9b8ea]">{total > 0 ? `New in the last ${days} days` : "No balance yet"}</span>
+              )}
+            </p>
+            {processing > 0 && <p className="mt-1 text-xs text-[#a9b8ea] sm:text-[13px]">{show(processing)} on its way to you</p>}
           </div>
-          <button type="button" onClick={toggle} aria-pressed={hidden} aria-label={hidden ? "Show balances" : "Hide balances"} className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background/50 text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none">
-            {hidden ? <EyeOff className="size-[18px]" aria-hidden /> : <Eye className="size-[18px]" aria-hidden />}
-          </button>
-        </div>
-        <p className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 px-4 text-xs text-muted-foreground sm:px-5">
-          {pct != null ? (
-            <>
-              <span className={cn("inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums", flat ? "border-border bg-muted text-muted-foreground" : change! > 0 ? "border-gain/25 bg-gain/12 text-gain" : "border-loss/25 bg-loss/12 text-loss")}>
-                <span aria-hidden>{flat ? "→" : change! > 0 ? "↑" : "↓"}</span>
-                <span className="sr-only">{flat ? "No change" : change! > 0 ? "Up" : "Down"}</span>
-                {flat ? "0%" : pct}
-              </span>
-              vs {days} days ago
-            </>
-          ) : (
-            <>Last {days} days</>
-          )}
-          {processing > 0 && <span className="text-muted-foreground">· {show(processing)} on its way to you</span>}
-        </p>
-        <div className="mt-auto pt-3">
-          <Sparkline values={trend.values} className="block h-16 w-full sm:h-20 lg:h-28" />
+          <WalletArt className="h-[86px] w-auto shrink-0 drop-shadow-[0_14px_22px_rgba(8,20,90,0.55)] sm:h-[132px]" />
         </div>
       </section>
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:col-span-3">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 lg:gap-5">
         <BreakdownCard icon={Wallet} label="Available Balance" value={show(available)} sub="Ready balance" />
         <BreakdownCard icon={Hourglass} label="Pending Balance" value={show(pending)} sub="Currently pending" />
         <BreakdownCard icon={CircleDollarSign} label="Total Earned" value={show(earned)} sub="All time" />
