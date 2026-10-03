@@ -5,7 +5,8 @@ import { loadPayoutPage } from "@/lib/affiliates/payout-view"
 import { money } from "@/lib/affiliates/types"
 import { PageHeader } from "@/components/page-header"
 import { Kpi, KpiGrid, linkButtonClass } from "@/components/affiliate/ui"
-import { AddPayoutMethodButton, AutoPayoutPanel, MethodCards, PayoutHistory, RequestPayout } from "@/components/affiliate/payouts"
+import { AddPayoutMethodButton, AutoPayoutPanel, MethodCards, PayoutHistory } from "@/components/affiliate/payouts"
+import { AvailableToWithdrawCard } from "@/components/affiliate/available-card"
 import { affiliateHref } from "@/lib/urls"
 
 export const metadata: Metadata = { title: "Payouts" }
@@ -42,21 +43,13 @@ export default async function AffiliatePayoutsPage({ searchParams }: { searchPar
           </p>
         )}
 
-        <div className="grid gap-3 lg:grid-cols-3">
-          <section className="rounded-xl border bg-card p-5 lg:col-span-1">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Available to withdraw</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{money(balances.available)}</p>
-            <div className="mt-4">
-              <RequestPayout {...data.request} />
-            </div>
-          </section>
-          <KpiGrid className="lg:col-span-2">
-            <Kpi label="Pending" value={money(balances.pending)} note={`Clears after the ${program.holdDays}-day hold`} />
-            <Kpi label="Processing" value={money(balances.processing)} note={inProgress ? "A payout is on its way" : "None right now"} />
-            <Kpi label="Lifetime earned" value={money(balances.lifetimeEarned)} note="All time" />
-            <Kpi label="Lifetime paid" value={money(balances.lifetimePaid)} note="All time" />
-          </KpiGrid>
-        </div>
+        <AvailableToWithdrawCard request={data.request} amount={balances.available} arrival={data.arrival} />
+        <KpiGrid>
+          <Kpi label="Pending" value={money(balances.pending)} note={`Clears after the ${program.holdDays}-day hold`} />
+          <Kpi label="Processing" value={money(balances.processing)} note={inProgress ? "A payout is on its way" : "None right now"} />
+          <Kpi label="Lifetime earned" value={money(balances.lifetimeEarned)} note="All time" />
+          <Kpi label="Lifetime paid" value={money(balances.lifetimePaid)} note="All time" />
+        </KpiGrid>
 
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold">Payout methods</h2>

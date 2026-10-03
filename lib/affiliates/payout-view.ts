@@ -135,6 +135,10 @@ export async function loadPayoutPage(affiliate: PortalContext["affiliate"], opts
       status: decision.ok ? `Ready — ${money(decision.amount)} in the next run` : SKIP[decision.code],
       ready: decision.ok,
     },
+    // When a payout arrives, for the banner. "Instantly" only when it is true
+    // for this affiliate: automatic crypto sending is on and they have an
+    // active method it covers. Otherwise the program's own stated time.
+    arrival: methods.some((m) => m.status === "active" && (instantTypes as string[]).includes(m.type)) ? "Arrives instantly or within a couple of hours" : `Arrives in ${program.payoutEta}`,
     // What the automatic payout worker will send on its next run (every few minutes), if anything.
     nextRun: decision.ok ? { amount: decision.amount } : null,
   }

@@ -7,7 +7,7 @@ import { money } from "@/lib/affiliates/types"
 import { affiliateHref } from "@/lib/urls"
 import { AutoPayoutPanel, PayoutHistory } from "@/components/affiliate/payouts"
 import { MethodMark } from "@/components/affiliate/payout-method-dialog"
-import { WithdrawButton } from "@/components/affiliate/v2/wallet"
+import { AvailableToWithdrawCard } from "@/components/affiliate/available-card"
 import { EmptyState, LinkTabs, MetricCard, PageFrame, StatusChip, V2Card, fmtDate, ghostBtnClass } from "@/components/affiliate/v2/ui"
 import { CircleDollarSign, Clock, Hourglass } from "lucide-react"
 
@@ -55,29 +55,14 @@ export default async function AffiliateV2Payouts({ searchParams }: { searchParam
       ) : (
         <>
           <div className="grid gap-4 lg:grid-cols-3 lg:gap-5">
-            <section className="v2-card-glow relative flex flex-col justify-between gap-4 overflow-hidden p-5 sm:p-6 lg:col-span-2">
-              <div aria-hidden className="pointer-events-none absolute -end-12 -top-12 size-48 rounded-full bg-[radial-gradient(circle,rgb(37_99_235/0.3),transparent_70%)]" />
-              <div className="relative flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">{inFlight ? "Payout in progress" : data.nextRun ? "Next automatic payout" : "Available to withdraw"}</p>
-                  <p className="text-3xl font-bold tracking-tight tabular-nums sm:text-4xl">{money(inFlight ? inFlight.amount : data.nextRun ? data.nextRun.amount : balances.available)}</p>
-                </div>
-                <p className="rounded-xl border bg-background/40 px-3 py-2 text-sm">
-                  {inFlight ? (
-                    <>
-                      {PAYOUT_STATUS_LABELS[inFlight.status as PayoutStatus] ?? inFlight.status} · requested {fmtDate(inFlight.requestedAt)}
-                    </>
-                  ) : data.nextRun ? (
-                    "On the next automatic run"
-                  ) : (
-                    `Arrives in ${data.program.payoutEta}`
-                  )}
-                </p>
-              </div>
-              <div className="relative">
-                <WithdrawButton request={data.request} label="Request Payout" autoOpen={sp.withdraw === "1"} className="w-full sm:w-auto" />
-              </div>
-            </section>
+            <AvailableToWithdrawCard
+              request={data.request}
+              amount={balances.available}
+              arrival={data.arrival}
+              status={inFlight ? `Payout in progress: ${money(inFlight.amount)} · ${PAYOUT_STATUS_LABELS[inFlight.status as PayoutStatus] ?? inFlight.status}` : data.nextRun ? `Next automatic payout: ${money(data.nextRun.amount)}, on the next run` : null}
+              autoOpen={sp.withdraw === "1"}
+              className="lg:col-span-2"
+            />
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
               <MetricCard icon={Hourglass} label="Pending" value={money(balances.pending)} sub={`Clears after the ${data.program.holdDays}-day hold`} />
               <MetricCard icon={Clock} label="Processing" value={money(balances.processing)} sub={data.inProgress ? "A payout is on its way" : "None right now"} />
