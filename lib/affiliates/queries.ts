@@ -228,13 +228,16 @@ export async function defaultLink(affiliateId: number) {
 
 export const PAGE_SIZE = 20
 
-export type ReferralFilters = { q?: string; status?: string; campaign?: number; source?: string; page?: number }
+// `statuses`: any of several; `paid`: only referrals that have paid at least once.
+export type ReferralFilters = { q?: string; status?: string; statuses?: string[]; paid?: boolean; campaign?: number; source?: string; page?: number }
 
 export async function referralsPage(affiliateId: number, f: ReferralFilters) {
   const where = and(
     eq(affiliateReferrals.affiliateId, affiliateId),
     f.q ? ilike(affiliateReferrals.publicId, `%${f.q.replace(/[%_\\]/g, "")}%`) : undefined,
     f.status ? eq(affiliateReferrals.status, f.status) : undefined,
+    f.statuses?.length ? inArray(affiliateReferrals.status, f.statuses) : undefined,
+    f.paid ? sql`${affiliateReferrals.firstPaymentAt} is not null` : undefined,
     f.campaign ? eq(affiliateReferrals.campaignId, f.campaign) : undefined,
     f.source ? eq(affiliateReferrals.source, f.source) : undefined
   )
@@ -312,13 +315,16 @@ export type ReferralDetail = NonNullable<Awaited<ReturnType<typeof referralDetai
 
 // --- Ledger -----------------------------------------------------------------
 
-export type LedgerFilters = { type?: string; status?: string; page?: number; from?: Date | null; to?: Date | null }
+// `types` / `statuses`: any of several (the V2 dashboard's filter tabs).
+export type LedgerFilters = { type?: string; status?: string; types?: string[]; statuses?: string[]; page?: number; from?: Date | null; to?: Date | null }
 
 export function ledgerWhere(affiliateId: number | null, f: LedgerFilters): SQL | undefined {
   return and(
     affiliateId == null ? undefined : eq(affiliateCommissions.affiliateId, affiliateId),
     f.type ? eq(affiliateCommissions.type, f.type) : undefined,
     f.status ? eq(affiliateCommissions.status, f.status) : undefined,
+    f.types?.length ? inArray(affiliateCommissions.type, f.types) : undefined,
+    f.statuses?.length ? inArray(affiliateCommissions.status, f.statuses) : undefined,
     f.from ? gte(affiliateCommissions.createdAt, f.from) : undefined,
     f.to ? lt(affiliateCommissions.createdAt, f.to) : undefined
   )

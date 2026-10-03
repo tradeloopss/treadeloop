@@ -19,6 +19,10 @@ test("affiliate.<domain>: the portal sits at the root, with clean addresses", as
   assert.equal((await visit("https://affiliate.tradeloop.pro/payouts")).rewrite, "https://affiliate.tradeloop.pro/affiliate/payouts")
   assert.equal((await visit("https://affiliate.tradeloop.pro/referrals?status=active&page=2")).rewrite, "https://affiliate.tradeloop.pro/affiliate/referrals?status=active&page=2")
   assert.equal((await visit("https://affiliate.tradeloop.pro/export/payouts")).rewrite, "https://affiliate.tradeloop.pro/affiliate/export/payouts")
+  // the V2 dashboard (beta) lives under /v2, with its own sections beneath it
+  assert.equal((await visit("https://affiliate.tradeloop.pro/v2")).rewrite, "https://affiliate.tradeloop.pro/affiliate/v2")
+  assert.equal((await visit("https://affiliate.tradeloop.pro/v2/wallet?withdraw=1")).rewrite, "https://affiliate.tradeloop.pro/affiliate/v2/wallet?withdraw=1")
+  assert.equal((await visit("https://affiliate.tradeloop.pro/v2/campaigns/12")).rewrite, "https://affiliate.tradeloop.pro/affiliate/v2/campaigns/12")
   for (const section of ["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "terms", "onboarding"]) {
     const r = await visit(`https://affiliate.tradeloop.pro/${section}`)
     assert.deepEqual([r.status, r.rewrite], [200, `https://affiliate.tradeloop.pro/affiliate/${section}`], section)

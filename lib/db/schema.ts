@@ -1529,6 +1529,11 @@ export const affiliates = pgTable(
     // once: an admin who later revokes that access isn't overruled by the next run.
     freeAccountAt: timestamp("freeAccountAt"),
     notifications: jsonb("notifications").$type<Record<string, boolean>>(),
+    // Which portal they use: "classic" | "v2"; null = the program default
+    // (lib/affiliates/v2/config.ts decides, and whether V2 is open to them at all).
+    dashboardVersion: text("dashboardVersion"),
+    // Shown on the public leaderboard only if they opt in.
+    leaderboardPublic: boolean("leaderboardPublic").notNull().default(false),
     rejectionReason: text("rejectionReason"),
     reviewedBy: text("reviewedBy"),
     approvedAt: timestamp("approvedAt"),
@@ -1939,6 +1944,21 @@ export const affiliateNotifications = pgTable(
     createdAt: timestamp("createdAt").notNull().defaultNow(),
   },
   (t) => [index("affiliate_notifications_affiliate").on(t.affiliateId, t.createdAt)]
+)
+
+// What affiliates think of the V2 dashboard beta (the Feedback window).
+export const affiliateFeedback = pgTable(
+  "affiliate_feedback",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    rating: text("rating").notNull(), // love | good | improve | difficult
+    message: text("message"),
+    page: text("page"), // the portal page it was sent from
+    version: text("version").notNull().default("v2"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_feedback_created").on(t.createdAt), index("affiliate_feedback_affiliate").on(t.affiliateId, t.createdAt)]
 )
 
 export const affiliateResources = pgTable("affiliate_resources", {

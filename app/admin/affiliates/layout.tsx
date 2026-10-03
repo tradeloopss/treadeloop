@@ -30,6 +30,7 @@ export default async function AdminAffiliatesLayout({ children }: { children: Re
           { href: "/admin/affiliates/resources", label: "Resources" },
           { href: "/admin/affiliates/announcements", label: "Announcements" },
           { href: "/admin/affiliates/emails", label: "Emails" },
+          { href: "/admin/affiliates/dashboard", label: "Dashboard V2" },
         ]}
       />
       {children}

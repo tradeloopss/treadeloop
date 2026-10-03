@@ -262,3 +262,156 @@ html[lang="ar"] * {
   .tl-reveal { animation: none }
   .tl-flash { animation: none; opacity: 0 }
 }
+
+/* --- Affiliate Dashboard V2 (beta) -------------------------------------------
+   Its own palette on the app's own tokens: every component (and every dialog
+   or menu rendered outside the page) reads --background, --card, --primary…,
+   so the V2 shell only has to mark itself with [data-aff-v2] for the whole
+   screen to take this palette. Light and dark are tuned separately — dark is
+   deep navy with violet / electric blue / cyan accents, light is white cards
+   on a soft lavender-gray. The dark block is more specific than the light one
+   on purpose (both match in dark mode). */
+:root:has([data-aff-v2]) {
+  --background: #f7f8fc;
+  --foreground: #0b1533;
+  --card: #ffffff;
+  --card-foreground: #0b1533;
+  --popover: #ffffff;
+  --popover-foreground: #0b1533;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0fb;
+  --secondary-foreground: #1d2550;
+  --muted: #f1f2fa;
+  --muted-foreground: #5a6485;
+  --accent: #eef0fb;
+  --accent-foreground: #1d2550;
+  --border: #e3e2f3;
+  --input: #dad9ee;
+  --ring: #8b5cf6;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1d2550;
+  --gain: #16a34a;
+  --loss: #dc2626;
+  --warning: #d97706;
+  --chart-1: #7c3aed;
+  --chart-2: #2563eb;
+  --chart-3: #06b6d4;
+  --chart-4: #c026d3;
+  --chart-5: #16a34a;
+  --v2-violet: #7c3aed;
+  --v2-violet-bright: #8b5cf6;
+  --v2-blue: #2563eb;
+  --v2-cyan: #0891b2;
+  --v2-magenta: #c026d3;
+  --v2-surface: #ffffff;
+  --v2-card-from: #ffffff;
+  --v2-card-to: #fbfbff;
+  --v2-edge: rgb(124 58 237 / 0.10);
+  --v2-shadow: 0 1px 2px rgb(16 24 64 / 0.04), 0 8px 24px -16px rgb(76 29 149 / 0.18);
+  --v2-glow: 0 10px 28px -14px rgb(124 58 237 / 0.55);
+  --v2-page: radial-gradient(1100px 520px at 12% -10%, rgb(124 58 237 / 0.07), transparent 60%), radial-gradient(900px 480px at 100% 0%, rgb(37 99 235 / 0.06), transparent 60%), #f7f8fc;
+}
+:root.dark:has([data-aff-v2]) {
+  --background: #030712;
+  --foreground: #f8fafc;
+  --card: #08152f;
+  --card-foreground: #f8fafc;
+  --popover: #0a1736;
+  --popover-foreground: #f8fafc;
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --secondary: #0f1f45;
+  --secondary-foreground: #e2e8f0;
+  --muted: #0c1a3a;
+  --muted-foreground: #94a3b8;
+  --accent: #10224b;
+  --accent-foreground: #f1f5f9;
+  --border: #1b2b58;
+  --input: #22366b;
+  --ring: #8b5cf6;
+  --sidebar: #050d1f;
+  --sidebar-foreground: #e2e8f0;
+  --gain: #22c55e;
+  --loss: #ef4444;
+  --warning: #f59e0b;
+  --chart-1: #8b5cf6;
+  --chart-2: #3b82f6;
+  --chart-3: #06b6d4;
+  --chart-4: #d946ef;
+  --chart-5: #22c55e;
+  --v2-violet: #7c3aed;
+  --v2-violet-bright: #8b5cf6;
+  --v2-blue: #2563eb;
+  --v2-cyan: #06b6d4;
+  --v2-magenta: #c026d3;
+  --v2-surface: #071226;
+  --v2-card-from: #0a1a3a;
+  --v2-card-to: #071329;
+  --v2-edge: rgb(139 92 246 / 0.16);
+  --v2-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03), 0 10px 30px -18px rgb(0 0 0 / 0.8);
+  --v2-glow: 0 0 0 1px rgb(139 92 246 / 0.35), 0 10px 30px -10px rgb(124 58 237 / 0.65);
+  --v2-page: radial-gradient(1200px 600px at 10% -12%, rgb(124 58 237 / 0.20), transparent 60%), radial-gradient(1000px 520px at 100% 0%, rgb(37 99 235 / 0.16), transparent 60%), radial-gradient(800px 500px at 50% 110%, rgb(192 38 211 / 0.07), transparent 60%), #030712;
+}
+
+@layer components {
+  .v2-page { background: var(--v2-page); background-attachment: fixed; }
+  /* A card: a soft vertical gradient, a hairline border, a shadow tuned per theme. */
+  .v2-card {
+    background: linear-gradient(180deg, var(--v2-card-from), var(--v2-card-to));
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    box-shadow: var(--v2-shadow);
+  }
+  /* The few things that should glow: the hero, the wallet, primary balances. */
+  .v2-card-glow {
+    background: radial-gradient(120% 140% at 0% 0%, rgb(124 58 237 / 0.16), transparent 55%), radial-gradient(120% 140% at 100% 100%, rgb(37 99 235 / 0.12), transparent 55%), linear-gradient(180deg, var(--v2-card-from), var(--v2-card-to));
+    border: 1px solid color-mix(in oklab, var(--v2-violet-bright) 35%, var(--border));
+    border-radius: 1rem;
+    box-shadow: var(--v2-shadow), 0 0 40px -24px rgb(124 58 237 / 0.7);
+  }
+  .v2-btn {
+    background: linear-gradient(90deg, var(--v2-violet), var(--v2-blue));
+    color: #fff;
+    box-shadow: var(--v2-glow);
+    transition: filter .15s ease, transform .15s ease, box-shadow .15s ease;
+  }
+  .v2-btn:hover { filter: brightness(1.08); }
+  .v2-btn:active { transform: translateY(1px); }
+  .v2-btn:disabled { filter: grayscale(.35) brightness(.9); box-shadow: none; }
+  .v2-icon {
+    background: linear-gradient(140deg, color-mix(in oklab, var(--v2-violet) 22%, transparent), color-mix(in oklab, var(--v2-blue) 18%, transparent));
+    border: 1px solid var(--v2-edge);
+    color: var(--v2-violet-bright);
+  }
+  :root.dark .v2-icon { color: #c4b5fd; box-shadow: inset 0 0 18px -8px rgb(139 92 246 / 0.6); }
+  .v2-nav-active {
+    background: linear-gradient(90deg, var(--v2-violet), var(--v2-blue));
+    color: #fff;
+    box-shadow: var(--v2-glow);
+  }
+  .v2-bar { background: linear-gradient(90deg, var(--v2-violet), var(--v2-blue), var(--v2-cyan)); }
+  .v2-beta {
+    background: linear-gradient(90deg, rgb(124 58 237 / 0.16), rgb(37 99 235 / 0.16));
+    border: 1px solid rgb(139 92 246 / 0.45);
+    color: var(--v2-violet-bright);
+    box-shadow: 0 0 14px -4px rgb(139 92 246 / 0.55);
+  }
+  :root.dark .v2-beta { color: #c4b5fd; }
+  .v2-text-gradient {
+    background: linear-gradient(90deg, var(--v2-violet-bright), var(--v2-blue) 60%, var(--v2-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@keyframes v2-grow { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+@keyframes v2-fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+.v2-grow { transform-origin: left center; animation: v2-grow .9s cubic-bezier(.2,.8,.2,1) both }
+[dir="rtl"] .v2-grow { transform-origin: right center }
+.v2-fade-up { animation: v2-fade-up .35s ease-out both }
+@media (prefers-reduced-motion: reduce) {
+  .v2-grow, .v2-fade-up { animation: none }
+  .v2-btn { transition: none }
+}

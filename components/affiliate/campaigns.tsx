@@ -29,7 +29,7 @@ export type CampaignView = {
 
 const BLANK = { name: "", description: "", landingPage: "/", utmSource: "", utmMedium: "", utmCampaign: "", utmContent: "" }
 
-function CampaignDialog({ open, onOpenChange, campaign }: { open: boolean; onOpenChange: (open: boolean) => void; campaign: CampaignView | null }) {
+export function CampaignDialog({ open, onOpenChange, campaign }: { open: boolean; onOpenChange: (open: boolean) => void; campaign: CampaignView | null }) {
   const { pending, run } = useAction()
   const [form, setForm] = useState(BLANK)
   const [seeded, setSeeded] = useState<number | "new" | null>(null)

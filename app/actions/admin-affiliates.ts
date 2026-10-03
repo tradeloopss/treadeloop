@@ -18,6 +18,7 @@ import { notifyAffiliate } from "@/lib/affiliates/notify"
 import { getPayoutSettings, getProgram, saveProgram, savePayoutSettings } from "@/lib/affiliates/program"
 import { exchangeReady, hotWalletReady, isAutoSender } from "@/lib/affiliates/providers"
 import { ANNOUNCEMENT_CATEGORIES, RESOURCE_CATEGORIES } from "@/lib/affiliates/types"
+import { saveV2Config } from "@/lib/affiliates/v2/server"
 
 // Admin side of the affiliate program. Every action re-checks the permission
 // on the server and writes the existing admin audit log.
@@ -147,6 +148,18 @@ export async function saveProgramSettings(input: Record<string, unknown>): Promi
     await logAdminAction(admin, "affiliate.program", null, { ...saved, ...(moved ? { pendingCommissionsBroughtForward: moved } : {}) })
     if (moved) return `Program rules saved. ${moved} pending commission${moved === 1 ? "" : "s"} now follow${moved === 1 ? "s" : ""} the ${saved.holdDays}-day holding period.`
     return "Program rules saved. They apply to payments from now on."
+  })
+}
+
+// The V2 dashboard beta: on/off, who gets it, the default, its feature
+// switches and the monthly goal targets (lib/affiliates/v2/config).
+export async function saveDashboardV2Settings(input: Record<string, unknown>): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await assertAdmin(MANAGE)
+    const saved = await saveV2Config(input)
+    await logAdminAction(admin, "affiliate.dashboard_v2", null, { ...saved, selected: saved.selected.length })
+    revalidatePath("/affiliate", "layout")
+    return saved.enabled ? "Dashboard settings saved." : "Saved. The V2 dashboard is switched off; everyone sees Classic."
   })
 }
 

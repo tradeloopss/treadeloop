@@ -253,6 +253,13 @@
       "when": 1791010000000,
       "tag": "0035_admin_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791020000000,
+      "tag": "0036_affiliate_dashboard_v2",
+      "breakpoints": true
     }
   ]
 }

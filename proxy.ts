@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { DEFAULT_LOCALE, LOCALE_COOKIE, LOCALE_HEADER, isOffered, localeFromAcceptLanguage, localeFromCountry } from "@/lib/i18n"
+import { PATH_HEADER } from "@/lib/path-header"
 
 // The public marketing pages that stay on the apex/www domain. Everything else
 // on the apex (the app itself, and the auth pages) now lives on the app
@@ -23,7 +24,7 @@ function appOrigin(hostname: string) {
 // The affiliate portal's pages, as they appear on affiliate.<domain> (the
 // first path segment). The portal's root is the overview. Keep in sync with
 // the folders under app/affiliate.
-const AFFILIATE_SECTIONS = new Set(["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "terms", "onboarding", "export"])
+const AFFILIATE_SECTIONS = new Set(["analytics", "referrals", "campaigns", "links", "coupons", "earnings", "payouts", "resources", "announcements", "support", "settings", "apply", "terms", "onboarding", "export", "v2"])
 const isAffiliatePath = (pathname: string) => pathname === "/affiliate" || pathname.startsWith("/affiliate/")
 // "/affiliate/payouts" → "/payouts"; "/affiliate" → "/"
 const stripAffiliate = (pathname: string) => pathname.slice("/affiliate".length) || "/"
@@ -126,6 +127,10 @@ export function proxy(request: NextRequest) {
 
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set(LOCALE_HEADER, locale)
+  // The page asked for, in its in-app form (after any rewrite): the affiliate
+  // portal uses it to send someone on the V2 dashboard to the V2 version of a
+  // Classic page they followed a link to.
+  requestHeaders.set(PATH_HEADER, `${(rewriteTo ?? url).pathname}${(rewriteTo ?? url).search}`)
   const response = rewriteTo
     ? NextResponse.rewrite(rewriteTo, { request: { headers: requestHeaders } })
     : NextResponse.next({ request: { headers: requestHeaders } })

@@ -1,5 +1,11 @@
 import type React from "react"
 import Link from "next/link"
+import { headers } from "next/headers"
+import { redirect } from "next/navigation"
+import { classicToV2 } from "@/lib/affiliates/v2/config"
+import { portalVersion } from "@/lib/affiliates/v2/server"
+import { PATH_HEADER } from "@/lib/path-header"
+import { TryV2Banner } from "@/components/affiliate/v2/switch"
 import { ArrowLeft } from "lucide-react"
 import { requireAffiliate } from "@/lib/affiliates/guard"
 import { currentRule } from "@/lib/affiliates/program"
@@ -13,6 +19,15 @@ import { affiliateHref, appHref } from "@/lib/urls"
 
 export default async function AffiliatePortalLayout({ children }: { children: React.ReactNode }) {
   const { user, affiliate } = await requireAffiliate()
+  // An affiliate on the V2 dashboard who follows a link to a Classic page (an
+  // email, a bookmark) lands on its V2 version instead.
+  const { open, version } = await portalVersion(affiliate)
+  if (version === "v2") {
+    const asked = (await headers()).get(PATH_HEADER) ?? "/affiliate"
+    const [path, query] = asked.split("?")
+    const v2 = classicToV2(path)
+    if (v2) redirect(affiliateHref(`${v2}${query ? `?${query}` : ""}`))
+  }
   // The Coupons section appears once the affiliate has a code to show there:
   // their permanent one, or a coupon an admin generated for them.
   const [unread, notifications, rule, coupons] = await Promise.all([unreadCounts(affiliate.id), notificationsFor(affiliate.id, 12), currentRule(affiliate.id), hasCoupons(affiliate.id)])
@@ -74,7 +89,10 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
             </p>
           </div>
         </aside>
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1">
+          {open && !user.impersonating && <TryV2Banner />}
+          {children}
+        </main>
       </div>
     </div>
   )

@@ -169,11 +169,15 @@ export type RequestPayoutProps = {
   autoPayoutOn?: boolean
   // what the Add Payout Method window needs; without it there is no "add" shortcut
   methodConfig?: MethodDialogConfig
+  // Draws whatever opens the window, in place of the standard "Request payout"
+  // button and its hint (V2 Wallet: "Withdraw Now", a payment method card…).
+  // `open` can preselect one of the affiliate's methods.
+  trigger?: (open: (methodId?: number) => void, hint: string | null) => React.ReactNode
 }
 
 const SUCCESS_STATUS: Partial<Record<PayoutStatus, string>> = { pending: "Pending review", queued: "Queued to be sent", processing: "Being sent", submitted: "Being sent", confirming: "Being sent", paid: "Sent" }
 
-export function RequestPayout({ available, pendingBalance = 0, min, max, methodMins = {}, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null, instantTypes = ["crypto_trc20"], prices = {}, autoPayoutOn = false, methodConfig }: RequestPayoutProps) {
+export function RequestPayout({ available, pendingBalance = 0, min, max, methodMins = {}, methods, blocked, eta, feePolicy, fees, approval, instantUpTo = null, instantTypes = ["crypto_trc20"], prices = {}, autoPayoutOn = false, methodConfig, trigger }: RequestPayoutProps) {
   const router = useRouter()
   const ids = { amount: useId(), amountHelp: useId(), sendTo: useId() }
   const [open, setOpen] = useState(false)
@@ -217,10 +221,10 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
   // Shown under the trigger, so the page explains itself before the window is opened.
   const hint = blocked ?? (live.length === 0 ? "Add a payout method to request a payout." : ready.length === 0 ? (held ? `Your payout method is in its security hold until ${fmtWhen(held.holdUntil!)}.` : "You don't have an active payout method.") : belowMin ? `You need at least ${money(min)} available to request a payout.` : null)
 
-  const openDialog = () => {
+  const openDialog = (preferMethodId?: number) => {
     setAmount(most >= min ? most.toFixed(2) : "")
     setTouched(false)
-    setMethodId(null)
+    setMethodId(preferMethodId != null && ready.some((m) => m.id === preferMethodId) ? preferMethodId : null)
     setKnown(null)
     setKey(newKey())
     setError(null)
@@ -261,10 +265,16 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
 
   return (
     <>
-      <Button size="lg" onClick={openDialog}>
-        <Banknote className="size-4" aria-hidden /> Request payout
-      </Button>
-      {hint && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
+      {trigger ? (
+        trigger(openDialog, hint)
+      ) : (
+        <>
+          <Button size="lg" onClick={() => openDialog()}>
+            <Banknote className="size-4" aria-hidden /> Request payout
+          </Button>
+          {hint && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
+        </>
+      )}
 
       <Dialog open={open} onOpenChange={(next) => (pending ? undefined : setOpen(next))}>
         {/* A sheet from the bottom on a phone, a compact centred window from sm up. */}

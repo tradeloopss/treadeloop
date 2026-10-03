@@ -101,6 +101,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "affiliate.announcement_save": "Saved an affiliate announcement",
   "affiliate.announcement_delete": "Deleted an affiliate announcement",
   "affiliate.export": "Exported affiliate data",
+  "affiliate.dashboard_v2": "Changed the affiliate dashboard V2 rollout",
   "admin.dashboard_version": "Switched admin dashboard version",
 }
 
