@@ -369,6 +369,16 @@ export function PayoutSettingsForm({ settings, minPayout, stripeReady, walletRea
           </label>
         </div>
 
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border px-3.5 py-3">
+          <input type="checkbox" role="switch" checked={form.confirmCode} onChange={(e) => set("confirmCode", e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" />
+          <span className="text-sm">
+            <span className="font-medium">Verification code for payouts and new payout methods</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              An affiliate must enter a 6-digit code to confirm a payout request and to add a payout method — from their authenticator app when they use two-factor sign-in, otherwise emailed to them from the payments address. Automatic payouts are not affected. Switch it off only if codes can&apos;t be delivered.
+            </span>
+          </span>
+        </label>
+
         <div>
           <h3 className="text-sm font-semibold">Automatic crypto sending</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">

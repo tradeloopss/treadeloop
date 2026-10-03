@@ -6,6 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ArrowRight, Banknote, Check, ChevronRight, CircleCheck, ExternalLink, Info, LifeBuoy, Loader2, Plus, ShieldCheck, TriangleAlert, type LucideIcon } from "lucide-react"
 import { cancelPayoutRequest, requestPayoutNow, type RequestedPayout } from "@/app/actions/affiliate"
+import { CodeField, useActionCode } from "@/components/affiliate/action-code"
 import { MethodMark, PayoutMethodDialog } from "@/components/affiliate/payout-method-dialog"
 import type { PayoutView } from "@/components/affiliate/payouts"
 import type { RequestPayoutProps } from "@/components/affiliate/request-payout-dialog"
@@ -311,6 +312,8 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
   const [pending, start] = useTransition()
   // the step last asked for (the one shown is worked out from it, below)
   const [at, setAt] = useState<StepN>(1)
+  // the verification code the Confirm Payout sheet asks for
+  const codes = useActionCode()
 
   const live = methods.filter((m) => m.status !== "removed" && m.status !== "rejected")
   const ready = live.filter((m) => usable(m))
@@ -369,13 +372,18 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
     setError(null)
     setDone(null)
     setConfirming(true)
+    // for exactly this amount to this method — emailed, unless the account uses an authenticator
+    if (method && value != null) void codes.request({ purpose: "payout", amount: value, methodId: method.id })
+  }
+  const resend = () => {
+    if (method && value != null) void codes.request({ purpose: "payout", amount: value, methodId: method.id, resend: codes.phase === "ready" })
   }
   const confirm = () => {
-    if (!method || value == null || pending) return
+    if (!method || value == null || pending || !codes.satisfied) return
     setError(null)
     start(async () => {
       try {
-        const res = await requestPayoutNow({ amount: value, methodId: method.id, key })
+        const res = await requestPayoutNow({ amount: value, methodId: method.id, key, code: codes.value })
         if (res.ok) {
           setDone(res.payout)
           setAmount("")
@@ -383,7 +391,10 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
           setKey("")
           setAt(1)
           router.refresh()
-        } else setError(res.error)
+        } else {
+          setError(res.error)
+          codes.setCode("")
+        }
       } catch {
         setError("We couldn't reach TradeLoop. Check your connection and try again — you won't be paid twice.")
       }
@@ -394,6 +405,7 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
     setConfirming(false)
     setDone(null)
     setError(null)
+    codes.reset()
   }
   const viewPayout = (p: RequestedPayout) => {
     closeSheet()
@@ -646,7 +658,7 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
         onOpenChange={(next) => !next && closeSheet()}
         locked={pending}
         title={done ? "Payout Request Submitted" : "Confirm Payout"}
-        description={done ? (done.sending ? `Your ${money(done.amount)} payout was approved and is being sent. We'll email you once it's confirmed.` : `Your ${money(done.amount)} request is in. We'll email you as it moves along.`) : "Check the details before you submit. This can't be changed afterwards."}
+        description={done ? (done.sending ? `Your ${money(done.amount)} payout was approved and is being sent. We'll email you once it's confirmed.` : `Your ${money(done.amount)} request is in. We'll email you as it moves along.`) : codes.phase === "off" ? "Check the details before you submit. This can't be changed afterwards." : "Check the details, then enter your verification code to submit."}
         footer={
           done ? (
             <>
@@ -662,7 +674,7 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
               <button type="button" className={sheetBtnQuiet} onClick={closeSheet} disabled={pending}>
                 Cancel
               </button>
-              <button type="button" className={cn(sheetBtn, "v2-btn flex-[1.6]")} onClick={confirm} disabled={pending || !method || value == null} aria-busy={pending}>
+              <button type="button" className={cn(sheetBtn, "v2-btn flex-[1.6]")} onClick={confirm} disabled={pending || !method || value == null || !codes.satisfied} aria-busy={pending}>
                 {pending ? (
                   <>
                     <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Submitting…
@@ -718,6 +730,7 @@ export function PayoutFlow({ request, top, aside, manageHref, back, inFlightId =
                   { label: "You receive", value: <span className="text-gain">{receive}</span>, strong: true },
                 ]}
               />
+              <CodeField flow={codes} disabled={pending} onResend={resend} onEnter={confirm} className="rounded-2xl border bg-background/40 p-3.5" />
               <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
                 <p className="flex items-start gap-2">
                   <Info className="mt-px size-3.5 shrink-0" aria-hidden /> {arrival}

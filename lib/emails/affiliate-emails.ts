@@ -356,6 +356,44 @@ function walletChanged(d: MethodFacts): EmailDoc {
   }
 }
 
+// --- Verification codes ---------------------------------------------------------
+
+type CodeFacts = {
+  firstName: string
+  code: string
+  minutes: number
+  // payout = confirming a payout request; method = adding a payout method
+  purpose: "payout" | "method"
+  amount?: string | null
+  method: string
+  destination?: string | null // masked
+}
+
+// The 6-digit code asked for before a payout is confirmed or a payout method
+// is added. The code is in the body only — never in the subject or the preview
+// line, which a locked phone shows to anyone.
+export function verificationCode(d: CodeFacts): EmailDoc {
+  const payout = d.purpose === "payout"
+  return {
+    template: payout ? "payout-code" : "payout-method-code",
+    sender: "payments",
+    subject: payout ? "Your TradeLoop payout verification code" : "Your TradeLoop verification code",
+    preview: payout ? "Use the code inside to confirm your payout request." : "Use the code inside to add your payout method.",
+    badge: { label: "Verification code", tone: "info" },
+    headline: payout ? "Confirm your payout" : "Confirm your new payout method",
+    greeting: hello(d.firstName),
+    intro: [payout ? "Enter this code in TradeLoop to confirm your payout request." : "Enter this code in TradeLoop to add your payout method."],
+    blocks: [
+      { kind: "code", label: "Verification code", value: d.code },
+      { kind: "info", rows: payout ? [["Amount", d.amount], ["Method", d.method], ["Destination", d.destination]] : [["Method", d.method]] },
+      { kind: "notice", lines: [`The code expires in ${d.minutes} minutes and can be used once.`] },
+      { kind: "warning", title: "Didn't ask for this code?", lines: ["Someone may be signed in to your account. Don't share this code with anyone — TradeLoop will never ask you for it. Change your password and contact TradeLoop Support."] },
+      { kind: "cta", label: "Secure My Account", url: appUrl("/settings") },
+    ],
+    signature: PAYMENTS_TEAM,
+  }
+}
+
 // --- Everything else ------------------------------------------------------------
 
 // Any other notice to an affiliate (a new referral, a commission, an account
@@ -400,5 +438,7 @@ export function emailPreviews(now = new Date("2026-10-02T14:05:00Z")): { id: str
     { id: "payout-failed", name: "Payout Failed", doc: payoutFailed({ firstName, payout: paypal, reason: "PayPal rejected the transfer: the receiving account is restricted." }) },
     { id: "payout-method-changed", name: "Payout Method Changed", doc: payoutMethodChanged({ firstName, method: "PayPal", destination: "a••••@example.com", changed: true, changedAt: now, holdUntil: new Date(now.getTime() + 24 * 3_600_000) }) },
     { id: "wallet-changed", name: "Wallet Changed", doc: payoutMethodChanged({ firstName, method: "Crypto — USDT (TRC-20)", destination: "TXYZ…8291", changed: true, changedAt: now, holdUntil: new Date(now.getTime() + 24 * 3_600_000), crypto: { asset: "USDT", network: "TRON (TRC-20)" } }) },
+    { id: "payout-code", name: "Payout Verification Code", doc: verificationCode({ firstName, code: "482915", minutes: 10, purpose: "payout", amount: "$420.00", method: "USDT · TRON (TRC-20)", destination: "TXYZ…8291" }) },
+    { id: "payout-method-code", name: "Payout Method Verification Code", doc: verificationCode({ firstName, code: "730164", minutes: 10, purpose: "method", method: "PayPal" }) },
   ]
 }

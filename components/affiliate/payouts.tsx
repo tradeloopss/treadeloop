@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { Banknote, ExternalLink, Plus, Wallet, Zap } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -11,6 +10,7 @@ import { PAYOUT_STATUS_LABELS, affiliateCanCancel, type PayoutStatus } from "@/l
 import { cryptoSpecByNetwork, explorerTxUrl } from "@/lib/affiliates/crypto"
 import { maskTxHash } from "@/lib/affiliates/tron"
 import { methodLabel, money, type PayoutMethodType } from "@/lib/affiliates/types"
+import { CodePrompt } from "./action-code"
 import { ConfirmButton } from "./confirm"
 import { MethodMark, PayoutMethodDialog } from "./payout-method-dialog"
 import { Empty, StatusBadge, TableShell, THead, fmtDay, tdClass, thClass } from "./ui"
@@ -86,24 +86,34 @@ function RenameButton({ method }: { method: MethodView }) {
   )
 }
 
+// Continuing on Stripe's pages is where the bank account gets entered, so it
+// asks for the verification code first, like adding any other method.
 function VerifyButton() {
-  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
   return (
-    <Button
-      size="sm"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true)
-        const res = await connectStripe()
-        if (res.ok) window.location.href = res.url
-        else {
-          setBusy(false)
-          toast.error(res.error)
-        }
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        Verify
+      </Button>
+      <StripeCodePrompt open={open} onOpenChange={setOpen} />
+    </>
+  )
+}
+
+export function StripeCodePrompt({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <CodePrompt
+      open={open}
+      onOpenChange={onOpenChange}
+      request={{ purpose: "method", type: "stripe" }}
+      description="Confirm it's you before continuing to Stripe, where your bank details are entered."
+      confirmLabel="Continue to Stripe"
+      pendingLabel="Opening Stripe…"
+      action={(code) => connectStripe(code)}
+      onDone={(res) => {
+        window.location.href = res.url
       }}
-    >
-      {busy ? "Opening Stripe…" : "Verify"}
-    </Button>
+    />
   )
 }
 

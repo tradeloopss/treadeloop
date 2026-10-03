@@ -164,6 +164,10 @@ export type PayoutSettings = {
   // Hours a newly added method must wait before it can be paid to, when the
   // account already had one. 0 switches the hold off.
   methodHoldHours: number
+  // A 6-digit verification code (emailed, or from the authenticator app of an
+  // account with two-factor on) is needed to confirm a payout request and to
+  // add a payout method. On unless an admin switches it off.
+  confirmCode: boolean
   methods: PayoutMethodType[] // offered to affiliates
   // The least one payout by this method can be, in the method's OWN unit: US
   // dollars, or the coin itself for a crypto method (5 USDT, 0.1 LTC). 0 = the
@@ -193,6 +197,7 @@ export const DEFAULT_PAYOUT_SETTINGS: PayoutSettings = {
   feePolicy: "platform",
   fees: { paypal: noFee(), wise: noFee(), bank: noFee(), stripe: noFee(), crypto_trc20: noFee(), crypto_aptos: noFee(), crypto_ltc: noFee() },
   methodHoldHours: 24,
+  confirmCode: true,
   methods: ["paypal", "wise", "bank", "crypto_trc20"],
   methodMin: { paypal: 0, wise: 0, bank: 0, stripe: 0, crypto_trc20: 5, crypto_aptos: 10, crypto_ltc: 0.1 },
   cryptoAutoSend: false,
@@ -238,6 +243,7 @@ export function normalizePayoutSettings(raw: unknown): PayoutSettings {
     feePolicy: r.feePolicy === "affiliate" ? "affiliate" : "platform",
     fees,
     methodHoldHours: Math.round(clamp(r.methodHoldHours, d.methodHoldHours, 0, 720)),
+    confirmCode: typeof r.confirmCode === "boolean" ? r.confirmCode : d.confirmCode,
     methods,
     methodMin,
     cryptoAutoSend: typeof r.cryptoAutoSend === "boolean" ? r.cryptoAutoSend : d.cryptoAutoSend,

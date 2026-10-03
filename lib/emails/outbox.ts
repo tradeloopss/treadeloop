@@ -57,6 +57,32 @@ export async function deliver(input: { key: string; to: string; doc: EmailDoc; a
   return attempt(row)
 }
 
+// An email that is only worth sending NOW — a verification code. One attempt,
+// never retried (a code that arrives twenty minutes late is useless), and its
+// body is not kept: the record says that it was sent, to whom and when, not
+// what the code was.
+export async function deliverNow(input: { key: string; to: string; doc: EmailDoc; affiliateId?: number | null }): Promise<"sent" | "failed" | "skipped"> {
+  if (!emailConfigured()) return "skipped"
+  const { html, text } = renderEmail(input.doc)
+  const sender = senderAddress(input.doc.sender)
+  let error: string | null = null
+  try {
+    await sendEmail({ to: input.to, from: sender, subject: input.doc.subject, text, html, idempotencyKey: input.key })
+  } catch (e) {
+    error = (e instanceof Error ? e.message : "The email provider couldn't be reached.").slice(0, 300)
+  }
+  try {
+    await db
+      .insert(emailEvents)
+      .values({ key: input.key.slice(0, 200), template: input.doc.template, sender, recipient: input.to, subject: input.doc.subject, html: "", text: "", status: error ? "failed" : "sent", attempts: 1, lastError: error, sentAt: error ? null : new Date(), affiliateId: input.affiliateId ?? null })
+      .onConflictDoNothing({ target: emailEvents.key })
+  } catch (e) {
+    // the record is a courtesy; the delivery already happened (or didn't)
+    console.error("[emails] couldn't record", input.key, e instanceof Error ? e.message : e)
+  }
+  return error ? "failed" : "sent"
+}
+
 // The worker's pass: deliveries whose retry time has come, and ones left
 // half-done. Each is claimed with a conditional update, so two workers never
 // send the same row.

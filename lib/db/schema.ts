@@ -1961,6 +1961,29 @@ export const affiliateFeedback = pgTable(
   (t) => [index("affiliate_feedback_created").on(t.createdAt), index("affiliate_feedback_affiliate").on(t.affiliateId, t.createdAt)]
 )
 
+// A verification code asked for before a payout is confirmed or a payout
+// method is added (lib/affiliates/action-codes.ts). An emailed code is kept
+// only as a keyed hash; for an authenticator code nothing is kept — the row
+// then only counts the wrong tries.
+export const affiliateActionCodes = pgTable(
+  "affiliate_action_codes",
+  {
+    id: serial("id").primaryKey(),
+    affiliateId: integer("affiliateId").notNull(),
+    purpose: text("purpose").notNull(), // payout | method
+    channel: text("channel").notNull(), // email | app
+    // What exactly the code is for ("12:10.00" = method 12, $10.00): a code
+    // asked for one payout can't confirm a different one.
+    subject: text("subject").notNull().default(""),
+    codeHash: text("codeHash"),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expiresAt").notNull(),
+    usedAt: timestamp("usedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("affiliate_action_codes_affiliate").on(t.affiliateId, t.purpose, t.createdAt)]
+)
+
 export const affiliateResources = pgTable("affiliate_resources", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),

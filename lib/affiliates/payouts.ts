@@ -491,6 +491,13 @@ export type PayoutRequest = { affiliateId: number; amount: number; methodId: num
 
 // A payout an affiliate asks for. The same idempotency key (one per opening of
 // the request dialog) returns the payout it already made.
+// Whether a request with this key already became a payout — a retry of one
+// that went through. Nothing new would be created, so nothing needs verifying.
+export async function requestAlreadyMade(affiliateId: number, idempotencyKey: string): Promise<boolean> {
+  const [row] = await db.select({ id: affiliatePayouts.id }).from(affiliatePayouts).where(eq(affiliatePayouts.idempotencyKey, `req:${affiliateId}:${idempotencyKey}`)).limit(1)
+  return !!row
+}
+
 export async function requestPayout(req: PayoutRequest): Promise<{ id: number; created: boolean; sending: boolean }> {
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(req.idempotencyKey)) throw new Error("That request couldn't be verified. Reload the page and try again.")
   const result = await createPayout({ mode: "manual", affiliateId: req.affiliateId, amount: req.amount, methodId: req.methodId, idempotencyKey: req.idempotencyKey, actor: req.actor ?? { type: "affiliate", id: null } })

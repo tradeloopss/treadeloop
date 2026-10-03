@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { ChevronRight, Loader2, Pencil, Plus, ShieldAlert, Star, Trash2, Wallet, Zap } from "lucide-react"
-import { toast } from "sonner"
-import { connectStripe, deletePayoutMethod, makeDefaultPayoutMethod, renamePayoutMethod, togglePayoutMethod } from "@/app/actions/affiliate"
+import { deletePayoutMethod, makeDefaultPayoutMethod, renamePayoutMethod, togglePayoutMethod } from "@/app/actions/affiliate"
 import { MethodMark, PayoutMethodDialog } from "@/components/affiliate/payout-method-dialog"
-import type { MethodDialogConfig, MethodView } from "@/components/affiliate/payouts"
+import { StripeCodePrompt, type MethodDialogConfig, type MethodView } from "@/components/affiliate/payouts"
 import { useAction } from "@/components/affiliate/use-action"
 import { cryptoSpec } from "@/lib/affiliates/crypto"
 import { describeMethod, fmtWhen, inHold } from "@/lib/affiliates/payout-form"
@@ -59,7 +58,7 @@ export function MethodManager({ methods, config, autoPayoutOn, openId = null }: 
   const [selected, setSelected] = useState<number | null>(openId)
   const [view, setView] = useState<View>("details")
   const [name, setName] = useState("")
-  const [redirecting, setRedirecting] = useState(false)
+  const [stripe, setStripe] = useState(false)
   const { pending, run } = useAction()
   const method = methods.find((m) => m.id === selected) ?? null
 
@@ -76,15 +75,6 @@ export function MethodManager({ methods, config, autoPayoutOn, openId = null }: 
     if (pending) return
     setSelected(null)
     setView("details")
-  }
-  async function verify() {
-    setRedirecting(true)
-    const res = await connectStripe()
-    if (res.ok) window.location.href = res.url
-    else {
-      setRedirecting(false)
-      toast.error(res.error)
-    }
   }
 
   const coin = cryptoSpec(method?.type)
@@ -133,6 +123,7 @@ export function MethodManager({ methods, config, autoPayoutOn, openId = null }: 
       </p>
 
       <PayoutMethodDialog open={adding} onOpenChange={setAdding} {...config} />
+      <StripeCodePrompt open={stripe} onOpenChange={setStripe} />
 
       <Sheet
         open={!!method}
@@ -208,8 +199,8 @@ export function MethodManager({ methods, config, autoPayoutOn, openId = null }: 
                 </button>
               )}
               {(method.status === "pending_verification" || method.status === "verification_required") && method.type === "stripe" && (
-                <button type="button" className={cn(sheetBtn, "v2-btn flex-none")} disabled={redirecting} onClick={verify}>
-                  {redirecting ? "Opening Stripe…" : "Verify with Stripe"}
+                <button type="button" className={cn(sheetBtn, "v2-btn flex-none")} onClick={() => setStripe(true)}>
+                  Verify with Stripe
                 </button>
               )}
               <button

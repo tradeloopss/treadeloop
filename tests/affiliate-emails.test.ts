@@ -29,7 +29,7 @@ test("affiliate emails come from affiliate@, payment emails from payments@ — n
 
   const bySender = (id: string) => emailPreviews(NOW).find((p) => p.id === id)!.doc.sender
   for (const id of ["application-received", "application-approved", "application-denied"]) assert.equal(bySender(id), "affiliate", id)
-  for (const id of ["payout-requested", "payout-approved", "payout-denied", "payout-sent", "crypto-payout-sent", "automatic-payout-sent", "payout-failed", "payout-method-changed", "wallet-changed"]) assert.equal(bySender(id), "payments", id)
+  for (const id of ["payout-requested", "payout-approved", "payout-denied", "payout-sent", "crypto-payout-sent", "automatic-payout-sent", "payout-failed", "payout-method-changed", "wallet-changed", "payout-code", "payout-method-code"]) assert.equal(bySender(id), "payments", id)
   for (const p of emailPreviews(NOW)) {
     const from = senderAddress(p.doc.sender)
     assert.ok(/<(affiliate|payments)@tradeloop\.pro>$/.test(from) && !/noreply|support@|admin@/.test(from), p.id)
@@ -38,7 +38,7 @@ test("affiliate emails come from affiliate@, payment emails from payments@ — n
 
 // ---------------------------------------------------------------- templates
 
-test("all twelve emails: the subject, a preview line, and nothing unfilled", () => {
+test("all fourteen emails: the subject, a preview line, and nothing unfilled", () => {
   const previews = emailPreviews(NOW)
   assert.deepEqual(
     previews.map((p) => [p.id, p.doc.subject]),
@@ -55,6 +55,8 @@ test("all twelve emails: the subject, a preview line, and nothing unfilled", () 
       ["payout-failed", "Action required — Your TradeLoop payout could not be completed"],
       ["payout-method-changed", "Your TradeLoop payout method was changed"],
       ["wallet-changed", "Your TradeLoop crypto payout wallet was changed"],
+      ["payout-code", "Your TradeLoop payout verification code"],
+      ["payout-method-code", "Your TradeLoop verification code"],
     ]
   )
   for (const p of previews) {

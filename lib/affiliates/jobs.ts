@@ -8,6 +8,7 @@ import { generalNotice } from "@/lib/emails/affiliate-emails"
 import { deliver, pruneEmailEvents, retryDueEmails } from "@/lib/emails/outbox"
 import { getWhopClient } from "@/lib/whop"
 import { money as whopMoney, whopAccountId } from "@/lib/admin/whop"
+import { pruneActionCodes } from "./action-codes"
 import { runAutoPayouts } from "./auto-payouts"
 import { handleAffiliateRefund, releaseHolds } from "./commissions"
 import { syncAllTierPerks } from "./perks"
@@ -131,5 +132,6 @@ export async function runDailyJob(now = new Date()) {
   await step("reports", () => sendMonthlyReports(now))
   await step("prune", () => pruneClicks())
   await step("pruneEmails", () => pruneEmailEvents())
+  await step("pruneCodes", () => pruneActionCodes())
   return out
 }

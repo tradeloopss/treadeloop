@@ -10,8 +10,17 @@ import { userHasPerk } from "@/lib/affiliates/perk-access"
 import { completeOnboarding, submitApplication, updateNotificationPrefs, updateProfile, type ApplicationInput } from "@/lib/affiliates/apply"
 import { claimAttribution } from "@/lib/affiliates/attribution"
 import { createCampaign, createLink, setCampaignStatus, setLinkStatus, updateCampaign, type CampaignInput } from "@/lib/affiliates/campaigns"
-import { addPayoutMethod, cancelOwnPayout, removePayoutMethod, renameMethod, requestPayout, setAutoPayout, setDefaultMethod, setMethodEnabled, startStripeOnboarding, type Actor } from "@/lib/affiliates/payouts"
-import { payoutsFor, referralDetail, type ReferralDetail } from "@/lib/affiliates/queries"
+import { addPayoutMethod, cancelOwnPayout, removePayoutMethod, renameMethod, requestAlreadyMade, requestPayout, setAutoPayout, setDefaultMethod, setMethodEnabled, startStripeOnboarding, type Actor } from "@/lib/affiliates/payouts"
+import { payoutMethodsFor, payoutsFor, referralDetail, type ReferralDetail } from "@/lib/affiliates/queries"
+import { CODE_TTL_MS, methodSubject, payoutSubject, type CodeChannel, type CodePurpose } from "@/lib/affiliates/action-code-rules"
+import { claimCode, discardCode, issueCode, releaseCode } from "@/lib/affiliates/action-codes"
+import { cryptoSpec } from "@/lib/affiliates/crypto"
+import { maskEmail } from "@/lib/affiliates/engine"
+import { getPayoutSettings } from "@/lib/affiliates/program"
+import { appChecker, codeChannel } from "@/lib/affiliates/two-factor"
+import { PAYOUT_METHOD_TYPES, methodLabel, money } from "@/lib/affiliates/types"
+import { verificationCode } from "@/lib/emails/affiliate-emails"
+import { deliverNow } from "@/lib/emails/outbox"
 import { ATTRIBUTION_COOKIE, attributionCookieDomain } from "@/lib/affiliates/token"
 
 // Everything an affiliate (or applicant) can do. The acting affiliate always
@@ -124,16 +133,85 @@ export async function loadReferral(publicId: string): Promise<{ ok: true; referr
 // Anything that changes where money goes, or moves it, is refused inside an
 // admin's "log in as user" session: support can look, not redirect a payout.
 
-async function payoutActor(): Promise<{ affiliateId: number; actor: Actor; affiliate: Awaited<ReturnType<typeof assertAffiliate>>["affiliate"] }> {
+type PayoutActor = { affiliateId: number; actor: Actor; affiliate: Awaited<ReturnType<typeof assertAffiliate>>["affiliate"]; user: Awaited<ReturnType<typeof assertAffiliate>>["user"] }
+
+async function payoutActor(): Promise<PayoutActor> {
   const { affiliate, user } = await assertAffiliate()
   if (user.impersonating) throw new Error("Payout settings can't be changed while logged in as another user.")
-  return { affiliateId: affiliate.id, actor: { type: "affiliate", id: user.id }, affiliate }
+  return { affiliateId: affiliate.id, actor: { type: "affiliate", id: user.id }, affiliate, user }
 }
 
-export async function savePayoutMethod(type: string, details: Record<string, unknown>): Promise<ActionResult> {
+// --- Verification codes ----------------------------------------------------------
+// Confirming a payout and adding a payout method each need a 6-digit code: the
+// authenticator app's when the account has two-factor sign-in on, otherwise one
+// emailed to the affiliate. It is checked HERE, in the action that does the
+// thing — a browser that skips the code screen is simply refused.
+
+export type CodeRequest = { purpose: "payout"; amount: number; methodId: number; resend?: boolean } | { purpose: "method"; type: string; resend?: boolean }
+export type SendCodeResult =
+  | { ok: true; required: false }
+  | { ok: true; required: true; channel: CodeChannel; sentTo: string | null; expiresInSeconds: number; resendInSeconds: number }
+  | { ok: false; error: string }
+
+// Starts the verification for one specific thing (this amount to this method;
+// adding this kind of method). Emails the code when the account has no
+// authenticator. Asking again for the same thing while its code is still good
+// sends nothing new — `resend` asks for a fresh one.
+export async function sendActionCode(input: CodeRequest): Promise<SendCodeResult> {
+  try {
+    const { affiliateId, affiliate, user } = await payoutActor()
+    if (!(await getPayoutSettings()).confirmCode) return { ok: true, required: false }
+    let subject: string
+    let facts: { purpose: CodePurpose; amount?: string; method: string; destination?: string }
+    if (input.purpose === "payout") {
+      const amount = Number(input.amount)
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an amount first.")
+      const method = (await payoutMethodsFor(affiliateId)).find((m) => m.id === Number(input.methodId))
+      if (!method) throw new Error("That payout method no longer exists.")
+      const coin = cryptoSpec(method.type)
+      subject = payoutSubject(method.id, amount)
+      facts = { purpose: "payout", amount: money(amount), method: coin ? `${coin.asset} · ${coin.networkLabel}` : methodLabel(method.type), destination: method.label }
+    } else {
+      const type = String(input.type)
+      if (!(PAYOUT_METHOD_TYPES as readonly string[]).includes(type)) throw new Error("That payout method isn't available.")
+      subject = methodSubject(type)
+      facts = { purpose: "method", method: cryptoSpec(type)?.title ?? methodLabel(type) }
+    }
+    const channel = await codeChannel(user)
+    const now = new Date()
+    const issued = await issueCode({ affiliateId, purpose: input.purpose, subject, channel, force: input.resend === true, now })
+    if (issued.code) {
+      const sent = await deliverNow({ key: `action_code:${issued.id}`, to: affiliate.email, affiliateId, doc: verificationCode({ firstName: affiliate.firstName, code: issued.code, minutes: CODE_TTL_MS / 60_000, ...facts }) })
+      if (sent !== "sent") {
+        await discardCode(issued.id)
+        return { ok: false, error: "We couldn't send your verification code right now. Please try again in a moment." }
+      }
+    }
+    const left = (until: Date) => Math.max(0, Math.ceil((until.getTime() - now.getTime()) / 1000))
+    return { ok: true, required: true, channel, sentTo: channel === "email" ? maskEmail(affiliate.email) : null, expiresInSeconds: left(issued.expiresAt), resendInSeconds: channel === "email" ? left(issued.resendAt) : 0 }
+  } catch (err) {
+    return { ok: false, error: describe(err) }
+  }
+}
+
+// Runs `act` only with a right code for exactly this thing. The code is spent
+// before `act` starts (one code, one use) and handed back if `act` is refused —
+// nothing happened, so the affiliate can put it right and confirm again.
+async function withCode<T>(who: PayoutActor, purpose: CodePurpose, subject: string, code: unknown, act: () => Promise<T>): Promise<T> {
+  if (!(await getPayoutSettings()).confirmCode) return act()
+  const claimed = await claimCode({ affiliateId: who.affiliateId, purpose, subject, code, checkApp: appChecker(who.user.id) })
+  try {
+    return await act()
+  } catch (err) {
+    await releaseCode(claimed.id).catch(() => null)
+    throw err
+  }
+}
+
+export async function savePayoutMethod(type: string, details: Record<string, unknown>, code?: string): Promise<ActionResult> {
   return run(async () => {
-    const { affiliateId, actor } = await payoutActor()
-    const { holdUntil } = await addPayoutMethod(affiliateId, String(type), details ?? {}, actor)
+    const who = await payoutActor()
+    const { holdUntil } = await withCode(who, "method", methodSubject(String(type)), code, () => addPayoutMethod(who.affiliateId, String(type), details ?? {}, who.actor))
     return holdUntil ? "Payout method added. For your security it can be paid to after a short hold." : "Payout method added."
   })
 }
@@ -171,12 +249,15 @@ export async function togglePayoutMethod(id: number, enabled: boolean): Promise<
 }
 
 // Stripe collects the bank details on its own pages; this returns the link there.
-export async function connectStripe(): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+// Whoever holds that link can enter the bank account the payouts will go to, so
+// it is behind the verification code like any other way of adding a method.
+export async function connectStripe(code?: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   try {
-    const { affiliate, actor } = await payoutActor()
+    const who = await payoutActor()
+    const { affiliate, actor } = who
     const base = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")
     if (!base.startsWith("https://")) throw new Error("Stripe onboarding needs the app's public https address to be configured.")
-    const url = await startStripeOnboarding({ id: affiliate.id, email: affiliate.email, country: affiliate.country }, `${base}/affiliate/payouts?stripe=return`, actor)
+    const url = await withCode(who, "method", methodSubject("stripe"), code, () => startStripeOnboarding({ id: affiliate.id, email: affiliate.email, country: affiliate.country }, `${base}/affiliate/payouts?stripe=return`, actor))
     revalidatePath("/affiliate", "layout")
     return { ok: true, url }
   } catch (err) {
@@ -202,10 +283,18 @@ export type RequestedPayout = { id: number; amount: number; fee: number; net: nu
 // with the same key returns the payout that was already created. The amount,
 // the fee, the eligibility and the destination are all decided on the server
 // (payouts.createPayout); nothing the browser says about them is trusted.
-export async function requestPayoutNow(input: { amount: number; methodId: number; key: string }): Promise<{ ok: true; payout: RequestedPayout } | { ok: false; error: string }> {
+// `code` is the verification code asked for exactly this amount to this method.
+export async function requestPayoutNow(input: { amount: number; methodId: number; key: string; code?: string }): Promise<{ ok: true; payout: RequestedPayout } | { ok: false; error: string }> {
   try {
-    const { affiliateId, actor } = await payoutActor()
-    const result = await requestPayout({ affiliateId, amount: Number(input.amount), methodId: Number(input.methodId), idempotencyKey: String(input.key), actor })
+    const who = await payoutActor()
+    const { affiliateId, actor } = who
+    const amount = Number(input.amount)
+    const methodId = Number(input.methodId)
+    const key = String(input.key)
+    const make = () => requestPayout({ affiliateId, amount, methodId, idempotencyKey: key, actor })
+    // A retry of a request that already went through creates nothing — it is
+    // answered with the payout that exists, and needs no code.
+    const result = (await requestAlreadyMade(affiliateId, key)) ? await make() : await withCode(who, "payout", payoutSubject(methodId, Number.isFinite(amount) ? amount : 0), input.code, make)
     const [p] = (await payoutsFor(affiliateId)).filter((row) => row.id === result.id)
     revalidatePath("/affiliate", "layout")
     if (!p) return { ok: false, error: "Your payout was requested, but it couldn't be shown. Refresh the page to see it." }

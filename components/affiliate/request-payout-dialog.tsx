@@ -12,6 +12,7 @@ import { cryptoSpec, formatAsset } from "@/lib/affiliates/crypto"
 import { DEFAULT_PAYOUT_SETTINGS, PAYOUT_STATUS_LABELS, quoteFee, type FeeRule, type PayoutStatus } from "@/lib/affiliates/payout-engine"
 import { cents, cleanAmount, describeMethod, fmtWhen, inHold, methodUnavailable, newKey, quickAmounts, readAmount, usable } from "@/lib/affiliates/payout-form"
 import { methodLabel, money } from "@/lib/affiliates/types"
+import { CodeField, useActionCode } from "./action-code"
 import { MethodMark, PayoutMethodDialog } from "./payout-method-dialog"
 import type { MethodDialogConfig, MethodView } from "./payouts"
 import { StatusBadge } from "./ui"
@@ -164,6 +165,9 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<RequestedPayout | null>(null)
   const [pending, start] = useTransition()
+  // After the form: the verification code, then the request is made.
+  const [verifying, setVerifying] = useState(false)
+  const codes = useActionCode()
 
   const live = methods.filter((m) => m.status !== "removed" && m.status !== "rejected")
   const ready = live.filter(usable)
@@ -201,6 +205,8 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
     setKey(newKey())
     setError(null)
     setDone(null)
+    setVerifying(false)
+    codes.reset()
     setOpen(true)
   }
   const onAmount = (text: string) => {
@@ -208,21 +214,45 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
     setTouched(true)
     setError(null)
   }
-  const submit = () => {
-    setTouched(true)
-    if (!canSubmit || !method || value == null) return
+  const send = (code: string | undefined) => {
+    if (!method || value == null) return
     setError(null)
     start(async () => {
       try {
-        const res = await requestPayoutNow({ amount: value, methodId: method.id, key })
+        const res = await requestPayoutNow({ amount: value, methodId: method.id, key, code })
         if (res.ok) {
           setDone(res.payout)
           router.refresh()
-        } else setError(res.error)
+        } else {
+          setError(res.error)
+          codes.setCode("")
+        }
       } catch {
         setError("We couldn't reach TradeLoop. Check your connection and try again — you won't be charged twice.")
       }
     })
+  }
+  const submit = async () => {
+    setTouched(true)
+    if (!canSubmit || !method || value == null) return
+    if (verifying) {
+      if (codes.satisfied) send(codes.value)
+      return
+    }
+    // The form is right: now the code, asked for exactly this amount to this method.
+    setError(null)
+    setVerifying(true)
+    const phase = await codes.request({ purpose: "payout", amount: value, methodId: method.id })
+    // verification switched off: the request goes straight through
+    if (phase === "off") {
+      setVerifying(false)
+      send(undefined)
+    }
+  }
+  const back = () => {
+    setVerifying(false)
+    setError(null)
+    codes.reset()
   }
   const addMethod = () => {
     setKnown(live.map((m) => m.id))
@@ -296,7 +326,34 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
                   </Callout>
                 )}
 
-                {blocked ? (
+                {verifying && method ? (
+                  <>
+                    <div className="rounded-xl border bg-muted/30">
+                      <p className="px-3.5 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">You are requesting</p>
+                      <dl className="px-3.5 pb-2 pt-1.5 text-sm">
+                        <div className="flex items-center justify-between gap-3 py-1.5">
+                          <dt className="text-muted-foreground">Amount</dt>
+                          <dd className="tabular-nums">{quote ? money(quote.amount) : "—"}</dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 py-1.5">
+                          <dt className="text-muted-foreground">{quote?.estimated ? "Estimated fee" : "Fee"}</dt>
+                          <dd className="tabular-nums">{quote ? (quote.fee > 0 ? `− ${money(quote.fee)}` : money(0)) : "—"}</dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 py-1.5">
+                          <dt className="text-muted-foreground">Send to</dt>
+                          <dd className="min-w-0 truncate text-end">
+                            {coin ? `${coin.asset} · ${coin.networkLabel}` : methodLabel(method.type)} · <span className="font-mono">{method.label}</span>
+                          </dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 border-t py-2">
+                          <dt className="font-semibold">You receive</dt>
+                          <dd className="font-semibold tabular-nums text-[var(--gain)]">{receive}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    <CodeField flow={codes} disabled={pending} onResend={() => value != null && void codes.request({ purpose: "payout", amount: value, methodId: method.id, resend: codes.phase === "ready" })} />
+                  </>
+                ) : blocked ? (
                   <Callout tone="warning" icon={ShieldCheck} title="Payouts temporarily unavailable">
                     {blocked}
                   </Callout>
@@ -441,13 +498,23 @@ export function RequestPayout({ available, pendingBalance = 0, min, max, methodM
               </div>
 
               <footer className="flex shrink-0 gap-2 border-t bg-muted/40 px-5 py-3.5 sm:justify-end sm:rounded-b-xl">
-                <Button type="button" variant="outline" size="lg" className="flex-1 sm:flex-none" onClick={() => setOpen(false)} disabled={pending}>
-                  Cancel
-                </Button>
-                <Button type="submit" size="lg" className="flex-[2] sm:min-w-44 sm:flex-none" disabled={!canSubmit} aria-busy={pending}>
+                {verifying ? (
+                  <Button type="button" variant="outline" size="lg" className="flex-1 sm:flex-none" onClick={back} disabled={pending}>
+                    Back
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" size="lg" className="flex-1 sm:flex-none" onClick={() => setOpen(false)} disabled={pending}>
+                    Cancel
+                  </Button>
+                )}
+                <Button type="submit" size="lg" className="flex-[2] sm:min-w-44 sm:flex-none" disabled={!canSubmit || (verifying && !codes.satisfied)} aria-busy={pending}>
                   {pending ? (
                     <>
                       <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Requesting…
+                    </>
+                  ) : verifying ? (
+                    <>
+                      <ShieldCheck className="size-4" aria-hidden /> Confirm payout
                     </>
                   ) : (
                     <>
