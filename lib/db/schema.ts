@@ -2022,3 +2022,200 @@ export const affiliateAnnouncementReads = pgTable(
   },
   (t) => [uniqueIndex("affiliate_announcement_reads_pair").on(t.announcementId, t.affiliateId)]
 )
+
+// --- Edge Lab and Psychology (beta) -------------------------------------------
+// Nothing here copies a trade: every table hangs off the existing `trades` row
+// by its id, or holds something the trader saved.
+
+// What a trader said about one trade: before it (the pre-trade check-in) and
+// after it (the post-trade review). One row per trade.
+export const tradePsychology = pgTable(
+  "trade_psychology",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    tradeId: integer("tradeId").notNull(),
+    emotionBefore: text("emotionBefore"),
+    confidenceBefore: integer("confidenceBefore"), // 1-10
+    focusBefore: integer("focusBefore"),
+    stressBefore: integer("stressBefore"),
+    reason: text("reason"), // why the trade was taken (valid_setup | fomo | revenge | ...)
+    planBefore: boolean("planBefore"), // "are you following your plan?" before the trade
+    emotionAfter: text("emotionAfter"),
+    planFollowed: boolean("planFollowed"),
+    interference: jsonb("interference").$type<string[]>().notNull().default([]), // moved_sl | moved_tp | closed_early | added | revenge
+    notes: text("notes"),
+    checkinId: integer("checkinId"),
+    reviewedAt: timestamp("reviewedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("trade_psychology_trade").on(t.tradeId), index("trade_psychology_user").on(t.userId)]
+)
+
+// A check-in: before a trade (linked to the trade once it exists), or the
+// day's morning / evening one.
+export const psychCheckins = pgTable(
+  "psych_checkins",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    kind: text("kind").notNull(), // pre_trade | morning | evening
+    day: text("day").notNull(), // YYYY-MM-DD in the trader's own timezone
+    emotion: text("emotion"),
+    confidence: integer("confidence"),
+    focus: integer("focus"),
+    stress: integer("stress"),
+    reason: text("reason"),
+    planFollowing: boolean("planFollowing"),
+    answers: jsonb("answers").$type<Record<string, string>>(),
+    tradeId: integer("tradeId"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("psych_checkins_user").on(t.userId, t.createdAt), index("psych_checkins_day").on(t.userId, t.kind, t.day)]
+)
+
+// An idea a trader wants tested, and what the test last said.
+export const edgeHypotheses = pgTable(
+  "edge_hypotheses",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    name: text("name").notNull(),
+    statement: text("statement"),
+    conditions: jsonb("conditions").$type<Record<string, string>>().notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("edge_hypotheses_user").on(t.userId, t.updatedAt)]
+)
+
+// An edge the trader is watching: its conditions, and how it looked when saved.
+export const edgeMonitors = pgTable(
+  "edge_monitors",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    name: text("name").notNull(),
+    conditions: jsonb("conditions").$type<Record<string, string>>().notNull(),
+    baseline: jsonb("baseline").$type<Record<string, unknown>>(),
+    playbookId: integer("playbookId"),
+    notifyInApp: boolean("notifyInApp").notNull().default(true),
+    notifyEmail: boolean("notifyEmail").notNull().default(false),
+    lastStatus: text("lastStatus"),
+    lastCheckedAt: timestamp("lastCheckedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("edge_monitors_user").on(t.userId, t.createdAt)]
+)
+
+export const edgeAlerts = pgTable(
+  "edge_alerts",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    monitorId: integer("monitorId"),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    dedupeKey: text("dedupeKey").notNull(),
+    readAt: timestamp("readAt"),
+    emailedAt: timestamp("emailedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("edge_alerts_dedupe").on(t.dedupeKey), index("edge_alerts_user").on(t.userId, t.createdAt)]
+)
+
+// A rule a trader set for themselves, from a leak or a behaviour pattern.
+export const tradingRules = pgTable(
+  "trading_rules",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    text: text("text").notNull(),
+    source: text("source").notNull().default("manual"), // manual | edge_leak | psych_pattern
+    conditions: jsonb("conditions").$type<Record<string, string>>(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("trading_rules_user").on(t.userId, t.createdAt)]
+)
+
+export const psychChallenges = pgTable(
+  "psych_challenges",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    key: text("key").notNull(),
+    days: integer("days").notNull().default(7),
+    status: text("status").notNull().default("active"), // active | ended
+    startedAt: timestamp("startedAt").notNull().defaultNow(),
+    endedAt: timestamp("endedAt"),
+  },
+  (t) => [index("psych_challenges_user").on(t.userId, t.startedAt)]
+)
+
+// Results of the heavier analyses, kept until the trader's trades change
+// (`fingerprint`), so a page load doesn't redo them.
+export const analyticsCache = pgTable(
+  "analytics_cache",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    key: text("key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    payload: jsonb("payload").notNull(),
+    computedAt: timestamp("computedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("analytics_cache_key").on(t.userId, t.key)]
+)
+
+export const featureFeedback = pgTable(
+  "feature_feedback",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    feature: text("feature").notNull(),
+    rating: text("rating"),
+    message: text("message"),
+    page: text("page"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("feature_feedback_created").on(t.createdAt)]
+)
+
+// What the market was doing on a day, per instrument, worked out from daily
+// price history. Shared by every trader of that instrument.
+export const marketRegimes = pgTable(
+  "market_regimes",
+  {
+    id: serial("id").primaryKey(),
+    symbol: text("symbol").notNull(), // the price feed's own symbol ("NQ=F")
+    day: text("day").notNull(), // YYYY-MM-DD (UTC)
+    trend: text("trend").notNull(), // bullish | bearish | ranging
+    volatility: text("volatility").notNull(), // high | normal | low
+    range: text("range").notNull(), // expansion | normal | compression
+    computedAt: timestamp("computedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("market_regimes_symbol_day").on(t.symbol, t.day)]
+)
+
+// How far a trade went for and against the trader while it was open, measured
+// from price history. One row per trade; `status` says why there is no figure.
+export const tradeExcursions = pgTable(
+  "trade_excursions",
+  {
+    tradeId: integer("tradeId").primaryKey(),
+    userId: text("userId").notNull(),
+    mae: numeric("mae"), // price units, always >= 0
+    mfe: numeric("mfe"),
+    maeR: numeric("maeR"), // in units of the trade's initial risk, when it had a stop
+    mfeR: numeric("mfeR"),
+    timeframe: text("timeframe"),
+    status: text("status").notNull().default("ok"), // ok | no_data | no_symbol | too_short
+    computedAt: timestamp("computedAt").notNull().defaultNow(),
+  },
+  (t) => [index("trade_excursions_user").on(t.userId)]
+)

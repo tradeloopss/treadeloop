@@ -4,6 +4,7 @@ import type { AdminContext } from "@/lib/admin/guard"
 
 // Human-readable names for the audit log page.
 export const ACTION_LABELS: Record<string, string> = {
+  "feature.release": "Changed a feature release stage",
   "user.suspend": "Suspended user",
   "user.unsuspend": "Unsuspended user",
   "user.revoke_sessions": "Signed user out everywhere",

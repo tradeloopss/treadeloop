@@ -21,6 +21,7 @@ export type NavIcon =
   | "cases"
   | "affiliates"
   | "settings"
+  | "features"
 
 export type NavLink = { href: string; label: string; icon: NavIcon; needs?: Permissions }
 
@@ -41,6 +42,7 @@ const L = {
   content: { href: "/admin/templates", label: "Content", icon: "content", needs: { announcements: ["manage"] } },
   audit: { href: "/admin/audit", label: "Audit log", icon: "audit", needs: { audit: ["view"] } },
   team: { href: "/admin/team", label: "Team & roles", icon: "team", needs: { team: ["manage"] } },
+  features: { href: "/admin/features", label: "Feature releases", icon: "features", needs: { team: ["manage"] } },
   // Every admin's own preferences: no permission beyond being staff.
   settings: { href: "/admin/settings", label: "Settings", icon: "settings" },
 } satisfies Record<string, NavLink>
@@ -63,6 +65,7 @@ export const LEGACY_SECTIONS: NavLink[] = [
   L.content,
   L.audit,
   L.team,
+  L.features,
 ]
 
 // The command center's sidebar: the same sections, grouped, plus Settings.
@@ -73,7 +76,7 @@ export const NAV_GROUPS: { label: string; items: NavLink[] }[] = [
   { label: "Trading", items: [L.brokers, L.propRules, L.imports] },
   { label: "Support", items: [L.support] },
   { label: "Content", items: [L.announcements, L.content] },
-  { label: "System", items: [L.audit, L.system, L.settings] },
+  { label: "System", items: [L.audit, L.system, L.features, L.settings] },
 ]
 
 // The phone's bottom bar: shortcuts only — the full menu is one tap away ("More").

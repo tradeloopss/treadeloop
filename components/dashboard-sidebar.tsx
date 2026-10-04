@@ -42,6 +42,9 @@ import {
   CreditCard,
   Gift,
   Handshake,
+  FlaskConical,
+  Brain,
+  MoreHorizontal,
 } from "lucide-react"
 import { BrandMark } from "@/components/brand-mark"
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -68,6 +71,15 @@ const links: NavLink[] = [
   { href: "/cases", label: "Cases Drop", icon: Gift },
 ]
 
+// Edge Lab and Psychology: shown only to who may use them (lib/features). The
+// stage is what the badge says — "Admin" while only the team sees the feature,
+// "Beta" once it is open to everyone.
+type InsightStage = "admin" | "beta"
+const INSIGHTS = [
+  { key: "edge_lab", href: "/edge-lab", label: "Edge Lab", short: "Edge", icon: FlaskConical },
+  { key: "psychology", href: "/psychology", label: "Psychology", short: "Psychology", icon: Brain },
+] as const
+
 const COLLAPSED_KEY = "sidebarCollapsed"
 
 export function DashboardSidebar({
@@ -76,6 +88,7 @@ export function DashboardSidebar({
   isAdmin = false,
   isPro = false,
   hasBeta = false,
+  insights,
 }: {
   userName: string
   userImage?: string | null
@@ -83,6 +96,8 @@ export function DashboardSidebar({
   isPro?: boolean
   // can use features still in beta (lib/beta.ts): no "Soon" badge on them
   hasBeta?: boolean
+  // the insight features this user may open, with their release stage
+  insights?: { edge_lab?: InsightStage; psychology?: InsightStage }
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -136,6 +151,9 @@ export function DashboardSidebar({
       return next
     })
   }
+
+  const insightLinks = INSIGHTS.filter((i) => insights?.[i.key])
+  const isOn = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
   async function handleSignOut() {
     await authClient.signOut()
@@ -242,6 +260,46 @@ export function DashboardSidebar({
               </Tooltip>
             )
           })}
+
+          {insightLinks.length > 0 && (
+            <>
+              <div className="my-1.5 border-t" />
+              <p className={cn("px-3 pt-1 pb-0.5 text-[10px] font-semibold tracking-wider text-muted-foreground/70 uppercase", collapsed && "md:hidden")}>{t("Insights")}</p>
+              {insightLinks.map((link) => {
+                const Icon = link.icon
+                const stage = insights![link.key]!
+                return (
+                  <Tooltip key={link.href}>
+                    <TooltipTrigger
+                      render={
+                        <Link
+                          href={link.href}
+                          className={cn(
+                            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                            collapsed && "md:justify-center md:px-0",
+                            isOn(link.href) ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0" />
+                          <span className={cn(collapsed && "md:hidden")}>{t(link.label)}</span>
+                          <span
+                            className={cn(
+                              "ml-auto rounded-full border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide uppercase",
+                              stage === "beta" ? "border-primary/40 bg-primary/10 text-primary" : "text-muted-foreground",
+                              collapsed && "md:hidden",
+                            )}
+                          >
+                            {stage === "beta" ? t("Beta") : t("Admin")}
+                          </span>
+                        </Link>
+                      }
+                    />
+                    {collapsed && <TooltipContent side="inline-end">{t(link.label)}</TooltipContent>}
+                  </Tooltip>
+                )
+              })}
+            </>
+          )}
 
           {/* Backtesting sits on its own, apart from the live-trading tabs —
               it's a separate mode with its own sub-navigation. Admin-only for
@@ -412,6 +470,27 @@ export function DashboardSidebar({
           </DropdownMenu>
         </div>
       </aside>
+
+      {/* The phone's bottom bar, for users who have the insight features: the
+          four places they move between, and the full menu one tap away. */}
+      {insightLinks.length > 0 && (
+        <nav aria-label={t("Quick navigation")} className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-sidebar pb-[env(safe-area-inset-bottom)] text-sidebar-foreground md:hidden">
+          {[{ href: "/dashboard", short: "Overview", icon: LayoutDashboard }, { href: "/trades", short: "Trades", icon: ListChecks }, ...insightLinks].map((link) => {
+            const Icon = link.icon
+            const on = isOn(link.href)
+            return (
+              <Link key={link.href} href={link.href} aria-current={on ? "page" : undefined} className={cn("flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium", on ? "text-primary" : "text-muted-foreground")}>
+                <Icon className="size-5 shrink-0" />
+                <span className="max-w-full truncate">{t(link.short)}</span>
+              </Link>
+            )
+          })}
+          <button type="button" onClick={() => setOpen(true)} className="flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium text-muted-foreground">
+            <MoreHorizontal className="size-5 shrink-0" />
+            <span>{t("More")}</span>
+          </button>
+        </nav>
+      )}
     </TooltipProvider>
   )
 }

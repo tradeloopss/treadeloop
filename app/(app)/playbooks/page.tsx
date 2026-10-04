@@ -3,6 +3,9 @@ import { getTrades } from "@/app/actions/trades"
 import { PageHeader } from "@/components/page-header"
 import { PlaybookManager, type PlaybookCard, type SharedPlaybookCard } from "@/components/playbook-manager"
 import { getT } from "@/lib/i18n/server"
+import { featureAccess } from "@/lib/features/server"
+import { edgeForPlaybooks } from "@/lib/edge/server"
+import { conditionsParam } from "@/lib/edge/core"
 
 export default async function PlaybooksPage() {
   const t = await getT()
@@ -12,6 +15,11 @@ export default async function PlaybooksPage() {
     getPlaybookSharesForOwner(),
     getSharedWithMePlaybooks(),
   ])
+
+  // Edge Lab, for traders who have it: a playbook made from an edge opens that
+  // edge; any other opens the trades logged under it.
+  const access = await featureAccess()
+  const edges = access.can.edge_lab && access.userId ? await edgeForPlaybooks(access.userId).catch(() => new Map()) : null
 
   const cards: PlaybookCard[] = playbooks.map((p) => {
     const linked = trades.filter((t) => t.playbookId === p.id && t.status === "closed")
@@ -26,6 +34,7 @@ export default async function PlaybooksPage() {
       netPnl,
       winRate: linked.length ? (wins / linked.length) * 100 : 0,
       shareToken: p.shareToken,
+      edgeHref: edges ? `/edge-lab?c=${encodeURIComponent(conditionsParam(edges.get(p.id)?.conditions ?? { strategy: p.name }))}` : null,
       sharedWith: shares.filter((s) => s.playbookId === p.id),
     }
   })

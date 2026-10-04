@@ -13,11 +13,13 @@ import { BiggestLossAnalysis } from "@/components/biggest-loss-analysis"
 import { AccountCustomizer } from "@/components/account-customizer"
 import { recordRequestTiming } from "@/lib/telemetry"
 import { getT } from "@/lib/i18n/server"
+import { featureAccess } from "@/lib/features/server"
 
 export default async function TradesPage() {
   const startedAt = Date.now()
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
+  const access = await featureAccess()
   const [rows, accounts, activeAccountIds, playbooks, lockedAccountIds] = await Promise.all([
     getTrades(),
     getAccounts(),
@@ -100,7 +102,7 @@ export default async function TradesPage() {
 
         {lossAnalysis && <BiggestLossAnalysis result={lossAnalysis} />}
 
-        <TradesTable trades={trades} traderName={session?.user.name} traderImage={session?.user.image} />
+        <TradesTable trades={trades} traderName={session?.user.name} traderImage={session?.user.image} insights={access.can.edge_lab || access.can.psychology ? { edge: access.can.edge_lab, psychology: access.can.psychology } : undefined} />
       </div>
     </div>
   )

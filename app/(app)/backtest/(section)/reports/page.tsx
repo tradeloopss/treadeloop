@@ -3,6 +3,8 @@ import { getBetaUser } from "@/lib/beta"
 import { getBacktestDashboardData } from "@/app/actions/backtest"
 import { Card } from "@/components/ui/card"
 import { getT } from "@/lib/i18n/server"
+import Link from "next/link"
+import { featureAccess } from "@/lib/features/server"
 
 const usd = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n)
 const pf = (n: number) => (n === Infinity ? "∞" : n.toFixed(2))
@@ -11,6 +13,8 @@ export default async function BacktestReportsPage() {
   if (!(await getBetaUser())) notFound()
   const t = await getT()
   const d = await getBacktestDashboardData()
+  // Edge Lab, for traders who have it: the same analysis on backtest trades.
+  const edgeLab = (await featureAccess()).can.edge_lab
 
   const metrics: { label: string; value: string }[] = [
     { label: t("Net P&L"), value: usd(d.netPnl) },
@@ -33,6 +37,22 @@ export default async function BacktestReportsPage() {
         <Card className="mx-auto max-w-md p-8 text-center text-sm text-muted-foreground">{t("No backtest data yet — run a session to see reports.")}</Card>
       ) : (
         <>
+          {edgeLab && (
+            <Card className="flex flex-row flex-wrap items-center justify-between gap-3 p-4">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold">{t("Compare with your live edge")}</h2>
+                <p className="text-sm text-muted-foreground">{t("Edge Lab runs the same analysis on your backtest trades, on their own or next to your live ones.")}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link href="/edge-lab?source=backtest" className="inline-flex h-8 items-center rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
+                  {t("Backtests in Edge Lab")}
+                </Link>
+                <Link href="/edge-lab?source=all" className="inline-flex h-8 items-center rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
+                  {t("Live and backtests together")}
+                </Link>
+              </div>
+            </Card>
+          )}
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-semibold">{t("Summary")}</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

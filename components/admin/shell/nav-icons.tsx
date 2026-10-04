@@ -1,4 +1,4 @@
-import { Activity, BookOpen, CreditCard, Database, FileUp, Gauge, Gift, Handshake, LifeBuoy, Lock, Megaphone, PlugZap, ScrollText, Settings, ShieldCheck, SlidersHorizontal, Users, type LucideIcon } from "lucide-react"
+import { Activity, BookOpen, CreditCard, Database, FileUp, FlaskConical, Gauge, Gift, Handshake, LifeBuoy, Lock, Megaphone, PlugZap, ScrollText, Settings, ShieldCheck, SlidersHorizontal, Users, type LucideIcon } from "lucide-react"
 import type { NavIcon } from "@/lib/admin/nav"
 
 // One icon per admin section, shared by both dashboards.
@@ -20,4 +20,5 @@ export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
   cases: Gift,
   affiliates: Handshake,
   settings: Settings,
+  features: FlaskConical,
 }

@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import type React from "react"
 import { Fragment, useMemo, useState, useTransition } from "react"
 import { deleteTrade } from "@/app/actions/trades"
@@ -16,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Trash2, Search, NotebookPen, ShieldCheck, CandlestickChart, Share2 } from "lucide-react"
+import { Trash2, Search, NotebookPen, ShieldCheck, CandlestickChart, Share2, Brain, FlaskConical } from "lucide-react"
 import { toast } from "sonner"
 import { TradeNotes } from "@/components/trade-notes"
 import { TradeChartDialog } from "@/components/trade-chart-dialog"
@@ -54,10 +56,13 @@ export function TradesTable({
   trades,
   traderName,
   traderImage,
+  insights,
 }: {
   trades: TradeRow[]
   traderName?: string
   traderImage?: string | null
+  // Edge Lab / Psychology links on each trade, for traders who have them
+  insights?: { edge: boolean; psychology: boolean }
 }) {
   const t = useT()
   const dateLocale = useIntlLocale()
@@ -244,6 +249,16 @@ export function TradesTable({
                         >
                           <CandlestickChart className="size-4" />
                         </Button>
+                        {insights?.psychology && (
+                          <Link href={`/psychology?trade=${row.id}`} aria-label={t("Psychology of {symbol} trade", { symbol: row.symbol })} title={t("View psychology")} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                            <Brain className="size-4" />
+                          </Link>
+                        )}
+                        {insights?.edge && row.status === "closed" && (
+                          <Link href={`/edge-lab?like=${row.id}`} aria-label={t("Edge and similar trades for {symbol} trade", { symbol: row.symbol })} title={t("See edge and compare similar trades")} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                            <FlaskConical className="size-4" />
+                          </Link>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"

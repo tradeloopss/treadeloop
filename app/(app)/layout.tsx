@@ -19,6 +19,7 @@ import { recordRequestTiming } from "@/lib/telemetry"
 import { AffiliateClaim } from "@/components/affiliate/tracker"
 import { userHasPerk } from "@/lib/affiliates/perk-access"
 import { ATTRIBUTION_COOKIE, attributionSecret, claimable } from "@/lib/affiliates/token"
+import { featureAccess } from "@/lib/features/server"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const startedAt = Date.now()
@@ -32,7 +33,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // they're subscribing to. The blurred layer is inert — aria-hidden and
   // pointer-events-none — so nothing behind the paywall is clickable or
   // reachable by keyboard.
-  const [plan, hasBeta, , live, settingsRow] = await Promise.all([
+  const [plan, hasBeta, , live, settingsRow, features] = await Promise.all([
     getUserPlan(session.user.id),
     // Features still in beta are open to affiliates whose tier includes them.
     userHasPerk(session.user.id, "beta"),
@@ -51,11 +52,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .where(eq(userSettings.userId, session.user.id))
       .limit(1)
       .catch(() => [] as { theme: unknown }[]),
+    // Edge Lab and Psychology: who may see them is set in the admin panel.
+    featureAccess(),
   ])
   const savedTheme = (settingsRow[0]?.theme ?? null) as { color?: string; win?: string; loss?: string; breakeven?: string } | null
   const themeColors: AppliedColors = savedTheme
     ? { color: savedTheme.color, win: savedTheme.win, loss: savedTheme.loss, breakeven: savedTheme.breakeven }
     : null
+  // Someone logged in as a user sees what that user sees: featureAccess gives
+  // an impersonating admin no admin rights.
+  const insights = { edge_lab: features.can.edge_lab ? features.releases.edge_lab : undefined, psychology: features.can.psychology ? features.releases.psychology : undefined }
+  const bottomBar = !!(insights.edge_lab || insights.psychology)
   const locked = plan === null
   // Only matters for the paywall: whether to offer the free trial or (once
   // they've had it — by account, email, or IP) a plan that starts today.
@@ -81,8 +88,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           aria-hidden={locked || undefined}
           inert={locked || undefined}
         >
-          <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} isPro={plan === "pro"} hasBeta={hasBeta} />
-          <main className="flex-1 overflow-y-auto">
+          <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} isPro={plan === "pro"} hasBeta={hasBeta} insights={insights} />
+          <main className={bottomBar ? "flex-1 overflow-y-auto pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" : "flex-1 overflow-y-auto"}>
             <AnnouncementBanners items={live} />
             {children}
           </main>

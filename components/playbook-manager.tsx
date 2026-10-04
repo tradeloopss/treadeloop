@@ -32,6 +32,7 @@ import { SharePlaybookDialog, type SharedPerson } from "@/components/share-playb
 import { Plus, MoreHorizontal, Search, CheckCircle2, Copy } from "lucide-react"
 import { toast } from "sonner"
 import { useT } from "@/components/locale-provider"
+import Link from "next/link"
 
 export interface PlaybookCard {
   id: number
@@ -43,6 +44,8 @@ export interface PlaybookCard {
   winRate: number
   shareToken: string | null
   sharedWith: SharedPerson[]
+  // where Edge Lab shows this playbook, for traders who have it
+  edgeHref?: string | null
 }
 
 export interface SharedPlaybookCard {
@@ -248,6 +251,7 @@ export function PlaybookManager({
                             }
                           />
                           <DropdownMenuContent align="end">
+                            {p.edgeHref && <DropdownMenuItem render={<Link href={p.edgeHref} />}>{t("View edge")}</DropdownMenuItem>}
                             <DropdownMenuItem onClick={() => setShareTarget(p)}>{t("Share")}</DropdownMenuItem>
                             <DropdownMenuItem variant="destructive" onClick={() => onDelete(p.id)}>
                               {t("Delete")}
