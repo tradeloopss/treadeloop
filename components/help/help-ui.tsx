@@ -1,4 +1,4 @@
-import { Rocket, Plug, NotebookPen, Activity, ShieldCheck, CreditCard, HelpCircle, Info, TriangleAlert, type LucideIcon } from "lucide-react"
+import { Brain, Rocket, Plug, NotebookPen, Activity, ShieldCheck, CreditCard, HelpCircle, Info, TriangleAlert, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Block } from "@/lib/help/content"
 import { HelpFigure } from "@/components/help/help-figures"
@@ -11,6 +11,7 @@ const ICONS: Record<string, LucideIcon> = {
   shield: ShieldCheck,
   card: CreditCard,
   help: HelpCircle,
+  brain: Brain,
 }
 
 export function HelpIcon({ name, className }: { name: string; className?: string }) {

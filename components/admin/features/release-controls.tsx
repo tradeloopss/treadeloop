@@ -7,8 +7,8 @@ import { setFeatureStage } from "@/app/actions/features"
 import { STAGES, STAGE_LABELS, type Stage } from "@/lib/features/release"
 
 const NOTES: Record<Stage, string> = {
-  admin: "Only the team sees it. Everyone else gets a not-found page and no menu entry.",
-  beta: "Every signed-in user sees it in the menu, marked Beta.",
+  admin: "Only the team can open it. Everyone else sees it in the menu as Coming soon, and can't open it.",
+  beta: "Every signed-in user can open it from the menu, marked Beta.",
 }
 
 // The release stage of one feature: two choices, the current one marked.

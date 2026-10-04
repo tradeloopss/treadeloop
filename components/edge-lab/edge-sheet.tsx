@@ -216,7 +216,7 @@ function Body({ detail: d }: { detail: Detail }) {
           />
         ) : (
           <p className="text-sm text-muted-foreground">
-            Not measured yet. Price history has to be analysed first — do it from the <span className="font-medium text-foreground">Regimes</span> tab. Trades without a stop can't be measured in R.
+            Not measured yet. Price history has to be analysed first — do it from <span className="font-medium text-foreground">Edge Discovery → Regimes</span>. Trades without a stop can't be measured in R.
           </p>
         )}
       </div>
@@ -265,13 +265,13 @@ function Actions({ conditions, kind, detail, query }: { conditions: Conditions; 
           disabled={pending || detail.stats.n < MIN_PATTERN}
           title={detail.stats.n < MIN_PATTERN ? `Needs ${MIN_PATTERN} trades` : undefined}
           className={linkBtnPrimary}
-          onClick={() => run(() => promoteEdge({ conditions }, query), () => toast.success("Added to your playbooks, and now watched in Monitor."))}
+          onClick={() => run(() => promoteEdge({ conditions }, query), () => toast.success("Added to your playbooks, and now watched in Edge Journal → Monitor."))}
         >
           <BookOpen className="size-3.5" />
           Add to Playbook
         </button>
       )}
-      <button type="button" disabled={pending} className={linkBtn} onClick={() => run(() => watchEdge({ conditions }, query), () => toast.success("Watching it. See the Monitor tab."))}>
+      <button type="button" disabled={pending} className={linkBtn} onClick={() => run(() => watchEdge({ conditions }, query), () => toast.success("Watching it. See Edge Journal → Monitor."))}>
         <Eye className="size-3.5" />
         Watch
       </button>

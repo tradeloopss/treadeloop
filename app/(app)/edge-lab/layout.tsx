@@ -19,13 +19,14 @@ export default async function EdgeLabLayout({ children }: { children: React.Reac
       description="Find what actually makes you money, test it, and watch whether it keeps working."
       disclaimers={["history"]}
       tabs={[
-        { href: "/edge-lab", label: "Overview" },
-        { href: "/edge-lab/discover", label: "Discover" },
-        { href: "/edge-lab/setups", label: "Setups" },
-        { href: "/edge-lab/regimes", label: "Regimes" },
-        { href: "/edge-lab/hypotheses", label: "Hypotheses" },
-        { href: "/edge-lab/robustness", label: "Robustness" },
-        { href: "/edge-lab/monitor", label: "Monitor", badge: unread },
+        // grouped the way the main menu lists them (lib/navigation.ts)
+        { href: "/edge-lab", label: "Overview", group: "overview" },
+        { href: "/edge-lab/discover", label: "Discover", group: "discovery" },
+        { href: "/edge-lab/regimes", label: "Regimes", group: "discovery" },
+        { href: "/edge-lab/setups", label: "Setups", group: "journal" },
+        { href: "/edge-lab/monitor", label: "Monitor", badge: unread, group: "journal" },
+        { href: "/edge-lab/hypotheses", label: "Hypotheses", group: "tests" },
+        { href: "/edge-lab/robustness", label: "Robustness", group: "tests" },
       ]}
     >
       {children}

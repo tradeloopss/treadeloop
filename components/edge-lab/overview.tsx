@@ -147,7 +147,7 @@ export function MatrixView({ initial }: { initial: Matrix }) {
       </div>
       {m.rows.length === 0 || m.cols.length === 0 ? (
         <p className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">
-          Nothing to show for {dimLabel(m.rowDim).toLowerCase()} against {dimLabel(m.colDim).toLowerCase()} yet. {["trend", "volatility"].includes(m.rowDim) || ["trend", "volatility"].includes(m.colDim) ? "Market regimes appear after price history is analysed in the Regimes tab." : ["emotion", "plan"].includes(m.rowDim) || ["emotion", "plan"].includes(m.colDim) ? "It fills in as you check in before trades." : ""}
+          Nothing to show for {dimLabel(m.rowDim).toLowerCase()} against {dimLabel(m.colDim).toLowerCase()} yet. {["trend", "volatility"].includes(m.rowDim) || ["trend", "volatility"].includes(m.colDim) ? "Market regimes appear after price history is analysed in Edge Discovery → Regimes." : ["emotion", "plan"].includes(m.rowDim) || ["emotion", "plan"].includes(m.colDim) ? "It fills in as you check in before trades." : ""}
         </p>
       ) : (
         <div className="overflow-x-auto">

@@ -5,7 +5,7 @@ import { Disclaimer, StageBadge } from "./ui"
 
 // The shell of an insight feature: its name, the stage it is released at, the
 // feedback button, the sub-pages and the standing disclaimers.
-export function InsightsFrame({ feature, name, stage, description, tabs, disclaimers, children }: { feature: string; name: string; stage: "admin" | "beta"; description: string; tabs: { href: string; label: string; badge?: number }[]; disclaimers: ("history" | "ai" | "behaviour" | "simulation")[]; children: React.ReactNode }) {
+export function InsightsFrame({ feature, name, stage, description, tabs, disclaimers, children }: { feature: string; name: string; stage: "admin" | "beta"; description: string; tabs: { href: string; label: string; badge?: number; group?: string }[]; disclaimers: ("history" | "ai" | "behaviour" | "simulation")[]; children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
       <header className="border-b">
@@ -22,7 +22,7 @@ export function InsightsFrame({ feature, name, stage, description, tabs, disclai
           </div>
         </div>
         {/* the tabs read the address, which is only known in the browser */}
-        <Suspense fallback={<div className="h-[42px]" />}>
+        <Suspense fallback={null}>
           <InsightTabs tabs={tabs} />
         </Suspense>
       </header>

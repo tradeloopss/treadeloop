@@ -69,15 +69,21 @@ export function Sheet({ open, onClose, title, description, children, footer }: {
   )
 }
 
-// The sub-pages of a feature. The filters travel with the link.
-export function InsightTabs({ tabs }: { tabs: { href: string; label: string; badge?: number }[] }) {
+// The pages that sit under one entry of the main menu (Edge Discovery holds
+// Discover and Regimes, say): tabs with the same `group`. An entry with a
+// single page shows no tabs. The filters travel with the link.
+export function InsightTabs({ tabs }: { tabs: { href: string; label: string; badge?: number; group?: string }[] }) {
   const pathname = usePathname()
   const query = useFilterQuery()
   const root = tabs[0]?.href
+  const isActive = (href: string) => (href === root ? pathname === href : pathname === href || pathname.startsWith(`${href}/`))
+  const here = tabs.find((tab) => isActive(tab.href))
+  const visible = tabs.filter((tab) => tab.group === here?.group)
+  if (!here || visible.length < 2) return null
   return (
     <nav aria-label="Sections" className="-mb-px flex gap-1 overflow-x-auto px-4 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {tabs.map((tab) => {
-        const active = tab.href === root ? pathname === tab.href : pathname === tab.href || pathname.startsWith(`${tab.href}/`)
+      {visible.map((tab) => {
+        const active = isActive(tab.href)
         return (
           <Link
             key={tab.href}

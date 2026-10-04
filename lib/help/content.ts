@@ -5,6 +5,7 @@
 
 import { appHref } from "@/lib/urls"
 import type { FigureKey } from "@/components/help/help-figures"
+import { EDGE_LAB_HELP } from "./edge-lab"
 
 export type Block =
   | { t: "p"; text: string }
@@ -211,7 +212,7 @@ export const HELP: Category[] = [
         title: "Manage your live positions",
         summary: "See every open position and act on it in a couple of taps.",
         body: [
-          { t: "p", text: "Trades Manager (a Pro feature, under the Calendar area) shows your live open positions with real-time P&L. Pick an account at the top to see just that account's positions and history." },
+          { t: "p", text: "Trade Manager (a Pro feature, in the Account Manager area of the menu) shows your live open positions with real-time P&L. Pick an account at the top to see just that account's positions and history." },
           { t: "list", items: [
             "Edit Stop Loss / Take Profit on any position.",
             "Close a position fully, or partial-close part of it.",
@@ -253,6 +254,7 @@ export const HELP: Category[] = [
       },
     ],
   },
+  EDGE_LAB_HELP,
   {
     slug: "billing",
     title: "Billing & plans",
