@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { listedContracts, pointValueAt, relatedSymbol, samePriceScale, searchContracts, specFor } from "@/lib/copy/contracts"
+import { baseSymbol, listedContracts, pointValueAt, relatedSymbol, resolveFollowerSymbol, sameInstrument, samePriceScale, searchContracts, specFor } from "@/lib/copy/contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, activationProblems, calculateFollowerOrder, calculateRisk, connectionHealth, followerOrderId, masterOrderId, normalizeQuantity, planLeaderEvents, proportionalClose, riskStatus, syncSummary, translatePrice, validateCopyRules, type AccountState, type FollowerConfig, type LeaderOrder, type LivePosition } from "@/lib/copy/engine"
 
 // Copy Trading's engine. The promise these tests hold it to: the quantity a
@@ -245,4 +245,47 @@ test("a group can't be switched on until it is complete", () => {
   assert.deepEqual(activationProblems({ ...ok, contracts: 0, symbolScope: "all" }), [])
   assert.match(activationProblems({ ...ok, followers: [{ name: "Apex #01", config: config({ sizingMode: "percentage", percentage: 0 }), connected: true }] })[0], /Apex #01/)
   assert.equal(activationProblems({ ...ok, followers: [{ name: "A", config: config(), connected: false }] }).length, 1)
+})
+
+test("the same instrument under two brokers' names", () => {
+  // JustMarkets, Exness and a plain feed all mean gold
+  for (const s of ["XAUUSD.m", "XAUUSDm", "XAUUSD", "XAUUSD-ECN", "xauusd"]) assert.equal(baseSymbol(s), "XAUUSD", s)
+  assert.equal(baseSymbol("BTCUSDm"), "BTCUSD")
+  assert.equal(baseSymbol("BTCUSD.m"), "BTCUSD")
+  assert.equal(baseSymbol("USTECm"), "USTEC")
+  assert.equal(baseSymbol("US30.cash"), "US30")
+  assert.equal(baseSymbol("BTC-USD"), "BTC-USD") // a pair written with a dash is not a suffix
+  assert.equal(baseSymbol("btcusd"), "BTCUSD") // all lower case: nothing is cut off
+  // a future is its exact contract: the next expiry is a different instrument
+  assert.equal(baseSymbol("nqz6"), "NQZ6")
+  assert.equal(sameInstrument("NQZ6", "NQH7"), false)
+  assert.equal(sameInstrument("XAUUSD.m", "XAUUSDm"), true)
+  assert.equal(sameInstrument("XAUUSD.m", "XAGUSD.m"), false)
+  // a spec keeps the broker's own spelling: MetaTrader symbols are case-sensitive
+  assert.equal(specFor("XAUUSDm").symbol, "XAUUSDm")
+  assert.equal(specFor("XAUUSDm").pointValue, 100)
+
+  // the group imported "XAUUSD"; the leader's broker calls it "XAUUSD.m": it is still one of the group's contracts
+  const ctx = { imported: ["XAUUSD", "BTCUSD"], minutes: 600, weekday: 2 }
+  assert.equal(validateCopyRules(DEFAULT_RULES, "open", { side: "short", orderType: "market", symbol: "XAUUSD.m" }, ctx).ok, true)
+  assert.equal(validateCopyRules(DEFAULT_RULES, "open", { side: "short", orderType: "market", symbol: "BTCUSDm" }, ctx).ok, true)
+  assert.equal(validateCopyRules(DEFAULT_RULES, "open", { side: "short", orderType: "market", symbol: "EURUSD.m" }, ctx).ok, false)
+})
+
+test("a follower trades the instrument under its own broker's name", () => {
+  const exness = ["BTCUSDm", "USTECm", "XAUUSDm"]
+  // found from what the account has traded before
+  assert.deepEqual(resolveFollowerSymbol("XAUUSD.m", [], exness), { symbol: "XAUUSDm", via: "auto" })
+  assert.deepEqual(resolveFollowerSymbol("BTCUSD.m", [], exness), { symbol: "BTCUSDm", via: "auto" })
+  // the same broker, the same name
+  assert.deepEqual(resolveFollowerSymbol("XAUUSD.m", [], ["XAUUSD.m", "EURUSD.m"]), { symbol: "XAUUSD.m", via: "same" })
+  // nothing known about it: the leader's own symbol, as before
+  assert.deepEqual(resolveFollowerSymbol("EURUSD.m", [], exness), { symbol: "EURUSD.m", via: "same" })
+  assert.deepEqual(resolveFollowerSymbol("XAUUSD.m", [], []), { symbol: "XAUUSD.m", via: "same" })
+  // a mapping the trader set always wins, spelled exactly as they typed it
+  assert.deepEqual(resolveFollowerSymbol("XAUUSD.m", [{ leaderSymbol: "XAUUSD.m", followerSymbol: "GOLD" }], exness), { symbol: "GOLD", via: "mapping" })
+  assert.deepEqual(resolveFollowerSymbol("XAUUSD.m", [{ leaderSymbol: "xauusd", followerSymbol: "Gold.pro" }], exness), { symbol: "Gold.pro", via: "mapping" })
+  // a futures mapping is for one contract, not for the next expiry
+  assert.deepEqual(resolveFollowerSymbol("NQH7", [{ leaderSymbol: "NQZ6", followerSymbol: "MNQZ6" }], []), { symbol: "NQH7", via: "same" })
+  assert.deepEqual(resolveFollowerSymbol("NQZ6", [{ leaderSymbol: "NQZ6", followerSymbol: "MNQZ6" }], []), { symbol: "MNQZ6", via: "mapping" })
 })

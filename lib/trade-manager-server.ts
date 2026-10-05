@@ -1,0 +1,220 @@
+// The open positions of a trader's accounts, read by user id — with no session
+// involved, so both the Trade Manager (for the signed-in trader) and the Copy
+// Trading engine (in the background) read them the same way.
+import { and, desc, eq, gte } from "drizzle-orm"
+import { db } from "@/lib/db"
+import { tradingAccounts, trades, providerAccounts, providerPositions, metatraderConnections, rithmicConnections } from "@/lib/db/schema"
+import { contractMultiplierForSymbol, computePnl, computeRMultiple } from "@/lib/calc"
+import { openTradeMetrics, liveTradeMetrics, computeStats, type TradeManagerData, type TradesManagerData, type ClosedTradeRow, type OpenTradeView } from "@/lib/trade-manager"
+
+// Every open position across the user's non-archived accounts, from BOTH
+// sources the app keeps them in:
+//  - the canonical `trades` table (status = "open") — manual open trades, and
+//    any future sync that writes open rows; these carry stop/target.
+//  - `provider_positions` — live broker positions (Tradovate). These carry an
+//    average entry and net quantity but no stop/target, so their risk shows as
+//    "no stop" rather than a fabricated number.
+// (MT5/Rithmic sync only stores closed fills — MT5 keeps just an open-position
+// COUNT, no per-position detail — so those can't appear here until the worker
+// stores positions. Surfaced honestly rather than silently dropped.)
+export async function loadOpenPositions(userId: string, onlyAccountId?: number): Promise<{ accounts: { id: number; name: string }[]; trades: OpenTradeView[] }> {
+  const accounts = await db
+    .select({ id: tradingAccounts.id, name: tradingAccounts.name, currency: tradingAccounts.currency, archived: tradingAccounts.archived })
+    .from(tradingAccounts)
+    .where(eq(tradingAccounts.userId, userId))
+  const active = accounts.filter((a) => !a.archived)
+  const accountById = new Map(active.map((a) => [a.id, a]))
+
+  const views: OpenTradeView[] = []
+
+  // 1) Open trades.
+  const openRows = await db
+    .select()
+    .from(trades)
+    .where(and(eq(trades.userId, userId), eq(trades.status, "open")))
+    .orderBy(desc(trades.entryTime))
+  for (const t of openRows) {
+    if (t.accountId != null && !accountById.has(t.accountId)) continue
+    if (onlyAccountId != null && t.accountId !== onlyAccountId) continue
+    const account = t.accountId != null ? accountById.get(t.accountId) : null
+    const side = t.side === "short" ? "short" : "long"
+    const quantity = Number(t.quantity)
+    const entryPrice = Number(t.entryPrice)
+    const stopLoss = t.stopLoss != null ? Number(t.stopLoss) : null
+    const takeProfit = t.takeProfit != null ? Number(t.takeProfit) : null
+    const contractMultiplier = Number(t.contractMultiplier) || 1
+    const fees = Number(t.fees) || 0
+    views.push({
+      id: t.id,
+      source: t.source ?? "manual",
+      origin: "trade",
+      positionRef: null,
+      accountId: t.accountId,
+      accountName: account?.name ?? "Unassigned",
+      currency: account?.currency ?? "USD",
+      symbol: t.symbol,
+      exchange: null,
+      market: t.market,
+      side,
+      quantity,
+      entryPrice,
+      currentPrice: null,
+      unrealizedPnl: null,
+      stopLoss,
+      takeProfit,
+      entryTime: t.entryTime.toISOString(),
+      contractMultiplier,
+      notes: t.notes,
+      metrics: openTradeMetrics({ side, quantity, entryPrice, stopLoss, takeProfit, contractMultiplier, fees }),
+    })
+  }
+
+  // 2) Live Tradovate positions (provider_positions), attributed to the
+  //    journal account their provider account is linked to.
+  const providerRows = await db
+    .select({
+      tradingAccountId: providerAccounts.tradingAccountId,
+      symbol: providerPositions.symbol,
+      contractId: providerPositions.contractId,
+      netQuantity: providerPositions.netQuantity,
+      averagePrice: providerPositions.averagePrice,
+      updatedAt: providerPositions.updatedAt,
+    })
+    .from(providerPositions)
+    .innerJoin(
+      providerAccounts,
+      and(
+        eq(providerAccounts.connectionId, providerPositions.connectionId),
+        eq(providerAccounts.environment, providerPositions.environment),
+        eq(providerAccounts.providerAccountId, providerPositions.providerAccountId),
+      ),
+    )
+    .where(eq(providerAccounts.enabled, true))
+  for (const p of providerRows) {
+    const netQuantity = Number(p.netQuantity)
+    if (netQuantity === 0) continue
+    const accId = p.tradingAccountId
+    if (accId == null || !accountById.has(accId)) continue
+    if (onlyAccountId != null && accId !== onlyAccountId) continue
+    const account = accountById.get(accId)!
+    const symbol = p.symbol ?? p.contractId
+    const side = netQuantity > 0 ? "long" : "short"
+    const quantity = Math.abs(netQuantity)
+    const entryPrice = p.averagePrice != null ? Number(p.averagePrice) : 0
+    const contractMultiplier = contractMultiplierForSymbol(symbol)
+    views.push({
+      id: -1 * (accId * 100000 + Math.abs(hashCode(symbol)) % 100000), // synthetic negative id (no `trades` row)
+      source: "tradovate",
+      origin: "provider",
+      positionRef: null,
+      accountId: accId,
+      accountName: account.name,
+      currency: account.currency,
+      symbol,
+      exchange: null,
+      market: "futures",
+      side,
+      quantity,
+      entryPrice,
+      currentPrice: null,
+      unrealizedPnl: null,
+      stopLoss: null,
+      takeProfit: null,
+      entryTime: p.updatedAt.toISOString(),
+      contractMultiplier,
+      notes: null,
+      metrics: openTradeMetrics({ side, quantity, entryPrice, stopLoss: null, takeProfit: null, contractMultiplier, fees: 0 }),
+    })
+  }
+
+  // 3) Live MetaTrader positions — stored on the connection each sync, with
+  //    real floating P&L, current price and SL/TP.
+  const mtConns = await db
+    .select({ accountId: metatraderConnections.accountId, positions: metatraderConnections.openPositionsData, updatedAt: metatraderConnections.lastSyncedAt, platform: metatraderConnections.platform })
+    .from(metatraderConnections)
+    .where(eq(metatraderConnections.userId, userId))
+  for (const c of mtConns) {
+    const accId = c.accountId
+    if (accId == null || !accountById.has(accId)) continue
+    if (onlyAccountId != null && accId !== onlyAccountId) continue
+    const account = accountById.get(accId)!
+    for (const pos of c.positions ?? []) {
+      if (!(Math.abs(pos.volume) > 0)) continue
+      views.push({
+        id: -1 * (accId * 1_000_000 + (Math.abs(hashCode(pos.identifier || pos.symbol)) % 1_000_000)),
+        source: c.platform === "mt4" ? "mt4" : "mt5",
+        origin: "provider",
+        positionRef: pos.identifier || null,
+        accountId: accId,
+        accountName: account.name,
+        currency: account.currency,
+        symbol: pos.symbol,
+        exchange: null,
+        market: "forex",
+        side: pos.side,
+        quantity: pos.volume,
+        entryPrice: pos.openPrice,
+        currentPrice: pos.currentPrice,
+        unrealizedPnl: pos.profit,
+        stopLoss: pos.stopLoss,
+        takeProfit: pos.takeProfit,
+        entryTime: (c.updatedAt ?? new Date()).toISOString(),
+        contractMultiplier: 1,
+        notes: null,
+        metrics: liveTradeMetrics({ side: pos.side, volume: pos.volume, openPrice: pos.openPrice, currentPrice: pos.currentPrice, profit: pos.profit, stopLoss: pos.stopLoss, takeProfit: pos.takeProfit }),
+      })
+    }
+  }
+
+  // 4) Live Rithmic futures positions — stored on the connection each sync
+  //    from the P&L-plant snapshot (signed net qty, avg fill price, floating P&L).
+  const rithRows = await db
+    .select({ accountId: rithmicConnections.accountId, positions: rithmicConnections.openPositionsData, updatedAt: rithmicConnections.lastSyncedAt })
+    .from(rithmicConnections)
+    .where(eq(rithmicConnections.userId, userId))
+  for (const r of rithRows) {
+    const accId = r.accountId
+    if (accId == null || !accountById.has(accId)) continue
+    if (onlyAccountId != null && accId !== onlyAccountId) continue
+    const account = accountById.get(accId)!
+    for (const pos of r.positions ?? []) {
+      if (!(Math.abs(pos.netQuantity) > 0)) continue
+      const side = pos.netQuantity > 0 ? "long" : "short"
+      const quantity = Math.abs(pos.netQuantity)
+      const entryPrice = pos.avgOpenFillPrice ?? 0
+      const contractMultiplier = contractMultiplierForSymbol(pos.symbol)
+      views.push({
+        id: -1 * (accId * 1_000_000 + (Math.abs(hashCode(pos.symbol)) % 1_000_000)),
+        source: "rithmic",
+        origin: "provider",
+        positionRef: null,
+        accountId: accId,
+        accountName: account.name,
+        currency: account.currency,
+        symbol: pos.symbol,
+        exchange: pos.exchange || null,
+        market: "futures",
+        side,
+        quantity,
+        entryPrice,
+        currentPrice: null,
+        unrealizedPnl: pos.openPositionPnl,
+        stopLoss: null,
+        takeProfit: null,
+        entryTime: (r.updatedAt ?? new Date()).toISOString(),
+        contractMultiplier,
+        notes: null,
+        metrics: openTradeMetrics({ side, quantity, entryPrice, stopLoss: null, takeProfit: null, contractMultiplier, fees: 0 }),
+      })
+    }
+  }
+
+  views.sort((a, b) => new Date(b.entryTime).getTime() - new Date(a.entryTime).getTime())
+  return { accounts: active.map((a) => ({ id: a.id, name: a.name })), trades: views }
+}
+
+function hashCode(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return h
+}

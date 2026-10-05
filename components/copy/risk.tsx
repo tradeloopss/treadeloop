@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { ArrowDown, Crown, Plus, ShieldCheck, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { saveCopyFollowers } from "@/app/actions/copy-trading"
-import { formatQuantity, listedContracts, relatedSymbol, specFor, unitLabel } from "@/lib/copy/contracts"
+import { formatQuantity, listedContracts, relatedSymbol, resolveFollowerSymbol, specFor, unitLabel } from "@/lib/copy/contracts"
 import { DEFAULT_FOLLOWER, MULTIPLIER_PRESETS, NO_PROPSYNC, ROUNDING_RULES, SIZING_MODES, calculateFollowerOrder, calculateRisk, riskStatus, roundingLabel, sizingLabel, type Decision, type FollowerConfig, type LeaderOrder, type RoundingRule, type SizingMode } from "@/lib/copy/engine"
 import { money, type AccountView, type FollowerView, type GroupView } from "@/lib/copy/view"
 import { Sheet, useAction } from "@/components/insights/client"
@@ -131,7 +131,7 @@ export function RiskManagement() {
   const leader = group ? account(group.leaderAccountId) : undefined
   const decide = (d: Draft, config: FollowerConfig = d.config): Decision => {
     const a = account(d.accountId)
-    const symbol = d.mappings.find((m) => m.leaderSymbol === order.symbol.toUpperCase())?.followerSymbol ?? order.symbol
+    const symbol = resolveFollowerSymbol(order.symbol, d.mappings, a?.symbols ?? []).symbol
     const spec = group?.contracts.find((c) => c.symbol === symbol.toUpperCase()) ?? specFor(symbol)
     return calculateFollowerOrder({ order, spec, config, leaderEquity: leader?.equity ?? leader?.balance ?? null, account: { equity: a?.equity ?? a?.balance ?? null, dayPnl: a?.dayPnl ?? 0, openNotional: a?.openNotional ?? 0, openQuantity: 0, connected: isOnline(a) }, propSync: limits.respectPropSync ? (a?.propSync ?? NO_PROPSYNC) : NO_PROPSYNC, rules: null })
   }
@@ -577,7 +577,8 @@ function Advanced({ draft, group, account, decision, side, leaderSymbol, patch, 
 
       <div className="space-y-2 border-t pt-4">
         <p className="text-sm font-medium">Symbol mapping</p>
-        <p className="text-xs text-muted-foreground">Trade the Leader&apos;s symbol under another name on this account — a micro contract, or a broker&apos;s own name for the same market.</p>
+        <p className="text-xs text-muted-foreground">Trade the Leader&apos;s symbol under another name on this account — a micro contract, or a broker&apos;s own name for the same market. Type it exactly as the broker spells it, capitals included.</p>
+        {!mapped && resolveFollowerSymbol(leaderSymbol, [], account?.symbols ?? []).via === "auto" && <p className="rounded-lg bg-muted/50 p-2 text-xs">Found automatically: this account has traded <span className="font-semibold">{resolveFollowerSymbol(leaderSymbol, [], account?.symbols ?? []).symbol}</span> before, so {leaderSymbol} is copied as that. Add a mapping only to override it.</p>}
         {draft.mappings.map((m, i) => (
           <div key={i} className="flex items-center gap-2">
             <select aria-label="Leader symbol" className={cn(fieldClass, "flex-1")} value={m.leaderSymbol} onChange={(e) => setMappings(draft.mappings.map((x, k) => (k === i ? { ...x, leaderSymbol: e.target.value } : x)))}>
@@ -586,7 +587,7 @@ function Advanced({ draft, group, account, decision, side, leaderSymbol, patch, 
               ))}
             </select>
             <span aria-hidden>→</span>
-            <input aria-label="Follower symbol" className={cn(fieldClass, "flex-1 uppercase")} value={m.followerSymbol} maxLength={20} onChange={(e) => setMappings(draft.mappings.map((x, k) => (k === i ? { ...x, followerSymbol: e.target.value.toUpperCase() } : x)))} />
+            <input aria-label="Follower symbol" className={cn(fieldClass, "flex-1")} value={m.followerSymbol} maxLength={20} spellCheck={false} autoCapitalize="off" onChange={(e) => setMappings(draft.mappings.map((x, k) => (k === i ? { ...x, followerSymbol: e.target.value.trim() } : x)))} />
             <button type="button" aria-label="Remove mapping" className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" onClick={() => setMappings(draft.mappings.filter((_, k) => k !== i))}>
               <Trash2 className="size-4" />
             </button>

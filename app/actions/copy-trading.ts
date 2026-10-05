@@ -8,7 +8,7 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { LIVE_SETTING, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenAll, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenAll, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
@@ -45,7 +45,7 @@ export async function refreshCopy(): Promise<Result<{ state: CopyState }>> {
 export async function createCopyGroup(input: GroupInput, activate: boolean): Promise<Result<{ id: number; activated: boolean; problem?: string }>> {
   try {
     const { userId, timeZone } = await who()
-    const id = await createGroup(userId, input)
+    const id = await createGroup(userId, { ...input, timeZone })
     let activated = false
     let problem: string | undefined
     if (activate) {
@@ -107,6 +107,20 @@ export async function setCopyTradingLive(live: boolean): Promise<Result<{ messag
     await logAdminAction(admin, "feature.release", null, { feature: "copy_trading", execution: live === true ? "live" : "simulation" })
     revalidatePath("/", "layout")
     return { ok: true, message: live === true ? "Copy Trading now sends follower orders to brokers." : "Copy Trading is back in simulation: nothing is sent to a broker." }
+  } catch (err) {
+    return fail(err)
+  }
+}
+
+// Admin: whether the engine also runs on its own, from the sync server's timer,
+// or only while a Copy Trading page is open. Recorded in the audit log.
+export async function setCopyTradingBackground(on: boolean): Promise<Result<{ message: string }>> {
+  try {
+    const admin = await assertAdmin({ team: ["manage"] })
+    await setAppSetting(BACKGROUND_SETTING, on === true)
+    await logAdminAction(admin, "feature.release", null, { feature: "copy_trading", background: on === true })
+    revalidatePath("/", "layout")
+    return { ok: true, message: on === true ? "The background engine is on: groups copy without a page open." : "The background engine is off: groups copy only while a Copy Trading page is open." }
   } catch (err) {
     return fail(err)
   }

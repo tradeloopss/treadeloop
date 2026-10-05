@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { Crown, Plus, Power, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { cancelCopyOrders, deleteCopyGroup, disableAllFollowers, flattenCopyGroup, removeCopyContract, saveCopyRules, setCopyFollowerEnabled, setCopyGroupActive } from "@/app/actions/copy-trading"
-import { formatQuantity } from "@/lib/copy/contracts"
+import { formatQuantity, resolveFollowerSymbol } from "@/lib/copy/contracts"
 import { riskStatus, syncSummary, type CopyRules, type FollowerConfig } from "@/lib/copy/engine"
 import { copyStats, groupCopies, money, price, type AccountView, type FollowerView, type PositionView } from "@/lib/copy/view"
 import { Sheet, useAction } from "@/components/insights/client"
@@ -68,7 +68,10 @@ export function Cockpit() {
 
   const cells = (r: Row) => {
     const p = r.positions.find((x) => symbols.has(x.symbol.toUpperCase())) ?? r.positions[0]
-    const cross = r.follower?.mappings.length ? r.follower.mappings.map((m) => `${m.leaderSymbol}→${m.followerSymbol}`).join(", ") : "Same"
+    // what this account's own broker calls each thing the group trades
+    const traded = [...new Set([...group.contracts.map((x) => x.symbol), ...rows[0].positions.map((x) => x.symbol)])]
+    const crossed = r.follower ? traded.map((s) => ({ s, to: resolveFollowerSymbol(s, r.follower!.mappings, r.account?.symbols ?? []) })).filter((x) => x.to.symbol !== x.s) : []
+    const cross = crossed.length ? crossed.map((x) => `${x.s}→${x.to.symbol}${x.to.via === "auto" ? " (auto)" : ""}`).join(", ") : "Same"
     return { p, more: r.positions.length - (p ? 1 : 0), symbol: p?.symbol ?? group.contracts[0]?.symbol ?? "—", cross }
   }
 

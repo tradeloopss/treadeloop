@@ -1,4 +1,4 @@
-import { formatQuantity, isExpired, pointValueAt, samePriceScale, unitLabel, type ContractSpec } from "./contracts"
+import { formatQuantity, isExpired, pointValueAt, sameInstrument, samePriceScale, unitLabel, type ContractSpec } from "./contracts"
 
 // The copy engine's rules, as pure functions. Every quantity a follower trades
 // comes out of calculateFollowerOrder — the pages, the previews and the engine
@@ -141,7 +141,7 @@ export function validateCopyRules(rules: CopyRules, action: CopyAction, order: P
       const inside = from <= to ? ctx.minutes >= from && ctx.minutes <= to : ctx.minutes >= from || ctx.minutes <= to
       if (!inside) return no(`This group only copies between ${rules.hoursFrom} and ${rules.hoursTo}.`)
     }
-    if (rules.symbolScope === "selected" && !ctx.imported.some((s) => s.toUpperCase() === order.symbol.toUpperCase())) return no(`${order.symbol} isn't one of this group's contracts. Import it in the Cockpit to copy it.`)
+    if (rules.symbolScope === "selected" && !ctx.imported.some((s) => sameInstrument(s, order.symbol))) return no(`${order.symbol} isn't one of this group's contracts. Import it in the Cockpit to copy it.`)
   }
   if (action === "partial_close" && !rules.partialClose) return no("Partial closes are switched off in this group's copy rules.")
   if (action === "close" && !rules.fullClose) return no("Full closes are switched off in this group's copy rules.")

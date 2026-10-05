@@ -5,7 +5,7 @@ import { getAppSetting, setAppSetting } from "@/lib/app-settings"
 // from the job's own record, not a guess. One app_settings row per job,
 // overwritten on every pass. Only step names are kept, never error text.
 
-export type HeartbeatJob = "rithmic_sync" | "affiliate_payouts"
+export type HeartbeatJob = "rithmic_sync" | "affiliate_payouts" | "copy_engine"
 export type Heartbeat = { at: Date; ok: boolean; failed: string | null }
 
 const key = (job: HeartbeatJob) => `heartbeat:${job}`

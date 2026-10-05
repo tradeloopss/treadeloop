@@ -109,12 +109,39 @@ export function specFor(symbol: string, now = new Date()): ContractSpec {
     return futureSpec(fut.root, s, expiration)
   }
   const spot = spotRoot(s)
+  const typed = symbol.trim()
   if (spot) {
     const c = SPOT[spot]
     const usdQuoted = spot.endsWith("USD")
-    return { symbol: s, root: spot, name: c.name, exchange: null, type: c.type, expiration: null, tickSize: c.tick, tickValue: usdQuoted ? round(c.tick * c.size) : null, pointValue: usdQuoted ? c.size : null, contractMultiplier: c.size, minimumQuantity: 0.01, quantityStep: 0.01 }
+    return { symbol: typed, root: spot, name: c.name, exchange: null, type: c.type, expiration: null, tickSize: c.tick, tickValue: usdQuoted ? round(c.tick * c.size) : null, pointValue: usdQuoted ? c.size : null, contractMultiplier: c.size, minimumQuantity: 0.01, quantityStep: 0.01 }
   }
-  return { symbol: s, root: s, name: s, exchange: null, type: "other", expiration: null, tickSize: 0.01, tickValue: null, pointValue: null, contractMultiplier: 1, minimumQuantity: 0.01, quantityStep: 0.01 }
+  return { symbol: typed, root: baseSymbol(typed), name: typed, exchange: null, type: "other", expiration: null, tickSize: 0.01, tickValue: null, pointValue: null, contractMultiplier: 1, minimumQuantity: 0.01, quantityStep: 0.01 }
+}
+
+// The instrument a symbol names, without the broker's own suffix: XAUUSD.m,
+// XAUUSDm and XAUUSD-ECN are all XAUUSD. A future is its exact contract.
+export function baseSymbol(symbol: string): string {
+  const raw = symbol.trim()
+  if (parseFuture(raw)) return clean(raw)
+  const spot = spotRoot(raw)
+  if (spot) return spot
+  // a suffix after a separator (US30.cash), then a lower-case tail (BTCUSDm)
+  const cut = raw.replace(/[._#-][A-Za-z0-9]{1,6}$/, (m, offset) => (offset >= 4 ? "" : m)).replace(/(?<=[A-Z0-9])[a-z]{1,3}$/, "")
+  return (cut || raw).toUpperCase()
+}
+export const sameInstrument = (a: string, b: string) => baseSymbol(a) === baseSymbol(b)
+
+// What a follower's own broker calls the leader's instrument. A mapping the
+// trader set wins; otherwise a symbol the follower account has traded before
+// under the same instrument (Exness's XAUUSDm for JustMarkets's XAUUSD.m);
+// otherwise the leader's own symbol.
+export function resolveFollowerSymbol(leaderSymbol: string, mappings: { leaderSymbol: string; followerSymbol: string }[], known: string[] = []): { symbol: string; via: "mapping" | "auto" | "same" } {
+  const base = baseSymbol(leaderSymbol)
+  const mapped = mappings.find((m) => m.leaderSymbol.toUpperCase() === leaderSymbol.toUpperCase()) ?? mappings.find((m) => baseSymbol(m.leaderSymbol) === base)
+  if (mapped) return { symbol: mapped.followerSymbol, via: "mapping" }
+  if (known.includes(leaderSymbol)) return { symbol: leaderSymbol, via: "same" }
+  const own = known.find((k) => baseSymbol(k) === base)
+  return own ? { symbol: own, via: "auto" } : { symbol: leaderSymbol, via: "same" }
 }
 
 // What a 1.00 price move is worth for one contract / lot, in USD, at a price.

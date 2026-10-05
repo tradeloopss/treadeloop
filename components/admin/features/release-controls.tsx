@@ -4,7 +4,7 @@ import { useTransition } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { setFeatureStage } from "@/app/actions/features"
-import { setCopyTradingLive } from "@/app/actions/copy-trading"
+import { setCopyTradingBackground, setCopyTradingLive } from "@/app/actions/copy-trading"
 import { STAGES, STAGE_LABELS, type Stage } from "@/lib/features/release"
 
 const NOTES: Record<Stage, string> = {
@@ -79,6 +79,38 @@ export function CopyExecutionControl({ live }: { live: boolean }) {
           <span className="mt-1 block text-xs text-muted-foreground">{text}</span>
         </button>
       ))}
+    </div>
+  )
+}
+
+// Copy Trading only: whether the engine runs by itself, from the sync server's
+// timer, or only while someone has a Copy Trading page open.
+export function CopyBackgroundControl({ on, lastRun }: { on: boolean; lastRun: string | null }) {
+  const [pending, startTransition] = useTransition()
+  const choose = (next: boolean) => {
+    if (next === on) return
+    if (!window.confirm(next ? "Turn the background engine on? Active groups will copy without a page open." : "Turn the background engine off? Active groups will copy only while a Copy Trading page is open.")) return
+    startTransition(async () => {
+      const result = await setCopyTradingBackground(next)
+      if (result.ok) toast.success(result.message)
+      else toast.error(result.error)
+    })
+  }
+  const options: [boolean, string, string][] = [
+    [true, "On", "Every active group is checked every few seconds by the sync server, whether or not a page is open."],
+    [false, "Off", "Groups are checked only while a Copy Trading page is open."],
+  ]
+  return (
+    <div className="space-y-2">
+      <div role="radiogroup" aria-label="Copy Trading background engine" className="grid gap-2 sm:grid-cols-2">
+        {options.map(([value, label, text]) => (
+          <button key={label} type="button" role="radio" aria-checked={value === on} disabled={pending} onClick={() => choose(value)} className={cn("rounded-lg border p-3 text-start transition-colors disabled:opacity-60", value === on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/60")}>
+            <span className="block text-sm font-medium">{label}</span>
+            <span className="mt-1 block text-xs text-muted-foreground">{text}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">{lastRun ? `Last pass: ${new Date(lastRun).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}.` : "No pass has been recorded yet: the timer on the sync server may not be running."}</p>
     </div>
   )
 }

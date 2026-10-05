@@ -2232,6 +2232,7 @@ export const copyGroups = pgTable(
     name: text("name").notNull(),
     leaderAccountId: integer("leaderAccountId").notNull(),
     status: text("status").notNull().default("draft"), // draft | active | paused
+    timeZone: text("timeZone"), // the trader's own, for the hours and days in the copy rules
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),
   },

@@ -2,10 +2,11 @@ import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
+import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
-import { pointValueAt, specFor, type ContractSpec } from "./contracts"
+import { pointValueAt, resolveFollowerSymbol, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, calculateFollowerOrder, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import type { AccountView, CopyState, EventView, FollowerView, GroupLimits, GroupStatus, GroupView, OrderView, PositionView, Role } from "./view"
 
@@ -22,6 +23,9 @@ import type { AccountView, CopyState, EventView, FollowerView, GroupLimits, Grou
 // guard and is the same path the Trade Manager uses.
 
 export const LIVE_SETTING = "copy_trading_live"
+export const BACKGROUND_SETTING = "copy_trading_background"
+// A leader whose last sync is older than this is not acted on: its picture is too old to copy from.
+export const LEADER_FRESH_MS = 5 * 60_000
 export const MAX_GROUPS = 20
 export const MAX_FOLLOWERS = 25
 export const MAX_CONTRACTS = 30
@@ -33,10 +37,10 @@ const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 // Where the live positions come from: the same reader as the Trade Manager,
 // for the signed-in trader. null = they couldn't be read this time.
 type LiveReader = (userId: string) => Promise<Pick<OpenTradeView, "id" | "accountId" | "symbol" | "side" | "quantity" | "entryPrice" | "currentPrice" | "unrealizedPnl" | "stopLoss" | "takeProfit" | "positionRef">[] | null>
-let readLive: LiveReader = async () => {
+let readLive: LiveReader = async (userId) => {
   try {
-    const { getOpenTradesOverview } = await import("@/app/actions/trade-manager")
-    return (await getOpenTradesOverview()).trades
+    const { loadOpenPositions } = await import("@/lib/trade-manager-server")
+    return (await loadOpenPositions(userId)).trades
   } catch {
     return null
   }
@@ -96,7 +100,7 @@ const toRules = (r: typeof copyRules.$inferSelect | undefined): CopyRules => (r 
 
 export async function loadCopyState(userId: string, timeZone: string): Promise<CopyState> {
   const since = new Date(Date.now() - 36 * 3_600_000)
-  const [accountRows, mt, rith, prov, prefs, groupRows, followerRows, contractRows, ruleRows, limitRows, mappingRows, managed, orderRows, eventRows, closed, mode, live, prop] = await Promise.all([
+  const [accountRows, mt, rith, prov, prefs, groupRows, followerRows, contractRows, ruleRows, limitRows, mappingRows, managed, orderRows, eventRows, closed, mode, live, prop, traded, background, beat] = await Promise.all([
     db.select().from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false))),
     db
       .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null` })
@@ -119,6 +123,9 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     engineMode(),
     readLive(userId),
     propSync(userId),
+    db.select({ accountId: trades.accountId, symbol: trades.symbol }).from(trades).where(eq(trades.userId, userId)).groupBy(trades.accountId, trades.symbol),
+    getAppSetting<boolean>(BACKGROUND_SETTING).catch(() => null),
+    readHeartbeat("copy_engine").catch(() => null),
   ])
 
   const today = localDay(new Date(), timeZone)
@@ -195,6 +202,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
         return point != null && at != null ? s + x.quantity * at * point : s
       }, 0),
       propSync: prop.get(a.id)?.state ?? NO_PROPSYNC,
+      symbols: [...new Set([...mine.map((x) => x.symbol), ...traded.filter((t) => t.accountId === a.id).map((t) => t.symbol)])].slice(0, 120),
     }
   })
 
@@ -227,7 +235,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const orders: OrderView[] = orderRows.map((o) => ({ id: o.id, groupId: o.groupId, correlationId: o.correlationId, masterOrderId: o.masterOrderId, masterAccountId: o.masterAccountId, followerAccountId: o.followerAccountId, action: o.action, symbol: o.symbol, leaderSymbol: o.leaderSymbol, side: o.side as Side, quantity: Number(o.quantity), leaderQuantity: num(o.leaderQuantity), requestedPrice: num(o.requestedPrice), executionPrice: num(o.executionPrice), status: o.status, reason: o.reason, slippage: num(o.slippage), latencyMs: o.latencyMs, simulated: o.simulated, createdAt: o.createdAt.toISOString(), steps: (Array.isArray((o.decision as { steps?: Step[] } | null)?.steps) ? (o.decision as { steps: Step[] }).steps : []) as Step[] }))
   const events: EventView[] = eventRows.map((e) => ({ id: e.id, groupId: e.groupId, accountId: e.accountId, level: e.level as EventView["level"], code: e.code, title: e.title, body: e.body, action: e.action, masterOrderId: e.masterOrderId, createdAt: e.createdAt.toISOString(), unread: !e.readAt }))
 
-  return { mode, accounts, groups, positions, orders, events, liveData: live != null, at: new Date().toISOString() }
+  return { mode, accounts, groups, positions, orders, events, liveData: live != null, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
 }
 // the broker's own id of each live position, kept beside the state rather than sent to the browser
 const liveKeys = new WeakMap<PositionView[], Map<PositionView, string>>()
@@ -291,7 +299,7 @@ async function note(userId: string, e: { groupId?: number | null; accountId?: nu
   await db.insert(copyEvents).values({ userId, groupId: e.groupId ?? null, accountId: e.accountId ?? null, level: e.level, code: e.code, title: e.title.slice(0, 200), body: e.body ?? null, action: e.action ?? null, masterOrderId: e.masterOrderId ?? null })
 }
 
-export type GroupInput = { name: string; leaderAccountId: number; followers: { accountId: number; config: unknown }[]; contracts: string[]; rules: unknown; limits?: Partial<GroupLimits> }
+export type GroupInput = { name: string; leaderAccountId: number; followers: { accountId: number; config: unknown }[]; contracts: string[]; rules: unknown; limits?: Partial<GroupLimits>; timeZone?: string | null }
 
 export async function createGroup(userId: string, input: GroupInput): Promise<number> {
   const name = String(input.name ?? "").trim().slice(0, 60)
@@ -308,7 +316,7 @@ export async function createGroup(userId: string, input: GroupInput): Promise<nu
   const rules = cleanRules(input.rules)
   const symbols = [...new Set((input.contracts ?? []).map((s) => String(s).trim().toUpperCase()).filter((s) => /^[A-Z0-9._-]{1,20}$/.test(s)))].slice(0, MAX_CONTRACTS)
 
-  const [g] = await db.insert(copyGroups).values({ userId, name, leaderAccountId: leader, status: "draft" }).returning({ id: copyGroups.id })
+  const [g] = await db.insert(copyGroups).values({ userId, name, leaderAccountId: leader, status: "draft", timeZone: input.timeZone ?? null }).returning({ id: copyGroups.id })
   if (followers.length) await db.insert(copyGroupFollowers).values(followers.map((f, i) => ({ userId, groupId: g.id, accountId: f.accountId, position: i, ...configColumns(f.config) })))
   if (symbols.length) await db.insert(copyGroupContracts).values(symbols.map((s) => contractRow(userId, g.id, specFor(s))))
   await db.insert(copyRules).values({ groupId: g.id, userId, ...rules })
@@ -357,7 +365,7 @@ export async function setGroupActive(userId: string, groupId: number, active: bo
   const problems = activationProblems({ hasLeader: byId.has(g.leaderAccountId), leaderConnected: online(g.leaderAccountId), followers: g.followers.map((f) => ({ name: byId.get(f.accountId)?.name ?? "A follower", config: f.config, connected: online(f.accountId) })), contracts: g.contracts.length, symbolScope: g.rules.symbolScope })
   if (problems.length) throw new Error(problems.join(" "))
   await baseline(userId, g, state)
-  await db.update(copyGroups).set({ status: "active", updatedAt: new Date() }).where(eq(copyGroups.id, groupId))
+  await db.update(copyGroups).set({ status: "active", timeZone, updatedAt: new Date() }).where(eq(copyGroups.id, groupId))
   await note(userId, { groupId, level: "success", code: "group_activated", title: `“${g.name}” is copying`, body: state.mode === "live" ? "New trades on the Leader are sent to the followers." : "Simulation: new trades on the Leader are worked out and recorded for each follower, and nothing is sent to a broker." })
 }
 
@@ -416,10 +424,11 @@ const cleanMappings = (raw: unknown) => {
   const seen = new Set<string>()
   const out: { leaderSymbol: string; followerSymbol: string }[] = []
   for (const m of Array.isArray(raw) ? raw : []) {
-    const a = String(m?.leaderSymbol ?? "").trim().toUpperCase()
-    const b = String(m?.followerSymbol ?? "").trim().toUpperCase()
-    if (!/^[A-Z0-9._-]{1,20}$/.test(a) || !/^[A-Z0-9._-]{1,20}$/.test(b) || a === b || seen.has(a)) continue
-    seen.add(a)
+    // kept exactly as typed: MetaTrader symbols are case-sensitive (XAUUSDm is not XAUUSDM)
+    const a = String(m?.leaderSymbol ?? "").trim()
+    const b = String(m?.followerSymbol ?? "").trim()
+    if (!/^[A-Za-z0-9._#-]{1,20}$/.test(a) || !/^[A-Za-z0-9._#-]{1,20}$/.test(b) || a === b || seen.has(a.toUpperCase())) continue
+    seen.add(a.toUpperCase())
     out.push({ leaderSymbol: a, followerSymbol: b })
   }
   return out.slice(0, 30)
@@ -504,7 +513,6 @@ function clock(timeZone: string, now: Date) {
   return { minutes: Number(get("hour")) * 60 + Number(get("minute")), weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday")) }
 }
 
-const followerSymbol = (f: FollowerView, leaderSymbol: string) => f.mappings.find((m) => m.leaderSymbol === leaderSymbol.toUpperCase())?.followerSymbol ?? f.mappings.find((m) => specFor(m.leaderSymbol).root === specFor(leaderSymbol).root)?.followerSymbol ?? leaderSymbol
 const specOf = (g: GroupView, symbol: string) => g.contracts.find((c) => c.symbol === symbol.toUpperCase()) ?? specFor(symbol)
 
 // Hands one order to the broker's queue — the same queue, with the same
@@ -531,7 +539,8 @@ async function copyEntry(ctx: Ctx, leader: { id: number; version: number }, p: L
     if (only && f.accountId !== only.accountId) continue
     const account = state.accounts.find((a) => a.id === f.accountId)
     if (!account) continue
-    const symbol = followerSymbol(f, p.symbol)
+    // the follower's own broker's name for the instrument
+    const symbol = resolveFollowerSymbol(p.symbol, f.mappings, account.symbols).symbol
     const spec = specOf(g, symbol)
     const open = state.positions.filter((x) => x.accountId === f.accountId && x.symbol.toUpperCase() === symbol.toUpperCase() && x.side === p.side).reduce((s, x) => s + x.quantity, 0)
     const decision = calculateFollowerOrder({
@@ -649,7 +658,9 @@ async function runGroup(ctx: Ctx): Promise<number> {
   const { group: g, state } = ctx
   // A leader whose connection isn't up reports nothing — and "nothing" must
   // never be read as "everything was closed". Wait until it is back.
-  if (state.accounts.find((x) => x.id === g.leaderAccountId)?.health !== "connected") return 0
+  const leaderAccount = state.accounts.find((x) => x.id === g.leaderAccountId)
+  if (leaderAccount?.health !== "connected") return 0
+  if (leaderAccount.lastSyncAt && ctx.now.getTime() - new Date(leaderAccount.lastSyncAt).getTime() > LEADER_FRESH_MS) return 0
   const keys = liveKeys.get(state.positions)
   const current: LivePosition[] = state.positions.filter((p) => p.accountId === g.leaderAccountId && !p.simulated).map((p) => ({ key: keys?.get(p) ?? `${p.symbol}|${p.side}`, symbol: p.symbol, side: p.side, quantity: p.quantity, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit, price: p.current }))
   const rows = await db.select().from(copyPositions).where(and(eq(copyPositions.groupId, g.id), eq(copyPositions.role, "leader"), eq(copyPositions.status, "open")))

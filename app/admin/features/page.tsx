@@ -7,8 +7,10 @@ import { requireAdmin } from "@/lib/admin/guard"
 import { FEATURES, STAGE_LABELS, featureLabel, isFeatureKey } from "@/lib/features/release"
 import { getReleases } from "@/lib/features/server"
 import { AdminPageHeader, Panel, StatePill, fmtDateTime } from "@/components/admin/ui"
-import { CopyExecutionControl, ReleaseControl } from "@/components/admin/features/release-controls"
+import { CopyBackgroundControl, CopyExecutionControl, ReleaseControl } from "@/components/admin/features/release-controls"
 import { engineMode } from "@/lib/copy/server"
+import { backgroundEnabled } from "@/lib/copy/background"
+import { readHeartbeat } from "@/lib/heartbeat"
 
 export const metadata: Metadata = { title: "Feature releases — TradeLoop admin" }
 
@@ -17,9 +19,11 @@ const RATING_LABELS: Record<string, string> = { love: "Love it", good: "Good", i
 // Who can see each new feature: the team only, or every user as a beta.
 export default async function AdminFeaturesPage() {
   await requireAdmin({ team: ["manage"] })
-  const [releases, copyMode, feedback, counts] = await Promise.all([
+  const [releases, copyMode, copyBackground, copyBeat, feedback, counts] = await Promise.all([
     getReleases(),
     engineMode(),
+    backgroundEnabled(),
+    readHeartbeat("copy_engine").catch(() => null),
     db
       .select({ id: featureFeedback.id, feature: featureFeedback.feature, rating: featureFeedback.rating, message: featureFeedback.message, page: featureFeedback.page, createdAt: featureFeedback.createdAt, email: user.email })
       .from(featureFeedback)
@@ -57,6 +61,9 @@ export default async function AdminFeaturesPage() {
                   <p className="text-sm font-medium">Execution</p>
                   <p className="mb-2 text-xs text-muted-foreground">Separate from who can see it: whether copies are only worked out, or really sent.</p>
                   <CopyExecutionControl live={copyMode === "live"} />
+                  <p className="mt-4 text-sm font-medium">Background engine</p>
+                  <p className="mb-2 text-xs text-muted-foreground">Whether groups copy on their own, or only while a Copy Trading page is open.</p>
+                  <CopyBackgroundControl on={copyBackground} lastRun={copyBeat?.at.toISOString() ?? null} />
                 </div>
               )}
               {ratings.length > 0 && (

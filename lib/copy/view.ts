@@ -38,6 +38,8 @@ export type AccountView = {
   openPnl: number | null
   openNotional: number
   propSync: PropSyncState
+  // the symbols this account has traded, as its own broker spells them
+  symbols: string[]
 }
 
 export type FollowerView = { id: number; accountId: number; config: FollowerConfig; mappings: { leaderSymbol: string; followerSymbol: string }[] }
@@ -92,6 +94,8 @@ export type CopyState = {
   events: EventView[]
   // false when the live positions couldn't be read this time
   liveData: boolean
+  // the background engine: whether it is switched on, and when it last ran
+  engine: { background: boolean; lastRunAt: string | null; ok: boolean }
   at: string
 }
 

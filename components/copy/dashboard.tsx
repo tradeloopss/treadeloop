@@ -148,6 +148,7 @@ export function CopyDashboard() {
               {[
                 ["Copy engine", state.mode === "live" ? "Live" : "Simulation"],
                 ["Leader data", state.liveData ? "Reading" : "Unavailable"],
+                ["Background engine", !state.engine.background ? "Off" : !state.engine.lastRunAt ? "No signal yet" : Date.now() - new Date(state.engine.lastRunAt).getTime() > 120_000 ? `No signal for ${ago(state.engine.lastRunAt).replace(" ago", "")}` : "Running"],
                 ["Account connections", used.length ? `${healthy}/${used.length} healthy` : "No accounts in a group"],
                 ["Follower sync", sync.total ? `${Math.round((sync.synced / sync.total) * 100)}%` : "—"],
               ].map(([k, v]) => (
@@ -157,7 +158,11 @@ export function CopyDashboard() {
                 </div>
               ))}
             </dl>
-            <p className="text-xs text-muted-foreground">The engine checks the Leader each time this page refreshes, so it copies while a Copy Trading page is open.</p>
+            <p className="text-xs text-muted-foreground">
+              {state.engine.background && state.engine.lastRunAt && Date.now() - new Date(state.engine.lastRunAt).getTime() <= 120_000
+                ? "The engine runs in the background every few seconds: your groups copy whether or not this page is open. A MetaTrader leader is re-read about every 15 seconds, a Rithmic leader about once a minute — that is how soon a new trade can be seen."
+                : "The background engine isn't running right now, so groups copy only while a Copy Trading page is open."}
+            </p>
           </Section>
           <Section title="Alerts" description="What happened, why, and what you can do.">
             <AlertList events={state.events} limit={5} problemsOnly />
