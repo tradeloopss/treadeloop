@@ -261,6 +261,13 @@ export const metatraderConnections = pgTable("metatrader_connections", {
   login: text("login").notNull(),
   server: text("server").notNull(),
   platform: text("platform").notNull(), // mt4 | mt5
+  // Copy Trading: what the account is in a group that is switched on (leader |
+  // follower | both), set by the app; and the terminal of its own the copy lane
+  // on the sync server gave it (worker/mt5/copy-lane.ts), with when the lane
+  // last read it. No terminal, or a stale time, means the slower shared path.
+  copyRole: text("copyRole"),
+  copySlot: text("copySlot"),
+  copySeenAt: timestamp("copySeenAt"),
   // pending (waiting for the worker's first login) → connected, or error
   // (login rejected / broker not supported — needs reconnecting; not retried).
   status: text("status").notNull().default("pending"),

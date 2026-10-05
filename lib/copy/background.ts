@@ -62,7 +62,7 @@ export async function runBackground(budgetMs = 40_000): Promise<BackgroundResult
     await db
       .update(metatraderConnections)
       .set({ nextSyncAt: sql`${metatraderConnections.lastSyncedAt} + make_interval(secs => ${LEADER_SYNC_SECONDS})` })
-      .where(and(inArray(metatraderConnections.accountId, leaders), eq(metatraderConnections.status, "connected"), isNotNull(metatraderConnections.lastSyncedAt), sql`${metatraderConnections.nextSyncAt} > ${metatraderConnections.lastSyncedAt} + make_interval(secs => ${LEADER_SYNC_SECONDS})`))
+      .where(and(inArray(metatraderConnections.accountId, leaders), eq(metatraderConnections.status, "connected"), isNotNull(metatraderConnections.lastSyncedAt), sql`(${metatraderConnections.copySlot} is null or ${metatraderConnections.copySeenAt} is null or ${metatraderConnections.copySeenAt} < now() - interval '20 seconds')`, sql`${metatraderConnections.nextSyncAt} > ${metatraderConnections.lastSyncedAt} + make_interval(secs => ${LEADER_SYNC_SECONDS})`))
       .catch((e) => console.error("[copy-engine] leader nudge failed:", e instanceof Error ? e.message : e))
 
   const failed: string[] = []

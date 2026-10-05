@@ -28,6 +28,10 @@ export function ModeBanner({ admin }: { admin: boolean }) {
   const ready = followers.filter((a) => a!.canExecute)
   const notReady = followers.filter((a) => !a!.canExecute)
   const open = state.positions.filter((p) => p.simulated).length
+  // every account of the groups that are on: all on the fast lane, or not
+  const copying = [...new Set(state.groups.filter((g) => g.status === "active").flatMap((g) => [g.leaderAccountId, ...g.followers.filter((f) => f.config.enabled).map((f) => f.accountId)]))].map(account).filter((a) => !!a)
+  const fast = copying.length > 0 && copying.every((a) => a!.lane === "fast")
+  const speed = fast ? "A new trade on the Leader reaches the followers in about 2 to 5 seconds." : "A new trade on the Leader reaches the followers in about 30 to 60 seconds (1 to 2 minutes for a Rithmic leader). Accounts on the fast lane are quicker: see the Cockpit."
 
   const change = (next: boolean) =>
     run(
@@ -48,7 +52,7 @@ export function ModeBanner({ admin }: { admin: boolean }) {
           <span className="font-semibold">{live ? "Live — real orders are sent to your follower accounts." : "Simulation — no real orders are placed."}</span>{" "}
           <span className="text-muted-foreground">
             {live
-              ? "A new trade on the Leader reaches the followers in about 30 to 60 seconds (1 to 2 minutes for a Rithmic leader)."
+              ? speed
               : "Copies are worked out and shown here marked SIM, but nothing is opened on your follower accounts. To open real trades on them, switch to Live."}
           </span>
           {live && notReady.length > 0 && (
@@ -74,7 +78,7 @@ export function ModeBanner({ admin }: { admin: boolean }) {
             Only trades the Leader opens <span className="font-semibold text-foreground">after</span> you switch are copied for real.{open > 0 ? ` The ${open} simulated ${open === 1 ? "position" : "positions"} open now stay simulated.` : " Trades that are already open are not copied."}
           </li>
           <li>A follower needs a MetaTrader 5 account with its master (trading) password added in the Trade Manager.</li>
-          <li>It is not instant: a new Leader trade reaches the followers in about 30 to 60 seconds.</li>
+          <li>{speed}</li>
           <li>Start with the smallest size, on a demo account if you can. Live mode has not placed an order with a broker yet.</li>
         </ul>
         {followers.length > 0 && (

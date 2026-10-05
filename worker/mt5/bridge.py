@@ -164,6 +164,60 @@ def sync(req):
     }
 
 
+def positions(req):
+    """The open positions of one account, from a session that is kept open for
+    it (the copy lane polls this every second). Logs in only when the terminal
+    is not on this account yet. `check` is a list of tickets the caller saw
+    before and no longer sees: the ones a closing deal confirms are returned in
+    `closed`, so a list that is short only because the terminal has just
+    reconnected is never taken for positions that were closed."""
+    try:
+        account = int(req["login"])
+        password = str(req["password"])
+        server = str(req["server"]).strip()
+    except (KeyError, TypeError, ValueError):
+        raise BridgeError(400, "request", "login, password and server are required")
+    if req.get("trading"):
+        before = mt5.account_info()
+        ensure_trading_login(account, password, server)
+        fresh = before is None or before.login != account or not before.trade_allowed
+        try:
+            # the "Algo Trading" button too, so the first order doesn't have to wait for it
+            ensure_algo_trading(account)
+        except BridgeError:
+            pass
+    else:
+        fresh = login(account, password, server)
+    if fresh:
+        # the trade server sends the positions a moment after the login: wait until the count holds still
+        last = -1
+        for _ in range(12):
+            total = mt5.positions_total()
+            if total is not None and total == last:
+                break
+            last = total
+            time.sleep(0.4)
+    term = mt5.terminal_info()
+    info = mt5.account_info()
+    listed = mt5.positions_get()
+    if term is None or not term.connected or info is None or info.login != account or listed is None:
+        code, message = last_error()
+        raise BridgeError(502, "terminal", f"Could not read the positions: {message}", code)
+    closed = []
+    for ticket in req.get("check") or []:
+        deals = mt5.history_deals_get(position=int(ticket))
+        if deals and any(d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY) for d in deals):
+            closed.append(str(ticket))
+    return {
+        "positions": [record(p) for p in listed],
+        "closed": closed,
+        "balance": info.balance,
+        "equity": info.equity,
+        "tradeAllowed": bool(info.trade_allowed),
+        "fresh": bool(fresh),
+        "utcNow": int(time.time()),
+    }
+
 def reset(req):
     """Stops the terminal and, when given one, installs a broker's server list
     (servers.dat) before the next start. A generic MT5 only knows the servers
@@ -313,11 +367,20 @@ def send_order(request):
     }
 
 
-def position_by_ticket(ticket):
-    positions = mt5.positions_get(ticket=ticket)
-    if not positions:
-        raise BridgeError(404, "position", "position not found — it may already be closed")
-    return positions[0]
+def position_by_ticket(ticket, wait=6.0):
+    """The open position with this ticket. Right after a login the terminal
+    lists no positions for a moment, until it has synchronised with the trade
+    server; an order that arrives then (a close, sent as the session is
+    switched to the master password) would be told the position does not
+    exist. So "not found" is only believed once it has stayed not found."""
+    deadline = time.time() + wait
+    while True:
+        positions = mt5.positions_get(ticket=ticket)
+        if positions:
+            return positions[0]
+        if time.time() >= deadline:
+            raise BridgeError(404, "position", "position not found — it may already be closed")
+        time.sleep(0.3)
 
 
 def ensure_symbol(symbol):
@@ -444,4 +507,4 @@ def on_bridge_error(err):
 
 
 if __name__ == "__main__":
-    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order}, on_bridge_error)
+    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order, "/positions": positions}, on_bridge_error)

@@ -26,6 +26,8 @@ export const LIVE_SETTING = "copy_trading_live"
 export const BACKGROUND_SETTING = "copy_trading_background"
 // A leader whose last sync is older than this is not acted on: its picture is too old to copy from.
 export const LEADER_FRESH_MS = 5 * 60_000
+// How recently the copy lane must have read an account for the account to count as on it.
+export const LANE_FRESH_MS = 20_000
 export const MAX_GROUPS = 20
 export const MAX_FOLLOWERS = 25
 export const MAX_CONTRACTS = 30
@@ -103,7 +105,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const [accountRows, mt, rith, prov, prefs, groupRows, followerRows, contractRows, ruleRows, limitRows, mappingRows, managed, orderRows, eventRows, closed, mode, live, prop, traded, background, beat] = await Promise.all([
     db.select().from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false))),
     db
-      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null` })
+      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt })
       .from(metatraderConnections)
       .where(eq(metatraderConnections.userId, userId)),
     db.select({ accountId: rithmicConnections.accountId, login: rithmicConnections.login, lastSyncedAt: rithmicConnections.lastSyncedAt, lastSyncStatus: rithmicConnections.lastSyncStatus }).from(rithmicConnections).where(eq(rithmicConnections.userId, userId)),
@@ -203,6 +205,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       }, 0),
       propSync: prop.get(a.id)?.state ?? NO_PROPSYNC,
       symbols: [...new Set([...mine.map((x) => x.symbol), ...traded.filter((t) => t.accountId === a.id).map((t) => t.symbol)])].slice(0, 120),
+      lane: m?.copySlot && m.copySeenAt && Date.now() - m.copySeenAt.getTime() < LANE_FRESH_MS ? "fast" : "standard",
     }
   })
 
@@ -525,7 +528,7 @@ async function queue(ctx: Pick<Ctx, "userId" | "state" | "prop">, accountId: num
   const decision = guardOrder(input, ctx.prop.get(accountId)?.evaluation ?? null)
   const [row] = await db
     .insert(orderCommands)
-    .values({ userId: ctx.userId, accountId, broker: "mt5", kind: command.kind, status: decision.allowed ? "pending" : "blocked", positionRef: input.positionRef, symbol: command.symbol, side: command.side, volume: str(input.volume), stopLoss: str(input.stopLoss), takeProfit: str(input.takeProfit), orderType: input.orderType, ruleCheck: decision, resultMessage: decision.allowed ? null : decision.reasons.join(" ") })
+    .values({ userId: ctx.userId, accountId, broker: account.lane === "fast" ? "mt5c" : "mt5", kind: command.kind, status: decision.allowed ? "pending" : "blocked", positionRef: input.positionRef, symbol: command.symbol, side: command.side, volume: str(input.volume), stopLoss: str(input.stopLoss), takeProfit: str(input.takeProfit), orderType: input.orderType, ruleCheck: decision, resultMessage: decision.allowed ? null : decision.reasons.join(" ") })
     .returning({ id: orderCommands.id })
   return { id: row.id, status: decision.allowed ? "sent" : "blocked", reason: decision.allowed ? null : `Blocked by the account's prop-firm rules. ${decision.reasons.join(" ")}` }
 }
@@ -723,6 +726,8 @@ const CLOSE_RETRY_MS = 8_000
 // confirms the close or stops listing the ticket — never just because a close
 // was sent — and a close that was refused is sent again.
 async function reconcile(userId: string, state: CopyState) {
+  // an order the fast lane hasn't picked up in ten seconds goes to the sync worker instead
+  await db.update(orderCommands).set({ broker: "mt5" }).where(and(eq(orderCommands.userId, userId), eq(orderCommands.broker, "mt5c"), eq(orderCommands.status, "pending"), isNull(orderCommands.leaseUntil), sql`${orderCommands.createdAt} < now() - interval '10 seconds'`))
   await bindPositions(userId, state)
   const keys = liveKeys.get(state.positions)
   const name = (accountId: number) => state.accounts.find((a) => a.id === accountId)?.name ?? "a follower"
@@ -797,10 +802,29 @@ async function reconcile(userId: string, state: CopyState) {
   }
 }
 
+// Tells the sync server which accounts are copying right now, so its copy lane
+// can keep a terminal open for each: the leader of a group that is switched
+// on, and each follower of it that is switched on. Everything else is cleared.
+export async function syncCopyRoles(userId: string): Promise<void> {
+  const [groups, followers, connections] = await Promise.all([
+    db.select({ id: copyGroups.id, leaderAccountId: copyGroups.leaderAccountId }).from(copyGroups).where(and(eq(copyGroups.userId, userId), eq(copyGroups.status, "active"))),
+    db.select({ groupId: copyGroupFollowers.groupId, accountId: copyGroupFollowers.accountId }).from(copyGroupFollowers).where(and(eq(copyGroupFollowers.userId, userId), eq(copyGroupFollowers.enabled, true))),
+    db.select({ id: metatraderConnections.id, accountId: metatraderConnections.accountId, copyRole: metatraderConnections.copyRole }).from(metatraderConnections).where(eq(metatraderConnections.userId, userId)),
+  ])
+  const active = new Set(groups.map((g) => g.id))
+  const leads = new Set(groups.map((g) => g.leaderAccountId))
+  const follows = new Set(followers.filter((f) => active.has(f.groupId)).map((f) => f.accountId))
+  for (const c of connections) {
+    const role = c.accountId == null ? null : leads.has(c.accountId) && follows.has(c.accountId) ? "both" : leads.has(c.accountId) ? "leader" : follows.has(c.accountId) ? "follower" : null
+    if (role !== (c.copyRole ?? null)) await db.update(metatraderConnections).set({ copyRole: role }).where(eq(metatraderConnections.id, c.id))
+  }
+}
+
 // The engine's heartbeat: every active group, once. It runs when a Copy Trading
 // page asks for fresh data, so it is as fast as the pages poll.
 export async function runEngine(userId: string, timeZone: string): Promise<CopyState> {
   const state = await loadCopyState(userId, timeZone)
+  await syncCopyRoles(userId).catch(() => undefined)
   const active = state.groups.filter((g) => g.status === "active")
   // without the brokers' positions there is nothing to compare: do nothing rather than read "no positions" as "all closed"
   if (!state.liveData) return state

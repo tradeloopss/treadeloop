@@ -8,7 +8,7 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { BACKGROUND_SETTING, LIVE_SETTING, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenAll, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenAll, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
@@ -57,6 +57,7 @@ export async function createCopyGroup(input: GroupInput, activate: boolean): Pro
         problem = err instanceof Error ? err.message : "It couldn't be activated."
       }
     }
+    await syncCopyRoles(userId).catch(() => undefined)
     done()
     return { ok: true, id, activated, problem }
   } catch (err) {
@@ -66,7 +67,10 @@ export async function createCopyGroup(input: GroupInput, activate: boolean): Pro
 
 const act = async <T extends object = object>(run: (who: { userId: string; timeZone: string }) => Promise<T | void>): Promise<Result<T>> => {
   try {
-    const result = await run(await who())
+    const me = await who()
+    const result = await run(me)
+    // whatever changed, the sync server is told at once which accounts are copying now
+    await syncCopyRoles(me.userId).catch(() => undefined)
     done()
     return { ok: true, ...((result ?? {}) as T) }
   } catch (err) {

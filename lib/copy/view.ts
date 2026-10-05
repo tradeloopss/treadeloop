@@ -40,6 +40,8 @@ export type AccountView = {
   propSync: PropSyncState
   // the symbols this account has traded, as its own broker spells them
   symbols: string[]
+  // fast: the sync server keeps a terminal open for this account, so it is read every second and trades at once
+  lane: "fast" | "standard"
 }
 
 export type FollowerView = { id: number; accountId: number; config: FollowerConfig; mappings: { leaderSymbol: string; followerSymbol: string }[] }

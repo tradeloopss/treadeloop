@@ -175,7 +175,10 @@ export function Cockpit() {
                       {r.account?.name ?? "Deleted account"}
                       <span className="block text-xs font-normal text-muted-foreground">{r.account?.platform}</span>
                     </th>
-                    <td className="py-2.5 ps-2.5">{r.account ? <HealthPill health={r.account.health} /> : "—"}</td>
+                    <td className="py-2.5 ps-2.5">
+                      {r.account ? <HealthPill health={r.account.health} /> : "—"}
+                      {r.account && active && <span className="mt-0.5 block text-[10px] font-semibold tracking-wide text-muted-foreground uppercase" title={r.account.lane === "fast" ? "The sync server keeps a terminal open for this account: it is read every second and trades at once." : "This account shares a terminal with others: it is read about every 30 seconds, and an order takes a few seconds longer."}>{r.account.lane === "fast" ? "⚡ Fast lane" : "Standard lane"}</span>}
+                    </td>
                     <td className="py-2.5 ps-2.5 text-end tabular-nums">{money(r.account?.balance)}</td>
                     <td className="py-2.5 ps-2.5 font-medium">{c.symbol}</td>
                     <td className={cn("py-2.5 ps-2.5 text-end font-semibold tabular-nums", c.p && (c.p.side === "long" ? "text-[var(--gain)]" : "text-[var(--loss)]"))}>
