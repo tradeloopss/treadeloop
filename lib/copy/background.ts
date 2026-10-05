@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm"
+import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
-import { copyGroups, metatraderConnections, user } from "@/lib/db/schema"
+import { copyGroups, copyPositions, metatraderConnections, user } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
 import { isAdminRole } from "@/lib/admin/roles"
 import { canUseFeature, normalizeReleases } from "@/lib/features/release"
@@ -41,7 +41,9 @@ export async function runBackground(budgetMs = 40_000): Promise<BackgroundResult
   if (!result.enabled) return result
 
   const groups = await db.select({ userId: copyGroups.userId, leaderAccountId: copyGroups.leaderAccountId, timeZone: copyGroups.timeZone }).from(copyGroups).where(eq(copyGroups.status, "active"))
-  const traders = [...new Set(groups.map((g) => g.userId))].slice(0, MAX_TRADERS)
+  // and anyone with a live position the engine touched in the last day: a close that is owed is settled even after copying is paused
+  const owed = await db.selectDistinct({ userId: copyPositions.userId }).from(copyPositions).where(and(eq(copyPositions.simulated, false), eq(copyPositions.role, "follower"), gte(copyPositions.updatedAt, new Date(Date.now() - 24 * 3_600_000)))).catch(() => [])
+  const traders = [...new Set([...groups.map((g) => g.userId), ...owed.map((o) => o.userId)])].slice(0, MAX_TRADERS)
   result.traders = traders.length
   if (!traders.length) {
     await recordHeartbeat("copy_engine")

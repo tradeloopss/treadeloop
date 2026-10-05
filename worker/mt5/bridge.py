@@ -215,7 +215,14 @@ def ensure_trading_login(account, password, server):
     (trade_allowed is false — e.g. it's the read-only investor session from the
     last /sync, or a fresh terminal)."""
     term = mt5.terminal_info()
-    if term is not None and term.connected and current_login()[0] == account and term.trade_allowed:
+    # Two different things must both be true. term.trade_allowed is only the
+    # terminal's "Algo Trading" button, and it stays on across a re-login with
+    # the read-only investor password (which every /sync does). The ACCOUNT's
+    # own trade_allowed is what says this session was opened with the master
+    # password: on an investor session it is False, and an order sent then is
+    # refused by the broker with retcode 10017 "Trade disabled".
+    info = mt5.account_info()
+    if term is not None and term.connected and current_login()[0] == account and term.trade_allowed and info is not None and info.trade_allowed:
         return
     if term is None:
         start_terminal(account, password, server)

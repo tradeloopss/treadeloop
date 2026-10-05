@@ -2368,6 +2368,9 @@ export const copyPositions = pgTable(
     status: text("status").notNull().default("open"), // open | closed
     simulated: boolean("simulated").notNull().default(true),
     realizedPnl: numeric("realizedPnl", { precision: 18, scale: 2 }),
+    // a close that is wanted (the leader closed, or Flatten All) and not yet confirmed by the broker
+    closeRequestedAt: timestamp("closeRequestedAt"),
+    closeAttempts: integer("closeAttempts").notNull().default(0),
     openedAt: timestamp("openedAt").notNull().defaultNow(),
     closedAt: timestamp("closedAt"),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),

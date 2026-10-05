@@ -302,6 +302,13 @@
       "when": 1791240000000,
       "tag": "0042_copy_group_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1791330000000,
+      "tag": "0043_copy_close_confirmation",
+      "breakpoints": true
     }
   ]
 }

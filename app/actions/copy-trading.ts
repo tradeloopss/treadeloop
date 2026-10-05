@@ -96,7 +96,7 @@ export const retryCopyOrder = async (orderId: number) => act(({ userId, timeZone
 // is confirmed again here, by the word the trader typed.
 export const disableAllFollowers = async (groupId: number) => act(({ userId }) => disableAll(userId, Number(groupId)))
 export const cancelCopyOrders = async (groupId: number) => act<{ cancelled: number }>(async ({ userId }) => ({ cancelled: await cancelOrders(userId, Number(groupId)) }))
-export const flattenCopyGroup = async (groupId: number, confirm: string) => act<{ closed: number; failed: number }>(({ userId, timeZone }) => flattenAll(userId, Number(groupId), String(confirm), timeZone))
+export const flattenCopyGroup = async (groupId: number, confirm: string) => act<{ closed: number; requested: number }>(({ userId, timeZone }) => flattenAll(userId, Number(groupId), String(confirm), timeZone))
 
 // Admin: whether the engine only works copies out (simulation) or also sends
 // them to brokers (live). Off by default; recorded in the audit log.

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
@@ -517,7 +517,7 @@ const specOf = (g: GroupView, symbol: string) => g.contracts.find((c) => c.symbo
 
 // Hands one order to the broker's queue — the same queue, with the same
 // prop-rule guard, as an order placed by hand in the Trade Manager.
-async function queue(ctx: Ctx, accountId: number, command: { kind: "place" | "close" | "partial_close" | "modify"; symbol: string; side: Side; volume?: number | null; stopLoss?: number | null; takeProfit?: number | null; positionRef?: string | null }): Promise<{ id: number | null; status: string; reason: string | null }> {
+async function queue(ctx: Pick<Ctx, "userId" | "state" | "prop">, accountId: number, command: { kind: "place" | "close" | "partial_close" | "modify"; symbol: string; side: Side; volume?: number | null; stopLoss?: number | null; takeProfit?: number | null; positionRef?: string | null }): Promise<{ id: number | null; status: string; reason: string | null }> {
   const account = ctx.state.accounts.find((a) => a.id === accountId)
   if (!account?.canExecute) return { id: null, status: "unsupported", reason: account?.executionNote ?? "This account can't receive orders." }
   const input = { accountId, broker: "mt5" as const, kind: command.kind, symbol: command.symbol, side: command.side, volume: command.volume ?? null, stopLoss: command.stopLoss ?? null, takeProfit: command.takeProfit ?? null, positionRef: command.positionRef ?? null, orderType: command.kind === "place" ? ("market" as const) : null }
@@ -618,7 +618,7 @@ async function copyChange(ctx: Ctx, leader: typeof copyPositions.$inferSelect, v
     const skip = !allowed.ok ? allowed.reason : off ? "Copying is switched off for this account." : action === "partial_close" && closing <= 0 ? "The proportional close is below the minimum quantity." : null
     const [order] = await db
       .insert(copyOrders)
-      .values({ userId: ctx.userId, groupId: g.id, correlationId: followerOrderId(master, pos.accountId), masterOrderId: master, masterAccountId: g.leaderAccountId, followerAccountId: pos.accountId, action, symbol: pos.symbol, leaderSymbol: leader.symbol, side: pos.side, quantity: String(closing || quantity), leaderQuantity: String(p.quantity), requestedPrice: str(p.price ?? p.entry), stopLoss: str(stopLoss), takeProfit: str(takeProfit), status: skip ? "skipped" : "pending", reason: skip, simulated: pos.simulated })
+      .values({ userId: ctx.userId, groupId: g.id, correlationId: followerOrderId(master, pos.accountId), masterOrderId: master, masterAccountId: g.leaderAccountId, followerAccountId: pos.accountId, action, symbol: pos.symbol, leaderSymbol: leader.symbol, side: pos.side, quantity: String(closing || quantity), leaderQuantity: String(p.quantity), requestedPrice: str(p.price ?? p.entry), stopLoss: str(stopLoss), takeProfit: str(takeProfit), status: skip ? "skipped" : "pending", reason: skip, decision: { positionId: pos.id }, simulated: pos.simulated })
       .onConflictDoNothing()
       .returning({ id: copyOrders.id })
     if (!order || skip) continue
@@ -638,6 +638,14 @@ async function copyChange(ctx: Ctx, leader: typeof copyPositions.$inferSelect, v
       }
     }
     await db.update(copyOrders).set({ status, reason, orderCommandId: commandId, executionPrice: pos.simulated ? str(p.price ?? p.entry) : null, updatedAt: new Date() }).where(eq(copyOrders.id, order.id))
+    // Live: nothing is taken as done until the broker says so (settle() applies
+    // it then). A full close is remembered as wanted, so that if the broker
+    // refuses it, or the ticket isn't known yet, it is tried again.
+    if (!pos.simulated) {
+      if (action === "close") await db.update(copyPositions).set({ closeRequestedAt: new Date(), updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+      else if (status !== "sent") await note(ctx.userId, { groupId: g.id, accountId: pos.accountId, level: "error", code: `order_${status}`, title: `Change not copied — ${ctx.state.accounts.find((a) => a.id === pos.accountId)?.name ?? "a follower"}`, body: reason, action: "Check the position in the Trade Manager and adjust it there if needed.", masterOrderId: master })
+      continue
+    }
     if (status !== "filled" && status !== "sent") {
       await note(ctx.userId, { groupId: g.id, accountId: pos.accountId, level: "error", code: `order_${status}`, title: `Change not copied — ${ctx.state.accounts.find((a) => a.id === pos.accountId)?.name ?? "a follower"}`, body: reason, action: "Check the position in the Trade Manager and adjust it there if needed.", masterOrderId: master })
       continue
@@ -706,24 +714,86 @@ async function bindPositions(userId: string, state: CopyState) {
   }
 }
 
-// Live orders: what the broker's executor said, written back to the copy.
+// How many times a close the broker refused is sent again, and how long between tries.
+const CLOSE_ATTEMPTS = 4
+const CLOSE_RETRY_MS = 8_000
+
+// Live orders, settled against what the brokers say. Nothing here trusts the
+// app's own records over the broker's: a position is closed when the broker
+// confirms the close or stops listing the ticket — never just because a close
+// was sent — and a close that was refused is sent again.
 async function reconcile(userId: string, state: CopyState) {
   await bindPositions(userId, state)
+  const keys = liveKeys.get(state.positions)
+  const name = (accountId: number) => state.accounts.find((a) => a.id === accountId)?.name ?? "a follower"
+
+  // 1. what the executor said about each order that was sent
   const waiting = await db.select().from(copyOrders).where(and(eq(copyOrders.userId, userId), inArray(copyOrders.status, ["sent", "pending"]), eq(copyOrders.simulated, false))).limit(100)
   const ids = waiting.map((o) => o.orderCommandId).filter((id): id is number => id != null)
-  if (!ids.length) return
-  const commands = await db.select({ id: orderCommands.id, status: orderCommands.status, message: orderCommands.resultMessage, updatedAt: orderCommands.updatedAt }).from(orderCommands).where(and(eq(orderCommands.userId, userId), inArray(orderCommands.id, ids)))
+  const commands = ids.length ? await db.select({ id: orderCommands.id, status: orderCommands.status, message: orderCommands.resultMessage, updatedAt: orderCommands.updatedAt }).from(orderCommands).where(and(eq(orderCommands.userId, userId), inArray(orderCommands.id, ids))) : []
   for (const o of waiting) {
     const c = commands.find((x) => x.id === o.orderCommandId)
     if (!c || c.status === "pending" || c.status === "sent") continue
     const filled = c.status === "filled"
+    const entry = o.action === "open" || o.action === "increase"
+    const positionId = Number((o.decision as { positionId?: number } | null)?.positionId) || null
     // the fill price, when the follower's position is already visible
-    const live = filled && (o.action === "open" || o.action === "increase") ? state.positions.find((p) => !p.simulated && p.accountId === o.followerAccountId && p.symbol === o.symbol && p.side === o.side) : undefined
+    const live = filled && entry ? state.positions.find((p) => !p.simulated && p.accountId === o.followerAccountId && p.symbol === o.symbol && p.side === o.side) : undefined
     const price = live?.entry ?? null
-    if (!filled && (o.action === "open" || o.action === "increase")) await db.update(copyPositions).set({ status: "closed", closedAt: new Date(), quantity: "0" }).where(and(eq(copyPositions.userId, userId), eq(copyPositions.correlationId, o.correlationId), eq(copyPositions.status, "open")))
+    if (!filled && entry) await db.update(copyPositions).set({ status: "closed", closedAt: new Date(), quantity: "0" }).where(and(eq(copyPositions.userId, userId), eq(copyPositions.correlationId, o.correlationId), eq(copyPositions.status, "open")))
+    if (filled && positionId) {
+      const [pos] = await db.select().from(copyPositions).where(and(eq(copyPositions.id, positionId), eq(copyPositions.userId, userId)))
+      if (pos && pos.status === "open") {
+        if (o.action === "close") await db.update(copyPositions).set({ status: "closed", closedAt: new Date(), quantity: "0", closeRequestedAt: null, updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+        else if (o.action === "partial_close") await db.update(copyPositions).set({ quantity: String(Math.max(0, Math.round((Number(pos.quantity) - Number(o.quantity)) * 1e8) / 1e8)), updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+        else await db.update(copyPositions).set({ stopLoss: o.stopLoss, takeProfit: o.takeProfit, updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+      }
+    }
     const requested = num(o.requestedPrice)
     await db.update(copyOrders).set({ status: c.status, reason: filled ? null : c.message, executionPrice: str(price), slippage: price != null && requested != null ? str((price - requested) * (o.side === "long" ? 1 : -1)) : null, latencyMs: filled ? Math.max(0, c.updatedAt.getTime() - o.createdAt.getTime()) : null, updatedAt: new Date() }).where(eq(copyOrders.id, o.id))
-    if (!filled) await note(userId, { groupId: o.groupId, accountId: o.followerAccountId, level: "error", code: `order_${c.status}`, title: `Order ${c.status} — ${state.accounts.find((a) => a.id === o.followerAccountId)?.name ?? "a follower"}`, body: c.message, action: "Check the account in the Trade Manager.", masterOrderId: o.masterOrderId })
+    // a refused close is not reported yet: it is about to be tried again
+    if (!filled && o.action !== "close") await note(userId, { groupId: o.groupId, accountId: o.followerAccountId, level: "error", code: `order_${c.status}`, title: `Order ${c.status} — ${name(o.followerAccountId)}`, body: c.message, action: "Check the account in the Trade Manager.", masterOrderId: o.masterOrderId })
+  }
+
+  // 2. a position recorded as closed that its broker still lists is not closed:
+  //    put it back, wanted closed (a Flatten All or a leader's close the broker refused)
+  const recent = await db.select().from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.simulated, false), eq(copyPositions.status, "closed"), isNotNull(copyPositions.positionRef), gte(copyPositions.updatedAt, new Date(Date.now() - 24 * 3_600_000))))
+  for (const pos of recent) {
+    const still = state.positions.find((p) => !p.simulated && p.accountId === pos.accountId && keys?.get(p) === pos.positionRef)
+    if (!still) continue
+    await db.update(copyPositions).set({ status: "open", closedAt: null, quantity: String(still.quantity), closeRequestedAt: new Date(), closeAttempts: 0, updatedAt: new Date(0) }).where(eq(copyPositions.id, pos.id))
+    await note(userId, { groupId: pos.groupId, accountId: pos.accountId, level: "warning", code: "close_unconfirmed", title: `Still open at the broker — ${name(pos.accountId)}`, body: `${pos.symbol} ${pos.side === "long" ? "BUY" : "SELL"} ${still.quantity} was recorded as closed, but the broker never confirmed it and still lists the position.`, action: "It is being closed now. If it is still there in a minute, close it on the broker's platform." })
+  }
+
+  // 3. every close that is wanted and not yet confirmed
+  const wanted = await db.select().from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.simulated, false), eq(copyPositions.status, "open"), isNotNull(copyPositions.closeRequestedAt)))
+  if (!wanted.length) return
+  const flying = new Set((await db.select({ decision: copyOrders.decision }).from(copyOrders).where(and(eq(copyOrders.userId, userId), eq(copyOrders.action, "close"), inArray(copyOrders.status, ["sent", "pending"]), eq(copyOrders.simulated, false)))).map((o) => Number((o.decision as { positionId?: number } | null)?.positionId)))
+  const prop = await propSync(userId)
+  for (const pos of wanted) {
+    const account = state.accounts.find((a) => a.id === pos.accountId)
+    const listed = !!pos.positionRef && state.positions.some((p) => !p.simulated && p.accountId === pos.accountId && keys?.get(p) === pos.positionRef)
+    // gone from an account read after the close was asked for: the broker has closed it
+    if (pos.positionRef && !listed && account?.lastSyncAt && new Date(account.lastSyncAt).getTime() > pos.closeRequestedAt!.getTime() && account.health === "connected") {
+      await db.update(copyPositions).set({ status: "closed", closedAt: new Date(), quantity: "0", closeRequestedAt: null, updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+      continue
+    }
+    if (!pos.positionRef || flying.has(pos.id) || Date.now() - pos.updatedAt.getTime() < CLOSE_RETRY_MS) continue
+    if (pos.closeAttempts >= CLOSE_ATTEMPTS) {
+      // said once, then left for the trader
+      if (pos.closeAttempts === CLOSE_ATTEMPTS) {
+        await db.update(copyPositions).set({ closeAttempts: CLOSE_ATTEMPTS + 1, updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+        await note(userId, { groupId: pos.groupId, accountId: pos.accountId, level: "error", code: "close_failed", title: `Could not close a position — ${name(pos.accountId)}`, body: `The broker refused to close ${pos.symbol} ${pos.side === "long" ? "BUY" : "SELL"} ${Number(pos.quantity)} after ${CLOSE_ATTEMPTS} tries.`, action: "Close it on the broker's platform now. It is still open." })
+      }
+      continue
+    }
+    const attempt = pos.closeAttempts + 1
+    const master = `x${pos.groupId}-p${pos.id}-${pos.closeRequestedAt!.getTime().toString(36)}`
+    const [order] = await db.insert(copyOrders).values({ userId, groupId: pos.groupId, correlationId: `${master}-c${attempt}`, masterOrderId: master, masterAccountId: state.groups.find((g) => g.id === pos.groupId)?.leaderAccountId ?? pos.accountId, followerAccountId: pos.accountId, action: "close", symbol: pos.symbol, leaderSymbol: pos.symbol, side: pos.side, quantity: pos.quantity, status: "pending", decision: { positionId: pos.id }, simulated: false }).onConflictDoNothing().returning({ id: copyOrders.id })
+    await db.update(copyPositions).set({ closeAttempts: attempt, updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+    if (!order) continue
+    const sent = await queue({ userId, state, prop }, pos.accountId, { kind: "close", symbol: pos.symbol, side: pos.side as Side, volume: Number(pos.quantity), positionRef: pos.positionRef })
+    await db.update(copyOrders).set({ status: sent.status, reason: sent.reason, orderCommandId: sent.id, updatedAt: new Date() }).where(eq(copyOrders.id, order.id))
   }
 }
 
@@ -732,12 +802,15 @@ async function reconcile(userId: string, state: CopyState) {
 export async function runEngine(userId: string, timeZone: string): Promise<CopyState> {
   const state = await loadCopyState(userId, timeZone)
   const active = state.groups.filter((g) => g.status === "active")
-  // without the leader's positions there is nothing to compare: do nothing rather than read "no positions" as "all closed"
-  if (!active.length || !state.liveData) return state
+  // without the brokers' positions there is nothing to compare: do nothing rather than read "no positions" as "all closed"
+  if (!state.liveData) return state
+  // Orders that went to a broker are settled whatever the mode or the groups'
+  // state is now: a close that is owed is owed even after copying is paused.
+  await reconcile(userId, state)
+  if (!active.length) return state
   const now = new Date()
   const prop = await propSync(userId)
   let changes = 0
-  if (state.mode === "live") await reconcile(userId, state)
   for (const group of active) changes += await runGroup({ userId, state, group, mode: state.mode, ...clock(timeZone, now), prop, now })
   if (state.mode === "live" && changes > 0) await reconcile(userId, state)
   return changes > 0 || state.mode === "live" ? loadCopyState(userId, timeZone) : state
@@ -786,30 +859,24 @@ export async function cancelOrders(userId: string, groupId: number): Promise<num
   return cancelled.length
 }
 
-// Closes every position the group's followers hold through Copy Trading.
-export async function flattenAll(userId: string, groupId: number, confirm: string, timeZone: string): Promise<{ closed: number; failed: number }> {
+// Closes every position the group's followers hold through Copy Trading. A
+// simulated position is closed here and now. A live one is asked closed at its
+// broker, and counts as closed only when the broker confirms — a close the
+// broker refuses is sent again (see reconcile).
+export async function flattenAll(userId: string, groupId: number, confirm: string, timeZone: string): Promise<{ closed: number; requested: number }> {
   if (confirm !== "FLATTEN") throw new Error("Type FLATTEN to confirm.")
   await ownGroup(userId, groupId)
-  const state = await loadCopyState(userId, timeZone)
-  const group = state.groups.find((g) => g.id === groupId)!
   const now = new Date()
-  const ctx: Ctx = { userId, state, group, mode: state.mode, ...clock(timeZone, now), prop: await propSync(userId), now }
   const held = await db.select().from(copyPositions).where(and(eq(copyPositions.groupId, groupId), eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open")))
-  let closed = 0
-  let failed = 0
-  for (const pos of held) {
-    if (!pos.simulated) {
-      const sent = pos.positionRef ? await queue(ctx, pos.accountId, { kind: "close", symbol: pos.symbol, side: pos.side as Side, volume: Number(pos.quantity), positionRef: pos.positionRef }) : { status: "failed" }
-      if (sent.status !== "sent") {
-        failed++
-        continue
-      }
-    }
-    await db.update(copyPositions).set({ status: "closed", closedAt: now, quantity: "0", updatedAt: now }).where(eq(copyPositions.id, pos.id))
-    closed++
-  }
+  const simulated = held.filter((p) => p.simulated)
+  const live = held.filter((p) => !p.simulated)
+  if (simulated.length) await db.update(copyPositions).set({ status: "closed", closedAt: now, quantity: "0", updatedAt: now }).where(inArray(copyPositions.id, simulated.map((p) => p.id)))
+  if (live.length) await db.update(copyPositions).set({ closeRequestedAt: now, closeAttempts: 0, updatedAt: new Date(0) }).where(inArray(copyPositions.id, live.map((p) => p.id)))
   await db.update(copyGroupFollowers).set({ enabled: false, updatedAt: now }).where(eq(copyGroupFollowers.groupId, groupId))
   await db.update(copyGroups).set({ status: "paused", updatedAt: now }).where(and(eq(copyGroups.id, groupId), eq(copyGroups.status, "active")))
-  await note(userId, { groupId, level: failed ? "error" : "warning", code: "flattened", title: `Flatten All: ${closed} ${closed === 1 ? "position" : "positions"} closed${failed ? `, ${failed} could not be` : ""}`, body: `${state.mode === "simulation" ? "Simulated positions were closed. " : ""}Copying is paused and every follower is switched off. The Leader's own positions were not touched.`, action: failed ? "Close the remaining positions in the Trade Manager or on the broker's platform now." : "Switch followers back on and activate the group when you are ready." })
-  return { closed, failed }
+  // send the closes now rather than on the next pass
+  const state = await loadCopyState(userId, timeZone)
+  if (live.length && state.liveData) await reconcile(userId, state)
+  await note(userId, { groupId, level: "warning", code: "flattened", title: `Flatten All: ${simulated.length ? `${simulated.length} simulated ${simulated.length === 1 ? "position" : "positions"} closed` : ""}${simulated.length && live.length ? ", " : ""}${live.length ? `${live.length} close ${live.length === 1 ? "order" : "orders"} sent to the broker` : ""}${!held.length ? "nothing was open" : ""}`, body: `${live.length ? "A live position shows as closed once its broker confirms; a close the broker refuses is sent again. " : ""}Copying is paused and every follower is switched off. The Leader's own positions were not touched.`, action: "Switch followers back on and activate the group when you are ready." })
+  return { closed: simulated.length, requested: live.length }
 }

@@ -313,12 +313,12 @@ export function Cockpit() {
         danger
         word="FLATTEN"
         pending={pending}
-        onConfirm={(typed) => run(() => flattenCopyGroup(group.id, typed), async (res) => ((res.failed ? toast.error : toast.success)(`${res.closed} ${res.closed === 1 ? "position" : "positions"} closed${res.failed ? `, ${res.failed} could not be closed` : ""}.`), setDialog(null), await after()))}
+        onConfirm={(typed) => run(() => flattenCopyGroup(group.id, typed), async (res) => (toast.success(res.requested ? `${res.requested} close ${res.requested === 1 ? "order" : "orders"} sent to the broker. Each position shows as closed once the broker confirms.` : `${res.closed} ${res.closed === 1 ? "position" : "positions"} closed.`), setDialog(null), await after()))}
       >
         <p>
           Closes every position the followers of “{group.name}” hold through Copy Trading, pauses the group and switches every follower off. <span className="font-semibold text-foreground">This cannot be undone.</span>
         </p>
-        <p>{state.mode === "live" ? "Close orders are sent to the brokers at market." : "This group is in simulation: the simulated positions are closed, and nothing is sent to a broker."} The Leader&apos;s own positions are not touched.</p>
+        <p>Live positions get a close order at market, and count as closed only when the broker confirms; a close the broker refuses is sent again. Simulated positions are closed here. The Leader&apos;s own positions are not touched.</p>
       </ConfirmDialog>
       <ConfirmDialog open={dialog === "delete"} onClose={() => setDialog(null)} title={`Delete “${group.name}”?`} action="Delete group" danger pending={pending} onConfirm={() => run(() => deleteCopyGroup(group.id), async () => (toast.success("Group deleted."), setDialog(null), router.replace("/copy-trading/cockpit"), await after()))}>
         <p>Its followers, contracts and rules are removed. What it copied stays in the history.</p>
