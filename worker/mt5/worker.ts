@@ -447,6 +447,12 @@ const UNSUPPORTED_PREFIX = `We don't have "`
 // Server time → the incremental window: re-read the last 3 days every time
 // (deals are de-duplicated by ticket), so nothing that arrives late is missed.
 const OVERLAP_SECONDS = 3 * 86_400
+// An account the copy lane keeps a terminal for (copy-lane.ts) is read there
+// many times a second, and the lane asks for a sync itself when one of its
+// positions closes. So here its deals are fetched less often: every login on a
+// shared terminal is one more session on the same account.
+const LANE_HELD_SYNC_MS = 5 * 60_000
+const LANE_FRESH_SECONDS = 20
 
 let normalizePending = false
 
@@ -547,8 +553,25 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
     const zoneChanged = measuredZone != null && measuredZone !== zone
 
     const newest = rows.reduce((max, r) => (r.time > max ? r.time : max), connection.lastDealTime ?? new Date(0))
-    const nextSyncAt = new Date(Date.now() + SYNC_INTERVAL_MS + Math.floor(Math.random() * 5_000))
+    const laneHeld = connection.copySlot != null && connection.copySeenAt != null && Date.now() - connection.copySeenAt.getTime() < LANE_FRESH_SECONDS * 1000
+    const nextSyncAt = new Date(Date.now() + (laneHeld ? LANE_HELD_SYNC_MS : SYNC_INTERVAL_MS) + Math.floor(Math.random() * 5_000))
     const changed = added > 0 || zoneChanged || firstSync
+    // While the lane has the account, the open positions in the database are
+    // the lane's, and nobody else's: it publishes a leader's new position only
+    // after it has sent the followers' orders for it, and the app's engine
+    // must not learn of that position from anywhere else first.
+    const laneHas = sql`(${metatraderConnections.copySlot} is not null and ${metatraderConnections.copySeenAt} > now() - make_interval(secs => ${LANE_FRESH_SECONDS}))`
+    const positionsData = res.positions.map((p) => ({
+      symbol: String(p.symbol ?? ""),
+      side: Number(p.type) === 1 ? "short" : "long", // MT5: 0 buy, 1 sell
+      volume: Number(p.volume ?? 0),
+      openPrice: Number(p.price_open ?? p.priceOpen ?? 0),
+      currentPrice: p.price_current != null ? Number(p.price_current) : p.priceCurrent != null ? Number(p.priceCurrent) : null,
+      stopLoss: p.sl ? Number(p.sl) : null,
+      takeProfit: p.tp ? Number(p.tp) : null,
+      profit: p.profit != null ? Number(p.profit) + Number(p.swap ?? 0) : null,
+      identifier: String(p.identifier ?? p.ticket ?? ""),
+    }))
     await db
       .update(metatraderConnections)
       .set({
@@ -559,20 +582,10 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
         currency: res.account.currency || null,
         balance: String(res.account.balance),
         equity: String(res.account.equity),
-        openPositions: res.positions.length,
+        openPositions: sql`case when ${laneHas} then ${metatraderConnections.openPositions} else ${res.positions.length} end`,
         // Keep the positions themselves (not just the count) so the app can
         // show running trades with real floating P&L / current price / SL / TP.
-        openPositionsData: res.positions.map((p) => ({
-          symbol: String(p.symbol ?? ""),
-          side: Number(p.type) === 1 ? "short" : "long", // MT5: 0 buy, 1 sell
-          volume: Number(p.volume ?? 0),
-          openPrice: Number(p.price_open ?? p.priceOpen ?? 0),
-          currentPrice: p.price_current != null ? Number(p.price_current) : p.priceCurrent != null ? Number(p.priceCurrent) : null,
-          stopLoss: p.sl ? Number(p.sl) : null,
-          takeProfit: p.tp ? Number(p.tp) : null,
-          profit: p.profit != null ? Number(p.profit) + Number(p.swap ?? 0) : null,
-          identifier: String(p.identifier ?? p.ticket ?? ""),
-        })),
+        openPositionsData: sql`case when ${laneHas} then ${metatraderConnections.openPositionsData} else ${JSON.stringify(positionsData)}::jsonb end`,
         ...(measuredZone ? { serverTimeZone: measuredZone } : {}),
         // A different time zone re-dates every trade: rebuild them all.
         ...(zoneChanged ? { normalizedAt: null } : {}),
@@ -666,20 +679,35 @@ async function flushNormalize() {
 // itself, the first-run account wizard, crash reports — and some block the
 // Python API until closed. Anything that isn't a terminal's main window
 // ("<login> - <server>…" or "MetaTrader 5 - …") gets closed.
+//
+// But only once it has been there for two looks in a row (ten seconds apart).
+// A terminal shows windows of its own for a moment while it starts, and since
+// MetaTrader build 6230 closing one of those crashes it: that was one start in
+// three, measured, and none with the windows left alone. A window that is
+// really stuck is still there the second time.
+//
+// A Wine desktop ("<name> - Wine Desktop") is never closed: the copy lane's
+// terminals each live in one, and closing it shuts down everything inside.
+const straySeen = new Set<string>()
 function closeStrayWindows() {
   execFile("wmctrl", ["-lp"], { env: { ...process.env, DISPLAY } }, (err, stdout) => {
     if (err) return
+    const now = new Set<string>()
     for (const line of stdout.split("\n")) {
       const match = /^(0x[0-9a-f]+)\s+-?\d+\s+(\d+)\s+\S+\s?(.*)$/i.exec(line.trim())
       if (!match) continue
       const [, id, pid, title] = match
-      if (/^(\d+ - |MetaTrader 5)/.test(title)) continue
+      if (/^(\d+ - |MetaTrader 5)/.test(title) || / - Wine Desktop$/i.test(title)) continue
       // MT4 terminals (C:\mt4\<slot>) only run for the few seconds of an
       // export, which the bridge ends itself — closing their windows (the
       // main one is titled "<login>: <server> - …") would kill the export.
       if (isMt4Process(Number(pid))) continue
-      execFile("wmctrl", ["-i", "-c", id], { env: { ...process.env, DISPLAY } }, () => {})
+      const key = `${id} ${title}`
+      now.add(key)
+      if (straySeen.has(key)) execFile("wmctrl", ["-i", "-c", id], { env: { ...process.env, DISPLAY } }, () => {})
     }
+    straySeen.clear()
+    for (const key of now) straySeen.add(key)
   })
 }
 

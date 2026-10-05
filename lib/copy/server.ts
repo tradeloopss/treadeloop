@@ -6,8 +6,9 @@ import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
-import { pointValueAt, resolveFollowerSymbol, specFor, type ContractSpec } from "./contracts"
-import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, calculateFollowerOrder, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
+import { pointValueAt, specFor, type ContractSpec } from "./contracts"
+import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
+import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
 import type { AccountView, CopyState, EventView, FollowerView, GroupLimits, GroupStatus, GroupView, OrderView, PositionView, Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
@@ -105,7 +106,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const [accountRows, mt, rith, prov, prefs, groupRows, followerRows, contractRows, ruleRows, limitRows, mappingRows, managed, orderRows, eventRows, closed, mode, live, prop, traded, background, beat] = await Promise.all([
     db.select().from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false))),
     db
-      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt })
+      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt, copyPingMs: metatraderConnections.copyPingMs })
       .from(metatraderConnections)
       .where(eq(metatraderConnections.userId, userId)),
     db.select({ accountId: rithmicConnections.accountId, login: rithmicConnections.login, lastSyncedAt: rithmicConnections.lastSyncedAt, lastSyncStatus: rithmicConnections.lastSyncStatus }).from(rithmicConnections).where(eq(rithmicConnections.userId, userId)),
@@ -206,6 +207,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       propSync: prop.get(a.id)?.state ?? NO_PROPSYNC,
       symbols: [...new Set([...mine.map((x) => x.symbol), ...traded.filter((t) => t.accountId === a.id).map((t) => t.symbol)])].slice(0, 120),
       lane: m?.copySlot && m.copySeenAt && Date.now() - m.copySeenAt.getTime() < LANE_FRESH_MS ? "fast" : "standard",
+      pingMs: m?.copySlot ? (m.copyPingMs ?? null) : null,
     }
   })
 
@@ -235,7 +237,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     positions.push({ accountId: m.accountId, symbol: m.symbol, side: m.side as Side, quantity, entry, current, openPnl: entry != null && current != null && point != null ? (current - entry) * (m.side === "long" ? 1 : -1) * quantity * point : null, stopLoss: num(m.stopLoss), takeProfit: num(m.takeProfit), simulated: true, groupId: m.groupId })
   }
 
-  const orders: OrderView[] = orderRows.map((o) => ({ id: o.id, groupId: o.groupId, correlationId: o.correlationId, masterOrderId: o.masterOrderId, masterAccountId: o.masterAccountId, followerAccountId: o.followerAccountId, action: o.action, symbol: o.symbol, leaderSymbol: o.leaderSymbol, side: o.side as Side, quantity: Number(o.quantity), leaderQuantity: num(o.leaderQuantity), requestedPrice: num(o.requestedPrice), executionPrice: num(o.executionPrice), status: o.status, reason: o.reason, slippage: num(o.slippage), latencyMs: o.latencyMs, simulated: o.simulated, createdAt: o.createdAt.toISOString(), steps: (Array.isArray((o.decision as { steps?: Step[] } | null)?.steps) ? (o.decision as { steps: Step[] }).steps : []) as Step[] }))
+  const orders: OrderView[] = orderRows.map((o) => ({ id: o.id, groupId: o.groupId, correlationId: o.correlationId, masterOrderId: o.masterOrderId, masterAccountId: o.masterAccountId, followerAccountId: o.followerAccountId, action: o.action, symbol: o.symbol, leaderSymbol: o.leaderSymbol, side: o.side as Side, quantity: Number(o.quantity), leaderQuantity: num(o.leaderQuantity), requestedPrice: num(o.requestedPrice), executionPrice: num(o.executionPrice), status: o.status, reason: o.reason, slippage: num(o.slippage), latencyMs: o.latencyMs, tradeloopMs: o.tradeloopMs, simulated: o.simulated, createdAt: o.createdAt.toISOString(), steps: (Array.isArray((o.decision as { steps?: Step[] } | null)?.steps) ? (o.decision as { steps: Step[] }).steps : []) as Step[] }))
   const events: EventView[] = eventRows.map((e) => ({ id: e.id, groupId: e.groupId, accountId: e.accountId, level: e.level as EventView["level"], code: e.code, title: e.title, body: e.body, action: e.action, masterOrderId: e.masterOrderId, createdAt: e.createdAt.toISOString(), unread: !e.readAt }))
 
   return { mode, accounts, groups, positions, orders, events, liveData: live != null, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
@@ -510,17 +512,25 @@ const ALERTS: Record<string, { title: string; action: string; level: EventView["
 
 type Ctx = { userId: string; state: CopyState; group: GroupView; mode: "simulation" | "live"; minutes: number; weekday: number; prop: Map<number, Prop>; now: Date }
 
-function clock(timeZone: string, now: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now)
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0"
-  return { minutes: Number(get("hour")) * 60 + Number(get("minute")), weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday")) }
-}
-
-const specOf = (g: GroupView, symbol: string) => g.contracts.find((c) => c.symbol === symbol.toUpperCase()) ?? specFor(symbol)
-
 // Hands one order to the broker's queue — the same queue, with the same
 // prop-rule guard, as an order placed by hand in the Trade Manager.
-async function queue(ctx: Pick<Ctx, "userId" | "state" | "prop">, accountId: number, command: { kind: "place" | "close" | "partial_close" | "modify"; symbol: string; side: Side; volume?: number | null; stopLoss?: number | null; takeProfit?: number | null; positionRef?: string | null }): Promise<{ id: number | null; status: string; reason: string | null }> {
+//
+// `clientRef` names the copy the order is (plan.ts). The sync server's copy
+// lane sends a leader's entries and closes by itself, the instant they happen,
+// under the same name; when it already has, that order IS this one, and
+// nothing more is sent. The name is unique in the table, so even if both
+// wrote at the same moment only one order would exist.
+async function queue(ctx: Pick<Ctx, "userId" | "state" | "prop">, accountId: number, command: { kind: "place" | "close" | "partial_close" | "modify"; symbol: string; side: Side; volume?: number | null; stopLoss?: number | null; takeProfit?: number | null; positionRef?: string | null; clientRef?: string | null }): Promise<{ id: number | null; status: string; reason: string | null }> {
+  const theirs = async () => {
+    if (!command.clientRef) return null
+    // Found and marked as booked in one statement. The lane takes back an
+    // order that never left only while it is not marked, so the order is
+    // either gone before this (and is queued below) or stays for good.
+    const [row] = await db.update(orderCommands).set({ lane: sql`${orderCommands.lane} || '{"booked":true}'::jsonb` }).where(and(eq(orderCommands.userId, ctx.userId), eq(orderCommands.clientRef, command.clientRef))).returning({ id: orderCommands.id })
+    return row ? { id: row.id, status: "sent", reason: null } : null
+  }
+  const already = await theirs()
+  if (already) return already
   const account = ctx.state.accounts.find((a) => a.id === accountId)
   if (!account?.canExecute) return { id: null, status: "unsupported", reason: account?.executionNote ?? "This account can't receive orders." }
   const input = { accountId, broker: "mt5" as const, kind: command.kind, symbol: command.symbol, side: command.side, volume: command.volume ?? null, stopLoss: command.stopLoss ?? null, takeProfit: command.takeProfit ?? null, positionRef: command.positionRef ?? null, orderType: command.kind === "place" ? ("market" as const) : null }
@@ -528,8 +538,11 @@ async function queue(ctx: Pick<Ctx, "userId" | "state" | "prop">, accountId: num
   const decision = guardOrder(input, ctx.prop.get(accountId)?.evaluation ?? null)
   const [row] = await db
     .insert(orderCommands)
-    .values({ userId: ctx.userId, accountId, broker: account.lane === "fast" ? "mt5c" : "mt5", kind: command.kind, status: decision.allowed ? "pending" : "blocked", positionRef: input.positionRef, symbol: command.symbol, side: command.side, volume: str(input.volume), stopLoss: str(input.stopLoss), takeProfit: str(input.takeProfit), orderType: input.orderType, ruleCheck: decision, resultMessage: decision.allowed ? null : decision.reasons.join(" ") })
+    .values({ userId: ctx.userId, accountId, broker: account.lane === "fast" ? "mt5c" : "mt5", kind: command.kind, status: decision.allowed ? "pending" : "blocked", positionRef: input.positionRef, symbol: command.symbol, side: command.side, volume: str(input.volume), stopLoss: str(input.stopLoss), takeProfit: str(input.takeProfit), orderType: input.orderType, ruleCheck: decision, resultMessage: decision.allowed ? null : decision.reasons.join(" "), clientRef: command.clientRef ?? null })
+    .onConflictDoNothing()
     .returning({ id: orderCommands.id })
+  // the lane wrote the same order in the meantime
+  if (!row) return (await theirs()) ?? { id: null, status: "failed", reason: "The order couldn't be queued." }
   return { id: row.id, status: decision.allowed ? "sent" : "blocked", reason: decision.allowed ? null : `Blocked by the account's prop-firm rules. ${decision.reasons.join(" ")}` }
 }
 
@@ -538,28 +551,38 @@ async function copyEntry(ctx: Ctx, leader: { id: number; version: number }, p: L
   const { group: g, state } = ctx
   const master = masterOrderId(g.id, leader.id, leader.version)
   const leaderAccount = state.accounts.find((a) => a.id === g.leaderAccountId)
+  // A new position, live: each follower's order has a name of its own, and the
+  // copy lane may already have sent it (a retry is a different order: no name).
+  const named = ctx.mode === "live" && action === "open" && !only
+  const refs = named ? g.followers.map((f) => entryRef(g.id, p.key, f.accountId)) : []
+  const sent = refs.length ? await db.select({ clientRef: orderCommands.clientRef, symbol: orderCommands.symbol, stopLoss: orderCommands.stopLoss, takeProfit: orderCommands.takeProfit, lane: orderCommands.lane }).from(orderCommands).where(and(eq(orderCommands.userId, ctx.userId), inArray(orderCommands.clientRef, refs), isNotNull(orderCommands.lane))) : []
   for (const f of g.followers) {
     if (only && f.accountId !== only.accountId) continue
     const account = state.accounts.find((a) => a.id === f.accountId)
     if (!account) continue
-    // the follower's own broker's name for the instrument
-    const symbol = resolveFollowerSymbol(p.symbol, f.mappings, account.symbols).symbol
-    const spec = specOf(g, symbol)
-    const open = state.positions.filter((x) => x.accountId === f.accountId && x.symbol.toUpperCase() === symbol.toUpperCase() && x.side === p.side).reduce((s, x) => s + x.quantity, 0)
-    const decision = calculateFollowerOrder({
-      order: { symbol: p.symbol, side: p.side, quantity, orderType: "market", entry: p.price ?? p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit },
-      spec,
-      config: f.config,
+    const clientRef = named ? entryRef(g.id, p.key, f.accountId) : null
+    const theirs = clientRef ? sent.find((c) => c.clientRef === clientRef && c.lane?.decision && c.symbol) : undefined
+    const own = decideEntry({
+      rules: g.rules,
+      contracts: g.contracts,
+      follower: { config: f.config, mappings: f.mappings, symbols: account.symbols },
+      position: p,
+      quantity,
       leaderEquity: leaderAccount?.equity ?? leaderAccount?.balance ?? null,
-      account: { equity: account.equity ?? account.balance, dayPnl: account.dayPnl, openNotional: account.openNotional, openQuantity: open, connected: ["connected", "syncing", "warning"].includes(account.health) },
+      account: { equity: account.equity ?? account.balance, dayPnl: account.dayPnl, openNotional: account.openNotional, connected: ["connected", "syncing", "warning"].includes(account.health), openQuantity: (symbol, side) => state.positions.filter((x) => x.accountId === f.accountId && x.symbol.toUpperCase() === symbol.toUpperCase() && x.side === side).reduce((s, x) => s + x.quantity, 0) },
       propSync: g.limits.respectPropSync ? account.propSync : NO_PROPSYNC,
-      rules: { rules: g.rules, imported: g.contracts.map((c) => c.symbol), minutes: ctx.minutes, weekday: ctx.weekday },
+      minutes: ctx.minutes,
+      weekday: ctx.weekday,
       now: ctx.now,
     })
+    // An order the lane has sent is recorded as it was sent, not as it would be
+    // worked out now (the follower's own new position already counts by now).
+    const decision: Decision = theirs?.lane?.decision ?? own.decision
+    const symbol = theirs?.symbol ?? own.symbol
     const correlationId = followerOrderId(master, f.accountId) + (only?.suffix ?? "")
-    const entry = p.price ?? p.entry
-    const sl = g.rules.stopLoss ? translatePrice({ leaderPrice: p.stopLoss, leaderEntry: p.entry, followerEntry: entry, leaderSymbol: p.symbol, followerSymbol: symbol }) : null
-    const tp = g.rules.takeProfit ? translatePrice({ leaderPrice: p.takeProfit, leaderEntry: p.entry, followerEntry: entry, leaderSymbol: p.symbol, followerSymbol: symbol }) : null
+    const entry = own.entry
+    const sl = theirs ? num(theirs.stopLoss) : own.stopLoss
+    const tp = theirs ? num(theirs.takeProfit) : own.takeProfit
     const skipped = decision.blockedBy === "disabled"
     const [order] = await db
       .insert(copyOrders)
@@ -572,7 +595,7 @@ async function copyEntry(ctx: Ctx, leader: { id: number; version: number }, p: L
       if (!skipped) await alert(ctx, f.accountId, account.name, decision, master, `${p.side === "long" ? "BUY" : "SELL"} ${quantity} ${p.symbol}`)
       continue
     }
-    await place(ctx, order.id, { leaderPositionId: leader.id, accountId: f.accountId, symbol, side: p.side, quantity: decision.finalQuantity, entry, stopLoss: sl, takeProfit: tp, correlationId })
+    await place(ctx, order.id, { leaderPositionId: leader.id, accountId: f.accountId, symbol, side: p.side, quantity: decision.finalQuantity, entry, stopLoss: sl, takeProfit: tp, correlationId, clientRef, positionRef: theirs?.lane?.ticket ?? null })
   }
 }
 
@@ -581,12 +604,12 @@ async function alert(ctx: Ctx, accountId: number, accountName: string, decision:
   await note(ctx.userId, { groupId: ctx.group.id, accountId, level: a.level, code: `blocked_${decision.blockedBy ?? "rules"}`, title: `${a.title} — ${accountName}`, body: `Leader: ${what}. ${decision.reason}`, action: a.action, masterOrderId: master })
 }
 
-async function place(ctx: Ctx, orderId: number, o: { leaderPositionId: number; accountId: number; symbol: string; side: Side; quantity: number; entry: number | null; stopLoss: number | null; takeProfit: number | null; correlationId: string }) {
+async function place(ctx: Ctx, orderId: number, o: { leaderPositionId: number; accountId: number; symbol: string; side: Side; quantity: number; entry: number | null; stopLoss: number | null; takeProfit: number | null; correlationId: string; clientRef?: string | null; positionRef?: string | null }) {
   let status = "filled"
   let reason: string | null = null
   let commandId: number | null = null
   if (ctx.mode === "live") {
-    const sent = await queue(ctx, o.accountId, { kind: "place", symbol: o.symbol, side: o.side, volume: o.quantity, stopLoss: o.stopLoss, takeProfit: o.takeProfit })
+    const sent = await queue(ctx, o.accountId, { kind: "place", symbol: o.symbol, side: o.side, volume: o.quantity, stopLoss: o.stopLoss, takeProfit: o.takeProfit, clientRef: o.clientRef })
     status = sent.status
     reason = sent.reason
     commandId = sent.id
@@ -600,7 +623,7 @@ async function place(ctx: Ctx, orderId: number, o: { leaderPositionId: number; a
   // the follower's own position: added to when it already holds this trade
   const [held] = await db.select().from(copyPositions).where(and(eq(copyPositions.groupId, ctx.group.id), eq(copyPositions.role, "follower"), eq(copyPositions.accountId, o.accountId), eq(copyPositions.leaderPositionId, o.leaderPositionId), eq(copyPositions.status, "open")))
   if (held) await db.update(copyPositions).set({ quantity: String(Number(held.quantity) + o.quantity), updatedAt: new Date() }).where(eq(copyPositions.id, held.id))
-  else await db.insert(copyPositions).values({ userId: ctx.userId, groupId: ctx.group.id, accountId: o.accountId, role: "follower", symbol: o.symbol, side: o.side, quantity: String(o.quantity), entryPrice: str(o.entry), stopLoss: str(o.stopLoss), takeProfit: str(o.takeProfit), leaderPositionId: o.leaderPositionId, correlationId: o.correlationId, simulated: ctx.mode === "simulation" })
+  else await db.insert(copyPositions).values({ userId: ctx.userId, groupId: ctx.group.id, accountId: o.accountId, role: "follower", symbol: o.symbol, side: o.side, quantity: String(o.quantity), entryPrice: str(o.entry), stopLoss: str(o.stopLoss), takeProfit: str(o.takeProfit), leaderPositionId: o.leaderPositionId, correlationId: o.correlationId, positionRef: o.positionRef ?? null, simulated: ctx.mode === "simulation" })
 }
 
 // A change to a position the followers already hold: partial close, close, stop, target.
@@ -611,7 +634,7 @@ async function copyChange(ctx: Ctx, leader: typeof copyPositions.$inferSelect, v
   const allowed = validateCopyRules(g.rules, action, { side: p.side, orderType: "market", symbol: p.symbol }, { imported: g.contracts.map((c) => c.symbol), minutes: ctx.minutes, weekday: ctx.weekday })
   for (const pos of held) {
     const follower = g.followers.find((f) => f.accountId === pos.accountId)
-    const spec = specOf(g, pos.symbol)
+    const spec = specOf(g.contracts, pos.symbol)
     const quantity = Number(pos.quantity)
     const closing = action === "close" ? quantity : action === "partial_close" ? proportionalClose(quantity, change.fraction ?? 0, spec) : 0
     const stopLoss = action === "modify_sl" || action === "trailing_stop" ? translatePrice({ leaderPrice: p.stopLoss, leaderEntry: num(leader.entryPrice), followerEntry: num(pos.entryPrice), leaderSymbol: leader.symbol, followerSymbol: pos.symbol }) : num(pos.stopLoss)
@@ -634,7 +657,9 @@ async function copyChange(ctx: Ctx, leader: typeof copyPositions.$inferSelect, v
         status = "failed"
         reason = "The follower's position hasn't shown up on its account yet, so it couldn't be changed. Check the account and close or adjust it there."
       } else {
-        const sent = await queue(ctx, pos.accountId, closing > 0 ? { kind: closing >= quantity ? "close" : "partial_close", symbol: pos.symbol, side: pos.side as Side, volume: closing, positionRef: pos.positionRef } : { kind: "modify", symbol: pos.symbol, side: pos.side as Side, stopLoss, takeProfit, positionRef: pos.positionRef })
+        // the leader's full close is the one change the lane also makes by itself
+        const clientRef = action === "close" && leader.positionRef ? closeRef(g.id, leader.positionRef, pos.accountId) : null
+        const sent = await queue(ctx, pos.accountId, closing > 0 ? { kind: closing >= quantity ? "close" : "partial_close", symbol: pos.symbol, side: pos.side as Side, volume: closing, positionRef: pos.positionRef, clientRef } : { kind: "modify", symbol: pos.symbol, side: pos.side as Side, stopLoss, takeProfit, positionRef: pos.positionRef })
         status = sent.status
         reason = sent.reason
         commandId = sent.id
@@ -720,6 +745,8 @@ async function bindPositions(userId: string, state: CopyState) {
 // How many times a close the broker refused is sent again, and how long between tries.
 const CLOSE_ATTEMPTS = 4
 const CLOSE_RETRY_MS = 8_000
+// An order the copy lane sent and has said nothing about for this long is taken as lost.
+const LANE_ORDER_LOST_MS = 120_000
 
 // Live orders, settled against what the brokers say. Nothing here trusts the
 // app's own records over the broker's: a position is closed when the broker
@@ -735,16 +762,28 @@ async function reconcile(userId: string, state: CopyState) {
   // 1. what the executor said about each order that was sent
   const waiting = await db.select().from(copyOrders).where(and(eq(copyOrders.userId, userId), inArray(copyOrders.status, ["sent", "pending"]), eq(copyOrders.simulated, false))).limit(100)
   const ids = waiting.map((o) => o.orderCommandId).filter((id): id is number => id != null)
-  const commands = ids.length ? await db.select({ id: orderCommands.id, status: orderCommands.status, message: orderCommands.resultMessage, updatedAt: orderCommands.updatedAt }).from(orderCommands).where(and(eq(orderCommands.userId, userId), inArray(orderCommands.id, ids))) : []
+  const commands = ids.length ? await db.select({ id: orderCommands.id, status: orderCommands.status, message: orderCommands.resultMessage, updatedAt: orderCommands.updatedAt, lane: orderCommands.lane }).from(orderCommands).where(and(eq(orderCommands.userId, userId), inArray(orderCommands.id, ids))) : []
   for (const o of waiting) {
-    const c = commands.find((x) => x.id === o.orderCommandId)
-    if (!c || c.status === "pending" || c.status === "sent") continue
+    const c = commands.find((x) => x.id === o.orderCommandId) ?? (o.orderCommandId != null && o.status === "sent" ? { id: o.orderCommandId, status: "failed", message: "The order was not sent: its record is gone. Use Retry to send it again.", updatedAt: new Date(), lane: null } : undefined)
+    if (!c || c.status === "pending") continue
+    if (c.status === "sent") {
+      // An order the lane sent and never reported on (it stopped in between).
+      // It can't be known from here whether the broker took it, so it is not
+      // sent again: the trader is told to look.
+      if (!c.lane || Date.now() - c.updatedAt.getTime() < LANE_ORDER_LOST_MS) continue
+      c.status = "failed"
+      c.message = "The copy lane sent this order and stopped before the broker answered. Check the account: the position may or may not be open."
+      await db.update(orderCommands).set({ status: "failed", resultMessage: c.message, updatedAt: new Date() }).where(and(eq(orderCommands.id, c.id), eq(orderCommands.status, "sent")))
+    }
     const filled = c.status === "filled"
     const entry = o.action === "open" || o.action === "increase"
     const positionId = Number((o.decision as { positionId?: number } | null)?.positionId) || null
     // the fill price, when the follower's position is already visible
     const live = filled && entry ? state.positions.find((p) => !p.simulated && p.accountId === o.followerAccountId && p.symbol === o.symbol && p.side === o.side) : undefined
-    const price = live?.entry ?? null
+    const price = c.lane?.price ?? live?.entry ?? null
+    // Timed by the lane when it sent the order itself: from seeing the leader's
+    // trade to the broker's answer, and how much of that was TradeLoop's.
+    const timed = c.lane && c.lane.brokerMs != null ? { latencyMs: Math.round(c.lane.tradeloopMs + c.lane.brokerMs), tradeloopMs: Math.round(c.lane.tradeloopMs) } : null
     if (!filled && entry) await db.update(copyPositions).set({ status: "closed", closedAt: new Date(), quantity: "0" }).where(and(eq(copyPositions.userId, userId), eq(copyPositions.correlationId, o.correlationId), eq(copyPositions.status, "open")))
     if (filled && positionId) {
       const [pos] = await db.select().from(copyPositions).where(and(eq(copyPositions.id, positionId), eq(copyPositions.userId, userId)))
@@ -755,7 +794,7 @@ async function reconcile(userId: string, state: CopyState) {
       }
     }
     const requested = num(o.requestedPrice)
-    await db.update(copyOrders).set({ status: c.status, reason: filled ? null : c.message, executionPrice: str(price), slippage: price != null && requested != null ? str((price - requested) * (o.side === "long" ? 1 : -1)) : null, latencyMs: filled ? Math.max(0, c.updatedAt.getTime() - o.createdAt.getTime()) : null, updatedAt: new Date() }).where(eq(copyOrders.id, o.id))
+    await db.update(copyOrders).set({ status: c.status, reason: filled ? null : c.message, executionPrice: str(price), slippage: entry && price != null && requested != null ? str((price - requested) * (o.side === "long" ? 1 : -1)) : null, latencyMs: filled ? (timed?.latencyMs ?? Math.max(0, c.updatedAt.getTime() - o.createdAt.getTime())) : null, tradeloopMs: filled ? (timed?.tradeloopMs ?? null) : null, updatedAt: new Date() }).where(eq(copyOrders.id, o.id))
     // a refused close is not reported yet: it is about to be tried again
     if (!filled && o.action !== "close") await note(userId, { groupId: o.groupId, accountId: o.followerAccountId, level: "error", code: `order_${c.status}`, title: `Order ${c.status} — ${name(o.followerAccountId)}`, body: c.message, action: "Check the account in the Trade Manager.", masterOrderId: o.masterOrderId })
   }
@@ -816,7 +855,58 @@ export async function syncCopyRoles(userId: string): Promise<void> {
   const follows = new Set(followers.filter((f) => active.has(f.groupId)).map((f) => f.accountId))
   for (const c of connections) {
     const role = c.accountId == null ? null : leads.has(c.accountId) && follows.has(c.accountId) ? "both" : leads.has(c.accountId) ? "leader" : follows.has(c.accountId) ? "follower" : null
-    if (role !== (c.copyRole ?? null)) await db.update(metatraderConnections).set({ copyRole: role }).where(eq(metatraderConnections.id, c.id))
+    if (role !== (c.copyRole ?? null)) await db.update(metatraderConnections).set({ copyRole: role, ...(role === "leader" || role === "both" ? {} : { copyPlan: null }) }).where(eq(metatraderConnections.id, c.id))
+  }
+}
+
+// Takes the plans away: the lane stops copying by itself at its next look (a
+// second) and only reports, until the engine has written new ones from the
+// setup as it is now. Called whenever the trader changes anything, and for
+// everyone when Copy Trading goes back to simulation.
+export async function clearPlans(userId?: string): Promise<void> {
+  await db.update(metatraderConnections).set({ copyPlan: null }).where(and(isNotNull(metatraderConnections.copyPlan), userId ? eq(metatraderConnections.userId, userId) : sql`true`))
+}
+
+// Writes each leader's plan (plan.ts): what the copy lane needs to size and
+// send the followers' orders the instant the leader trades. Live mode only,
+// and only for a group that is switched on; rewritten on every pass of the
+// engine, so the risk picture in it is never more than a few seconds old.
+async function writePlans(userId: string, state: CopyState, prop: Map<number, Prop>, timeZone: string) {
+  const connections = await db.select({ id: metatraderConnections.id, accountId: metatraderConnections.accountId, has: sql<boolean>`${metatraderConnections.copyPlan} is not null` }).from(metatraderConnections).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.platform, "mt5")))
+  const leading = (accountId: number | null) => (state.mode === "live" && accountId != null ? state.groups.filter((g) => g.status === "active" && g.leaderAccountId === accountId) : [])
+  if (!connections.some((c) => c.has || leading(c.accountId).length)) return
+  // followers' positions already held for the leaders' open ones: what a leader's close closes
+  const held = await db.select({ id: copyPositions.id, groupId: copyPositions.groupId, accountId: copyPositions.accountId, role: copyPositions.role, positionRef: copyPositions.positionRef, leaderPositionId: copyPositions.leaderPositionId, simulated: copyPositions.simulated, closeRequestedAt: copyPositions.closeRequestedAt }).from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.status, "open")))
+  const now = Date.now()
+  for (const c of connections) {
+    const groups = leading(c.accountId)
+    if (!groups.length) {
+      if (c.has) await db.update(metatraderConnections).set({ copyPlan: null }).where(eq(metatraderConnections.id, c.id))
+      continue
+    }
+    const plan: LanePlan = {
+      v: 1,
+      userId,
+      at: now,
+      until: now + PLAN_TTL_MS,
+      groups: groups.map((g) => ({
+        id: g.id,
+        timeZone,
+        rules: g.rules,
+        contracts: g.contracts,
+        followers: g.followers.flatMap((f) => {
+          const account = state.accounts.find((a) => a.id === f.accountId)
+          if (!account?.canExecute) return []
+          return [{ accountId: f.accountId, name: account.name, config: f.config, mappings: f.mappings, symbols: account.symbols, closedToday: account.dayPnl - (account.openPnl ?? 0), propSync: g.limits.respectPropSync ? account.propSync : NO_PROPSYNC, guard: guardView(prop.get(f.accountId)?.evaluation ?? null) }]
+        }),
+        links: held.flatMap((pos) => {
+          if (pos.groupId !== g.id || pos.role !== "follower" || pos.simulated || !pos.positionRef || pos.closeRequestedAt) return []
+          const leaderRef = held.find((x) => x.id === pos.leaderPositionId)?.positionRef
+          return leaderRef ? [{ leaderRef, accountId: pos.accountId, positionRef: pos.positionRef }] : []
+        }),
+      })),
+    }
+    await db.update(metatraderConnections).set({ copyPlan: plan }).where(eq(metatraderConnections.id, c.id))
   }
 }
 
@@ -831,13 +921,20 @@ export async function runEngine(userId: string, timeZone: string): Promise<CopyS
   // Orders that went to a broker are settled whatever the mode or the groups'
   // state is now: a close that is owed is owed even after copying is paused.
   await reconcile(userId, state)
-  if (!active.length) return state
+  if (!active.length) {
+    // nothing is switched on: any plan left over is taken away
+    await writePlans(userId, state, new Map(), timeZone).catch(() => undefined)
+    return state
+  }
   const now = new Date()
   const prop = await propSync(userId)
   let changes = 0
   for (const group of active) changes += await runGroup({ userId, state, group, mode: state.mode, ...clock(timeZone, now), prop, now })
   if (state.mode === "live" && changes > 0) await reconcile(userId, state)
-  return changes > 0 || state.mode === "live" ? loadCopyState(userId, timeZone) : state
+  const after = changes > 0 || state.mode === "live" ? await loadCopyState(userId, timeZone) : state
+  // from what the books say now, so a position just taken over is in it
+  await writePlans(userId, after, prop, timeZone).catch(() => undefined)
+  return after
 }
 
 // Tries a refused entry again with the follower's current settings, while the

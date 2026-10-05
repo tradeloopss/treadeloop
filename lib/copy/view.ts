@@ -42,6 +42,8 @@ export type AccountView = {
   symbols: string[]
   // fast: the sync server keeps a terminal open for this account, so it is read every second and trades at once
   lane: "fast" | "standard"
+  // the round trip from the sync server to this account's broker, as its terminal measures it
+  pingMs: number | null
 }
 
 export type FollowerView = { id: number; accountId: number; config: FollowerConfig; mappings: { leaderSymbol: string; followerSymbol: string }[] }
@@ -78,7 +80,10 @@ export type OrderView = {
   status: string
   reason: string | null
   slippage: number | null
+  // from the leader's trade being seen to the broker's answer; and TradeLoop's
+  // own share of it, when the copy lane sent the order itself and timed it
   latencyMs: number | null
+  tradeloopMs: number | null
   simulated: boolean
   createdAt: string
   steps: Step[]
@@ -99,6 +104,15 @@ export type CopyState = {
   // the background engine: whether it is switched on, and when it last ran
   engine: { background: boolean; lastRunAt: string | null; ok: boolean }
   at: string
+}
+
+// An order's latency in words. When the copy lane sent the order itself it timed
+// both halves: its own (seeing the leader's trade, sizing, handing the order
+// over) and the broker's round trip, which no software on our side can shorten.
+export function latencyParts(o: Pick<OrderView, "latencyMs" | "tradeloopMs">): { total: string; split: string | null } | null {
+  if (o.latencyMs == null) return null
+  if (o.tradeloopMs == null) return { total: `${o.latencyMs}ms`, split: null }
+  return { total: `${o.latencyMs}ms`, split: `TradeLoop ${o.tradeloopMs}ms + broker ${Math.max(0, o.latencyMs - o.tradeloopMs)}ms` }
 }
 
 export const ACTION_LABELS: Record<string, string> = { open: "Entry", increase: "Add", partial_close: "Partial close", close: "Close", modify_sl: "Stop loss", trailing_stop: "Trailing stop", modify_tp: "Take profit", cancel: "Cancel" }

@@ -3,6 +3,7 @@ import type { RuleConfig } from "@/lib/propmax/types"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { Mt5Position, RithmicPosition } from "@/lib/trade-manager"
 import type { GuardDecision } from "@/lib/order-execution/types"
+import type { LanePlan, LaneReport } from "@/lib/copy/plan"
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -268,6 +269,12 @@ export const metatraderConnections = pgTable("metatrader_connections", {
   copyRole: text("copyRole"),
   copySlot: text("copySlot"),
   copySeenAt: timestamp("copySeenAt"),
+  // On a leader: what the lane needs to copy its trades by itself the instant
+  // they happen (lib/copy/plan.ts), rewritten by the engine every few seconds
+  // while copying is live. Null, or past its time, and the lane only reports.
+  copyPlan: jsonb("copyPlan").$type<LanePlan>(),
+  // The terminal's own round trip to the broker's server, in ms, as the lane last read it.
+  copyPingMs: integer("copyPingMs"),
   // pending (waiting for the worker's first login) → connected, or error
   // (login rejected / broker not supported — needs reconnecting; not retried).
   status: text("status").notNull().default("pending"),
@@ -1295,6 +1302,13 @@ export const orderCommands = pgTable(
     // Executor scheduling: who's working it and how many tries.
     leaseUntil: timestamp("leaseUntil"),
     attempts: integer("attempts").notNull().default(0),
+    // Copy Trading: which copy this order is (lib/copy/plan.ts entryRef /
+    // closeRef). Unique where set (index order_commands_client_ref, in the
+    // migration), so the copy lane and the app's engine can never both send
+    // the same one: whoever writes the row first, the other takes it over.
+    clientRef: text("clientRef"),
+    // What the copy lane decided and measured, for an order it sent by itself.
+    lane: jsonb("lane").$type<LaneReport>(),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),
   },
@@ -2410,6 +2424,9 @@ export const copyOrders = pgTable(
     decision: jsonb("decision").$type<Record<string, unknown>>(),
     slippage: numeric("slippage", { precision: 18, scale: 8 }),
     latencyMs: integer("latencyMs"),
+    // TradeLoop's own share of latencyMs, when the copy lane measured it: from
+    // seeing the leader's trade to the follower's order leaving. The rest is the broker.
+    tradeloopMs: integer("tradeloopMs"),
     simulated: boolean("simulated").notNull().default(true),
     orderCommandId: integer("orderCommandId"),
     createdAt: timestamp("createdAt").notNull().defaultNow(),

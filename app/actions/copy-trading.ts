@@ -8,7 +8,7 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenAll, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenAll, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
@@ -58,6 +58,7 @@ export async function createCopyGroup(input: GroupInput, activate: boolean): Pro
       }
     }
     await syncCopyRoles(userId).catch(() => undefined)
+    await clearPlans(userId).catch(() => undefined)
     done()
     return { ok: true, id, activated, problem }
   } catch (err) {
@@ -69,8 +70,10 @@ const act = async <T extends object = object>(run: (who: { userId: string; timeZ
   try {
     const me = await who()
     const result = await run(me)
-    // whatever changed, the sync server is told at once which accounts are copying now
+    // whatever changed, the sync server is told at once which accounts are copying now,
+    // and stops copying by itself until the engine has planned from the new setup
     await syncCopyRoles(me.userId).catch(() => undefined)
+    await clearPlans(me.userId).catch(() => undefined)
     done()
     return { ok: true, ...((result ?? {}) as T) }
   } catch (err) {
@@ -108,6 +111,8 @@ export async function setCopyTradingLive(live: boolean): Promise<Result<{ messag
   try {
     const admin = await assertAdmin({ team: ["manage"] })
     await setAppSetting(LIVE_SETTING, live === true)
+    // back to simulation: the sync server must stop sending orders by itself, for everyone, now
+    if (live !== true) await clearPlans().catch(() => undefined)
     await logAdminAction(admin, "feature.release", null, { feature: "copy_trading", execution: live === true ? "live" : "simulation" })
     revalidatePath("/", "layout")
     return { ok: true, message: live === true ? "Copy Trading now sends follower orders to brokers." : "Copy Trading is back in simulation: nothing is sent to a broker." }

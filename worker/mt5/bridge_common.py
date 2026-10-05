@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -57,14 +58,34 @@ def kill_process(exe_path):
     k32.CloseHandle(snap)
 
 
-def serve(port, token_file, get_routes, post_routes, on_bridge_error=None):
+# Calls that must not wait behind a long one. A route that waits on purpose
+# (the copy lane's /watch) asks urgent_waiting() as it goes and steps aside.
+_urgent = 0
+_urgent_lock = threading.Lock()
+# When the call that holds the terminal now began (None: it is free).
+_busy_since = None
+
+
+def urgent_waiting():
+    return _urgent > 0
+
+
+def serve(port, token_file, get_routes, post_routes, on_bridge_error=None, urgent=()):
     """Serves the bridge on 127.0.0.1:port. Every call needs the X-Bridge-Token
-    header and runs alone (a terminal holds one account at a time)."""
+    header and runs alone (a terminal holds one account at a time). A call to
+    one of the `urgent` paths makes a waiting route give the terminal up.
+
+    GET /alive answers without the terminal: how long the current call has had
+    it, so a watchdog can tell a bridge stuck on a dead terminal from a busy one."""
+    global _urgent, _busy_since
     with open(token_file, encoding="utf-8") as fh:
         token = fh.read().strip()
     lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
+        # keep the connection: the copy lane calls many times a second
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, fmt, *a):  # quiet; the worker logs outcomes
             pass
 
@@ -77,19 +98,38 @@ def serve(port, token_file, get_routes, post_routes, on_bridge_error=None):
             self.wfile.write(data)
 
         def call(self, fn, *fn_args):
+            global _urgent, _busy_since
             if not hmac.compare_digest(self.headers.get("X-Bridge-Token", ""), token):
                 return self.reply(401, {"ok": False, "kind": "unauthorized", "message": "bad bridge token"})
-            with lock:
-                try:
-                    return self.reply(200, fn(*fn_args))
-                except BridgeError as err:
-                    if on_bridge_error:
-                        on_bridge_error(err)
-                    return self.reply(err.status, {"ok": False, "kind": err.kind, "message": err.message, "code": err.code})
-                except Exception as err:  # never let one bad request kill the bridge
-                    return self.reply(500, {"ok": False, "kind": "internal", "message": str(err)})
+            pressing = self.path in urgent
+            if pressing:
+                with _urgent_lock:
+                    _urgent += 1
+            try:
+                lock.acquire()
+            finally:
+                if pressing:
+                    with _urgent_lock:
+                        _urgent -= 1
+            _busy_since = time.time()
+            try:
+                return self.reply(200, fn(*fn_args))
+            except BridgeError as err:
+                if on_bridge_error:
+                    on_bridge_error(err)
+                return self.reply(err.status, {"ok": False, "kind": err.kind, "message": err.message, "code": err.code})
+            except Exception as err:  # never let one bad request kill the bridge
+                return self.reply(500, {"ok": False, "kind": "internal", "message": str(err)})
+            finally:
+                _busy_since = None
+                lock.release()
 
         def do_GET(self):
+            if self.path == "/alive":
+                if not hmac.compare_digest(self.headers.get("X-Bridge-Token", ""), token):
+                    return self.reply(401, {"ok": False, "kind": "unauthorized", "message": "bad bridge token"})
+                since = _busy_since
+                return self.reply(200, {"ok": True, "busyFor": round(time.time() - since, 1) if since else 0})
             fn = get_routes.get(self.path)
             if fn is None:
                 return self.reply(404, {"ok": False, "kind": "not_found", "message": "not found"})
@@ -97,13 +137,13 @@ def serve(port, token_file, get_routes, post_routes, on_bridge_error=None):
 
         def do_POST(self):
             fn = post_routes.get(self.path)
-            if fn is None:
-                return self.reply(404, {"ok": False, "kind": "not_found", "message": "not found"})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
             except (ValueError, json.JSONDecodeError):
                 return self.reply(400, {"ok": False, "kind": "request", "message": "invalid JSON"})
+            if fn is None:
+                return self.reply(404, {"ok": False, "kind": "not_found", "message": "not found"})
             return self.call(fn, body)
 
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

@@ -31,7 +31,11 @@ export function ModeBanner({ admin }: { admin: boolean }) {
   // every account of the groups that are on: all on the fast lane, or not
   const copying = [...new Set(state.groups.filter((g) => g.status === "active").flatMap((g) => [g.leaderAccountId, ...g.followers.filter((f) => f.config.enabled).map((f) => f.accountId)]))].map(account).filter((a) => !!a)
   const fast = copying.length > 0 && copying.every((a) => a!.lane === "fast")
-  const speed = fast ? "A new trade on the Leader reaches the followers in about 2 to 5 seconds." : "A new trade on the Leader reaches the followers in about 30 to 60 seconds (1 to 2 minutes for a Rithmic leader). Accounts on the fast lane are quicker: see the Cockpit."
+  // the slowest broker among the followers: an order can't be confirmed faster than its round trip
+  const ping = Math.max(0, ...followers.map((a) => a!.pingMs ?? 0))
+  const speed = fast
+    ? `A new trade on the Leader is sent to the followers within a few milliseconds. After that it is the broker's own answer time${ping > 0 ? ` (about ${ping}ms from our server to the slowest of them)` : ""}: the latency of every order is shown in the Cockpit, split into TradeLoop's part and the broker's.`
+    : "A new trade on the Leader reaches the followers in about 30 to 60 seconds (1 to 2 minutes for a Rithmic leader). Accounts on the fast lane are quicker: see the Cockpit."
 
   const change = (next: boolean) =>
     run(

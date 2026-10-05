@@ -22,7 +22,7 @@ import time
 
 import MetaTrader5 as mt5
 
-from bridge_common import BridgeError, kill_process, serve
+from bridge_common import BridgeError, kill_process, serve, urgent_waiting
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--terminal", required=True, help=r"path to terminal64.exe, e.g. C:\mt5\t1\terminal64.exe")
@@ -35,6 +35,9 @@ TERMINAL_DIR = os.path.dirname(args.terminal)
 # (crashed, or restarted itself after an update) — drop the session so the
 # next request starts it again.
 IPC_ERRORS = {-10001, -10002, -10003, -10004, -10005}
+# The fill mode each symbol takes, learned once per session: it saves a call to
+# the terminal on every order after the first (cleared whenever it logs in).
+FILLING = {}
 # MT5 fields that are 64-bit ids — sent as strings so JavaScript can't round them.
 ID_FIELDS = {"ticket", "order", "position_id", "position_by_id", "identifier", "magic", "external_id"}
 
@@ -61,6 +64,7 @@ def start_terminal(account, password, server):
     A terminal that has never had an account sits in its first-run wizard and
     never answers the Python API, so a cold start has to hand over the login
     in initialize() itself rather than log in afterwards."""
+    FILLING.clear()
     if not mt5.initialize(path=args.terminal, portable=True, login=account, password=password, server=server, timeout=90_000):
         code, message = last_error()
         mt5.shutdown()
@@ -164,13 +168,10 @@ def sync(req):
     }
 
 
-def positions(req):
-    """The open positions of one account, from a session that is kept open for
-    it (the copy lane polls this every second). Logs in only when the terminal
-    is not on this account yet. `check` is a list of tickets the caller saw
-    before and no longer sees: the ones a closing deal confirms are returned in
-    `closed`, so a list that is short only because the terminal has just
-    reconnected is never taken for positions that were closed."""
+def kept_session(req):
+    """Puts the terminal on the account the copy lane keeps it for, logging in
+    only when it is not on it yet. Returns (account, fresh): fresh when it has
+    only just logged in."""
     try:
         account = int(req["login"])
         password = str(req["password"])
@@ -189,6 +190,7 @@ def positions(req):
     else:
         fresh = login(account, password, server)
     if fresh:
+        FILLING.clear()
         # the trade server sends the positions a moment after the login: wait until the count holds still
         last = -1
         for _ in range(12):
@@ -197,26 +199,80 @@ def positions(req):
                 break
             last = total
             time.sleep(0.4)
+    return account, fresh
+
+
+def position_signature(listed):
+    """What the copy engine acts on: which positions, how big, and their stops."""
+    return "|".join(sorted(f"{p.ticket}:{p.volume}:{p.sl}:{p.tp}" for p in listed))
+
+
+def read_positions(account, fresh, req, listed=None):
     term = mt5.terminal_info()
     info = mt5.account_info()
-    listed = mt5.positions_get()
+    if listed is None:
+        listed = mt5.positions_get()
     if term is None or not term.connected or info is None or info.login != account or listed is None:
         code, message = last_error()
         raise BridgeError(502, "terminal", f"Could not read the positions: {message}", code)
+    # of the tickets the caller knows and that are no longer listed: the ones a closing deal confirms
+    here = {str(p.ticket) for p in listed} | {str(p.identifier) for p in listed}
     closed = []
     for ticket in req.get("check") or []:
+        if str(ticket) in here:
+            continue
         deals = mt5.history_deals_get(position=int(ticket))
         if deals and any(d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY) for d in deals):
             closed.append(str(ticket))
+    for symbol in req.get("prime") or []:
+        # in Market Watch, so its price is already streaming when an order for it arrives
+        if str(symbol) not in FILLING:
+            try:
+                ensure_symbol(str(symbol))
+            except BridgeError:
+                pass
     return {
         "positions": [record(p) for p in listed],
+        "signature": position_signature(listed),
         "closed": closed,
         "balance": info.balance,
         "equity": info.equity,
-        "tradeAllowed": bool(info.trade_allowed),
+        "tradeAllowed": bool(info.trade_allowed and term.trade_allowed),
         "fresh": bool(fresh),
+        # the terminal's own measure of the round trip to the broker's server, in ms
+        "ping": round(term.ping_last / 1000, 1) if getattr(term, "ping_last", 0) else None,
         "utcNow": int(time.time()),
     }
+
+
+def positions(req):
+    """The open positions of one account, from a session that is kept open for
+    it (the copy lane's terminals). Logs in only when the terminal is not on
+    this account yet. `check` is a list of tickets the caller knows: the ones
+    that are gone and that a closing deal confirms are returned in `closed`, so
+    a list that is short only because the terminal has just reconnected is
+    never taken for positions that were closed."""
+    account, fresh = kept_session(req)
+    return read_positions(account, fresh, req)
+
+
+def watch(req):
+    """/positions that waits. Returns the moment the account's positions differ
+    from `signature` (the one the last answer gave), or after `waitMs` with
+    nothing changed. This is how the copy lane learns of a leader's trade
+    within a few milliseconds instead of at its next look. An order that
+    arrives for this terminal meanwhile ends the wait at once."""
+    account, fresh = kept_session(req)
+    if fresh:
+        return read_positions(account, fresh, req)
+    signature = str(req.get("signature") or "")
+    deadline = time.time() + min(max(float(req.get("waitMs") or 1000), 0), 5000) / 1000
+    listed = mt5.positions_get()
+    while listed is not None and position_signature(listed) == signature and time.time() < deadline and not urgent_waiting():
+        time.sleep(0.002)
+        listed = mt5.positions_get()
+    return read_positions(account, False, req, listed)
+
 
 def reset(req):
     """Stops the terminal and, when given one, installs a broker's server list
@@ -224,6 +280,7 @@ def reset(req):
     in that file, and reads it at startup — so serving another broker means a
     restart with that broker's list."""
     servers_dat = req.get("serversDat")
+    FILLING.clear()
     mt5.shutdown()
     kill_process(args.terminal)
     if servers_dat:
@@ -349,7 +406,9 @@ def ensure_algo_trading(account):
 
 
 def send_order(request):
+    began = time.perf_counter()
     result = mt5.order_send(request)
+    took = round((time.perf_counter() - began) * 1000, 1)
     if result is None:
         code, message = last_error()
         raise BridgeError(502, "order", f"order_send returned nothing: {message}", code)
@@ -364,6 +423,8 @@ def send_order(request):
         "deal": str(result.deal),
         "volume": result.volume,
         "price": result.price,
+        # the round trip to the broker's server and back, as this terminal timed it
+        "sendMs": took,
     }
 
 
@@ -390,13 +451,20 @@ def ensure_symbol(symbol):
     if not info.visible:
         mt5.symbol_select(symbol, True)
         info = mt5.symbol_info(symbol)
+    FILLING[symbol] = pick_filling(info)
     return info
+
+
+def filling_for(symbol):
+    if symbol not in FILLING:
+        ensure_symbol(symbol)
+    return FILLING[symbol]
 
 
 def do_close(req, partial):
     ticket = int(req["positionRef"])
-    pos = position_by_ticket(ticket)
-    info = ensure_symbol(pos.symbol)
+    pos = position_by_ticket(ticket, float(req["wait"]) if req.get("wait") is not None else 6.0)
+    filling = filling_for(pos.symbol)
     volume = float(req["volume"]) if partial and req.get("volume") else pos.volume
     volume = min(volume, pos.volume)
     is_buy = pos.type == mt5.POSITION_TYPE_BUY
@@ -412,8 +480,9 @@ def do_close(req, partial):
         "price": tick.bid if is_buy else tick.ask,
         "deviation": 30,
         "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": pick_filling(info),
+        "type_filling": filling,
         "comment": "TradeLoop",
+        **tag(req),
     })
 
 
@@ -445,7 +514,7 @@ ORDER_TYPE_NAMES = {
 
 def do_place(req):
     symbol = str(req["symbol"])
-    info = ensure_symbol(symbol)
+    filling = filling_for(symbol)
     side = str(req.get("side") or "long")
     otype = str(req.get("orderType") or "market")
     type_name = ORDER_TYPE_NAMES.get((side, otype))
@@ -464,8 +533,9 @@ def do_place(req):
         "price": price,
         "deviation": 30,
         "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": pick_filling(info),
+        "type_filling": filling,
         "comment": "TradeLoop",
+        **tag(req),
     }
     if req.get("stopLoss") is not None:
         request["sl"] = float(req["stopLoss"])
@@ -474,20 +544,21 @@ def do_place(req):
     return send_order(request)
 
 
-def order(req):
-    try:
-        account = int(req["login"])
-        password = str(req["password"])
-        server = str(req["server"]).strip()
-        kind = str(req["kind"])
-    except (KeyError, TypeError, ValueError):
-        raise BridgeError(400, "request", "login, password, server and kind are required")
-    ensure_trading_login(account, password, server)
-    # A headless terminal starts with the "Algo Trading" button off (and a
-    # re-login resets it), so order_send is refused with retcode 10027. Enable
-    # it in-process — right here, after the login and before the order, so
-    # nothing re-logs in between and resets it.
-    ensure_algo_trading(account)
+def tag(req):
+    """The number the copy lane gives an order it sends by itself. MetaTrader
+    keeps it on the position, so after a crash the lane can tell whether that
+    order reached the broker."""
+    return {"magic": int(req["magic"])} if req.get("magic") is not None else {}
+
+
+# Refusals that say the session can't trade as it is (Algo Trading off, an
+# investor login): nothing was executed, so the order can be sent again once
+# the session is put right. The same for a request that never left this machine.
+SESSION_RETCODES = {10017, 10027}
+NEVER_SENT = {-10001, -10004}
+
+
+def run_order(kind, req):
     if kind == "close":
         return do_close(req, False)
     if kind == "partial_close":
@@ -501,10 +572,50 @@ def order(req):
     raise BridgeError(400, "request", f"unknown order kind {kind}")
 
 
+def order(req):
+    began = time.perf_counter()
+    try:
+        account = int(req["login"])
+        password = str(req["password"])
+        server = str(req["server"]).strip()
+        kind = str(req["kind"])
+    except (KeyError, TypeError, ValueError):
+        raise BridgeError(400, "request", "login, password, server and kind are required")
+
+    def checked():
+        ensure_trading_login(account, password, server)
+        # A headless terminal starts with the "Algo Trading" button off (and a
+        # re-login resets it), so order_send is refused with retcode 10027. Enable
+        # it in-process, right here, after the login and before the order, so
+        # nothing re-logs in between and resets it.
+        ensure_algo_trading(account)
+        return run_order(kind, req)
+
+    # `fast`: the copy lane keeps this terminal on this account and has just
+    # read it, so the checks above (four calls to the terminal) are skipped and
+    # the order goes straight out. They run only if the session turns out not
+    # to be what it was, and then the order is sent again. Never when it may
+    # already have reached the broker.
+    if req.get("fast"):
+        try:
+            result = run_order(kind, req)
+            if not result["accepted"] and result["retcode"] in SESSION_RETCODES:
+                result = checked()
+        except BridgeError as err:
+            if err.code not in NEVER_SENT:
+                raise
+            mt5.shutdown()
+            result = checked()
+    else:
+        result = checked()
+    result["totalMs"] = round((time.perf_counter() - began) * 1000, 1)
+    return result
+
+
 def on_bridge_error(err):
     if err.code in IPC_ERRORS:
         mt5.shutdown()
 
 
 if __name__ == "__main__":
-    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order, "/positions": positions}, on_bridge_error)
+    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order, "/positions": positions, "/watch": watch}, on_bridge_error, urgent=("/order",))

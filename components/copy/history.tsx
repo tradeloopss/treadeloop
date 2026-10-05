@@ -8,7 +8,7 @@ import { ArrowDown, CircleAlert, CircleCheck, Download, Info, TriangleAlert } fr
 import { cn } from "@/lib/utils"
 import { readCopyAlerts, retryCopyOrder } from "@/app/actions/copy-trading"
 import { formatQuantity } from "@/lib/copy/contracts"
-import { ACTION_LABELS, ORDER_STATUS, isFailure, price, type Copy, type EventView, type OrderView } from "@/lib/copy/view"
+import { ACTION_LABELS, ORDER_STATUS, isFailure, latencyParts, price, type Copy, type EventView, type OrderView } from "@/lib/copy/view"
 import { useAction } from "@/components/insights/client"
 import { NotEnough, Pill, fieldClass, linkBtn } from "@/components/insights/ui"
 import { useCopy } from "./store"
@@ -70,7 +70,12 @@ export function CopyFeed({ copies, limit = 6, detailed }: { copies: Copy[]; limi
                       </span>
                       <StatusPill o={o} />
                       {o.executionPrice != null && <span className="text-xs text-muted-foreground tabular-nums">{price(o.executionPrice)}</span>}
-                      {o.latencyMs != null && <span className="text-xs text-muted-foreground tabular-nums">Latency: {o.latencyMs}ms</span>}
+                      {latencyParts(o) && (
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          Latency: {latencyParts(o)!.total}
+                          {latencyParts(o)!.split && <> ({latencyParts(o)!.split})</>}
+                        </span>
+                      )}
                     </div>
                     {o.reason && <p className="mt-0.5 text-xs text-muted-foreground">{o.reason}</p>}
                   </li>
@@ -160,8 +165,8 @@ export function HistoryTable({ orders }: { orders: OrderView[] }) {
   const groupName = (id: number) => state.groups.find((g) => g.id === id)?.name ?? "Deleted group"
   const symbols = [...new Set(orders.flatMap((o) => [o.leaderSymbol, o.symbol]))].sort()
   const exportCsv = () => {
-    const head = ["Time", "Group", "Leader", "Follower", "Action", "Symbol", "Side", "Quantity", "Leader quantity", "Requested price", "Execution price", "Slippage", "Latency ms", "Status", "Reason", "Simulated", "Master order", "Follower order"]
-    const lines = rows.map((o) => [o.createdAt, groupName(o.groupId), account(o.masterAccountId)?.name, account(o.followerAccountId)?.name, ACTION_LABELS[o.action] ?? o.action, o.symbol, o.side, o.quantity, o.leaderQuantity, o.requestedPrice, o.executionPrice, o.slippage, o.latencyMs, o.status, o.reason, o.simulated ? "yes" : "no", o.masterOrderId, o.correlationId].map(csv).join(","))
+    const head = ["Time", "Group", "Leader", "Follower", "Action", "Symbol", "Side", "Quantity", "Leader quantity", "Requested price", "Execution price", "Slippage", "Latency ms", "TradeLoop ms", "Status", "Reason", "Simulated", "Master order", "Follower order"]
+    const lines = rows.map((o) => [o.createdAt, groupName(o.groupId), account(o.masterAccountId)?.name, account(o.followerAccountId)?.name, ACTION_LABELS[o.action] ?? o.action, o.symbol, o.side, o.quantity, o.leaderQuantity, o.requestedPrice, o.executionPrice, o.slippage, o.latencyMs, o.tradeloopMs, o.status, o.reason, o.simulated ? "yes" : "no", o.masterOrderId, o.correlationId].map(csv).join(","))
     const url = URL.createObjectURL(new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" }))
     const a = document.createElement("a")
     a.href = url
@@ -223,7 +228,10 @@ export function HistoryTable({ orders }: { orders: OrderView[] }) {
                 <td className="py-2 ps-3 tabular-nums">{formatQuantity(o.quantity)}</td>
                 <td className="py-2 ps-3 tabular-nums">{price(o.executionPrice ?? o.requestedPrice)}</td>
                 <td className="py-2 ps-3 tabular-nums">{o.slippage != null ? price(o.slippage) : "—"}</td>
-                <td className="py-2 ps-3 tabular-nums">{o.latencyMs != null ? `${o.latencyMs}ms` : "—"}</td>
+                <td className="py-2 ps-3 tabular-nums" title={latencyParts(o)?.split ?? undefined}>
+                  {latencyParts(o)?.total ?? "—"}
+                  {o.tradeloopMs != null && <span className="block text-[10px] text-muted-foreground">TradeLoop {o.tradeloopMs}ms</span>}
+                </td>
                 <td className="py-2 ps-3">
                   <span className="flex items-center gap-1.5">
                     <StatusPill o={o} />

@@ -100,11 +100,79 @@ that do (it blocked this VPS for hours once).
   `mt5.initialize()` on a cold start.
 - MT5 updates itself and pops dialogs (LiveUpdate, wizards, crash reports) that
   can block the API. The worker closes any window that isn't a terminal's main
-  window every ~10s (`wmctrl`, needs openbox).
+  window (`wmctrl`, needs openbox) — but only one that is still there on two
+  looks ten seconds apart. A terminal shows windows of its own for a moment
+  while it starts, and since build 6230 (26 Sep 2026) closing one crashes it:
+  that was one terminal start in three (measured 4–6 of 10; with the windows
+  left alone, 0 of 10), every one a failed sync. A Wine desktop
+  (`… - Wine Desktop`, the copy lane's) is never closed: closing it shuts down
+  everything inside.
 - Services: `mt5-xvfb`, `mt5-openbox`, `mt5-wineserver` (one persistent
   wineserver, so a bridge restart doesn't take the others down),
   `mt5-bridge@t1`, `mt5-bridge@t2` (ports 9101, 9102), `tradeloop-mt5-worker`.
   Status is at `https://sync.tradeloop.pro/status/mt5`.
+
+## Copy lane
+
+Copy Trading's own terminals (`copy-lane.ts`, unit `tradeloop-copy-lane`).
+The shared terminals log in to an account, read it, and move on; a copy needs
+a leader that is watched all the time and a follower whose trading session is
+already open. So each copying account (`metatrader_connections.copyRole`, set
+by the app for groups that are switched on) gets a terminal to itself:
+`C:\mt5\c1`, `c2`, … behind `mt5-copy-bridge@c1` … on ports 9111, 9112, …
+(`MT5_COPY_BRIDGES=c1:9111,c2:9112`). An account that doesn't get one keeps
+working through the worker, slower.
+
+- **One Wine desktop per terminal** (`mt5-copy-bridge.sh`): nothing done to
+  another terminal's windows reaches it, and the bridge's "Algo Trading" key
+  press stays inside. The bridge runs under `pythonw` there (a console window
+  on such a desktop is closed by Wine, and takes the bridge with it). The
+  launcher restarts a bridge that stops listening or is stuck on a dead
+  terminal (`GET /alive`).
+- **Watching a leader**: bridge `/watch` holds the call and answers the moment
+  the positions differ from the last answer (it looks about every 2ms), so a
+  leader's trade is known within a few milliseconds.
+- **The instant path**: the app writes each leader a plan
+  (`metatrader_connections.copyPlan`, `lib/copy/plan.ts`): its groups, rules,
+  followers' sizing and risk picture, good for 20 seconds and rewritten on
+  every pass of the engine. With a fresh plan the lane sizes each follower's
+  order itself (the app's own `decideEntry` and prop-rule guard) and sends it
+  at once (`/order` with `fast`: no checks first, they run only if the session
+  turns out wrong). A leader's full close closes the followers' positions the
+  same way. Measured against pretend bridges: about 3ms from the leader's
+  trade to the order leaving. The broker's own round trip comes on top and is
+  the terminal's to tell (`sendMs`; `copyPingMs` is its ping).
+- **Never twice**: every such order has a name (`e:<group>:<leader ticket>:<account>`,
+  `c:…` for a close) that is unique in `order_commands.clientRef`. The lane
+  writes the row as it sends, and publishes the leader's new position to the
+  database only after; the app's engine learns of the position from nowhere
+  else (the worker leaves a held account's open positions alone), finds the
+  order under its name and takes it over. An order that failed takes its row
+  back first, and the engine then copies the trade its own way.
+- **A crash in the middle**: each order is written to a journal file
+  (`/var/lib/tradeloop/copy-lane.journal`) before it leaves, with a number of
+  its own (`magic`) that MetaTrader keeps on the position. On the way back up
+  the lane gives every unfinished order its row before it publishes anything,
+  then reads the account: the position is there with that number (filled), or
+  it is not (the row goes, and the engine copies the trade).
+- Everything else — partial closes, stops and targets, a follower without a
+  terminal, a trade the limits turn down, retries, Flatten All — is decided by
+  the app's engine as before; the lane tells it the moment something changed
+  and sends what it queues (`order_commands.broker = 'mt5c'`).
+
+A terminal only helps as far as the broker is near: the round trip from this
+server to Exness's access point is about 120ms, so an Exness follower can't be
+confirmed faster than that whatever TradeLoop does. Closer needs a server in
+the broker's own data centre.
+
+```sh
+# build and install the lane (after the app's migrations are live)
+esbuild worker/mt5/copy-lane.ts --bundle --platform=node --target=node22 --format=cjs \
+  --outfile=copy-lane.cjs --external:pg --external:pg-native
+scp copy-lane.cjs root@sync:/srv/tradeloop/mt5-worker/copy-lane.cjs
+scp worker/mt5/mt5-copy-bridge.sh root@sync:/usr/local/bin/mt5-copy-bridge   # chmod 755
+ssh root@sync 'systemctl restart mt5-copy-bridge@c1 mt5-copy-bridge@c2 tradeloop-copy-lane'
+```
 
 ## Deploy
 

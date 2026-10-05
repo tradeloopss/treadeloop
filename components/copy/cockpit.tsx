@@ -177,7 +177,7 @@ export function Cockpit() {
                     </th>
                     <td className="py-2.5 ps-2.5">
                       {r.account ? <HealthPill health={r.account.health} /> : "—"}
-                      {r.account && active && <span className="mt-0.5 block text-[10px] font-semibold tracking-wide text-muted-foreground uppercase" title={r.account.lane === "fast" ? "The sync server keeps a terminal open for this account: it is read every second and trades at once." : "This account shares a terminal with others: it is read about every 30 seconds, and an order takes a few seconds longer."}>{r.account.lane === "fast" ? "⚡ Fast lane" : "Standard lane"}</span>}
+                      {r.account && active && <span className="mt-0.5 block text-[10px] font-semibold tracking-wide text-muted-foreground uppercase" title={r.account.lane === "fast" ? `The sync server keeps a terminal open for this account: a trade on it is seen within milliseconds, and an order is sent at once.${r.account.pingMs != null ? ` The round trip from our server to this broker is ${r.account.pingMs}ms: an order on this account can't be confirmed faster than that.` : ""}` : "This account shares a terminal with others: it is read about every 30 seconds, and an order takes a few seconds longer."}>{r.account.lane === "fast" ? `⚡ Fast lane${r.account.pingMs != null ? ` · broker ${r.account.pingMs}ms` : ""}` : "Standard lane"}</span>}
                     </td>
                     <td className="py-2.5 ps-2.5 text-end tabular-nums">{money(r.account?.balance)}</td>
                     <td className="py-2.5 ps-2.5 font-medium">{c.symbol}</td>
