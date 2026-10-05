@@ -238,7 +238,8 @@ async function poll(s: Slot, force = false) {
     const changed = signature !== s.signature
     if (changed || Date.now() - s.writtenAt >= KEEPALIVE_MS) {
       const now = new Date()
-      await db.update(metatraderConnections).set({ openPositions: published.length, openPositionsData: published, balance: String(res.balance), equity: String(res.equity), lastSyncedAt: now, copySeenAt: now }).where(eq(metatraderConnections.id, c.id))
+      // it is connected — we have just read it — whatever a refused second login on the shared terminals said
+      await db.update(metatraderConnections).set({ openPositions: published.length, openPositionsData: published, balance: String(res.balance), equity: String(res.equity), lastSyncedAt: now, copySeenAt: now, status: "connected", statusMessage: null }).where(eq(metatraderConnections.id, c.id))
       s.writtenAt = Date.now()
     }
     if (changed) {
