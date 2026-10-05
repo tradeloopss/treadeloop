@@ -130,8 +130,8 @@ working through the worker, slower.
   launcher restarts a bridge that stops listening or is stuck on a dead
   terminal (`GET /alive`).
 - **Watching a leader**: bridge `/watch` holds the call and answers the moment
-  the positions differ from the last answer (it looks about every 2ms), so a
-  leader's trade is known within a few milliseconds.
+  the positions differ from the last answer (it looks every 5ms or so), so a
+  leader's trade is known within about 7ms.
 - **The instant path**: the app writes each leader a plan
   (`metatrader_connections.copyPlan`, `lib/copy/plan.ts`): its groups, rules,
   followers' sizing and risk picture, good for 20 seconds and rewritten on
@@ -139,9 +139,10 @@ working through the worker, slower.
   order itself (the app's own `decideEntry` and prop-rule guard) and sends it
   at once (`/order` with `fast`: no checks first, they run only if the session
   turns out wrong). A leader's full close closes the followers' positions the
-  same way. Measured against pretend bridges: about 3ms from the leader's
-  trade to the order leaving. The broker's own round trip comes on top and is
-  the terminal's to tell (`sendMs`; `copyPingMs` is its ping).
+  same way. From the leader's trade to the order leaving: about 4ms against
+  pretend bridges, 14ms on the server (the calls into the terminal under Wine).
+  The broker's own round trip comes on top and is the terminal's to tell
+  (`sendMs`; `copyPingMs` is its ping): 125ms on the first live copy, Exness.
 - **Never twice**: every such order has a name (`e:<group>:<leader ticket>:<account>`,
   `c:…` for a close) that is unique in `order_commands.clientRef`. The lane
   writes the row as it sends, and publishes the leader's new position to the

@@ -240,7 +240,8 @@ def read_positions(account, fresh, req, listed=None):
         "tradeAllowed": bool(info.trade_allowed and term.trade_allowed),
         "fresh": bool(fresh),
         # the terminal's own measure of the round trip to the broker's server, in ms
-        "ping": round(term.ping_last / 1000, 1) if getattr(term, "ping_last", 0) else None,
+        # (one that hasn't measured yet reports ten seconds: that is no reading)
+        "ping": round(term.ping_last / 1000, 1) if 0 < getattr(term, "ping_last", 0) < 5_000_000 else None,
         "utcNow": int(time.time()),
     }
 
@@ -268,8 +269,11 @@ def watch(req):
     signature = str(req.get("signature") or "")
     deadline = time.time() + min(max(float(req.get("waitMs") or 1000), 0), 5000) / 1000
     listed = mt5.positions_get()
+    # One look costs both this process and the terminal about a millisecond of
+    # processor. Every 5ms is a quarter of a core per leader at most, and a
+    # change is seen within 7ms.
     while listed is not None and position_signature(listed) == signature and time.time() < deadline and not urgent_waiting():
-        time.sleep(0.002)
+        time.sleep(0.005)
         listed = mt5.positions_get()
     return read_positions(account, False, req, listed)
 
