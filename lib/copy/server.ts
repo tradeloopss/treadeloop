@@ -629,7 +629,7 @@ async function copyChange(ctx: Ctx, leader: typeof copyPositions.$inferSelect, v
     if (!pos.simulated) {
       if (!pos.positionRef) {
         status = "failed"
-        reason = "The follower's position hasn't been confirmed by its broker yet, so it can't be changed."
+        reason = "The follower's position hasn't shown up on its account yet, so it couldn't be changed. Check the account and close or adjust it there."
       } else {
         const sent = await queue(ctx, pos.accountId, closing > 0 ? { kind: closing >= quantity ? "close" : "partial_close", symbol: pos.symbol, side: pos.side as Side, volume: closing, positionRef: pos.positionRef } : { kind: "modify", symbol: pos.symbol, side: pos.side as Side, stopLoss, takeProfit, positionRef: pos.positionRef })
         status = sent.status
@@ -688,26 +688,38 @@ async function runGroup(ctx: Ctx): Promise<number> {
   return events.length
 }
 
+// A follower's live position, tied to the ticket its broker gave it. Until
+// that is known the position can't be closed or changed, so this is tried on
+// every pass until the follower's account shows it.
+async function bindPositions(userId: string, state: CopyState) {
+  const unbound = await db.select().from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open"), eq(copyPositions.simulated, false), isNull(copyPositions.positionRef)))
+  if (!unbound.length) return
+  const keys = liveKeys.get(state.positions)
+  const taken = new Set((await db.select({ ref: copyPositions.positionRef }).from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open")))).map((r) => r.ref))
+  for (const pos of unbound) {
+    const live = state.positions.find((p) => !p.simulated && p.accountId === pos.accountId && p.symbol === pos.symbol && p.side === pos.side && keys?.get(p) && !taken.has(keys.get(p)!))
+    const ref = live && keys?.get(live)
+    if (!live || !ref) continue
+    taken.add(ref)
+    await db.update(copyPositions).set({ positionRef: ref, entryPrice: str(live.entry), updatedAt: new Date() }).where(eq(copyPositions.id, pos.id))
+    if (pos.correlationId) await db.update(copyOrders).set({ executionPrice: str(live.entry), updatedAt: new Date() }).where(and(eq(copyOrders.userId, userId), eq(copyOrders.correlationId, pos.correlationId), isNull(copyOrders.executionPrice)))
+  }
+}
+
 // Live orders: what the broker's executor said, written back to the copy.
 async function reconcile(userId: string, state: CopyState) {
+  await bindPositions(userId, state)
   const waiting = await db.select().from(copyOrders).where(and(eq(copyOrders.userId, userId), inArray(copyOrders.status, ["sent", "pending"]), eq(copyOrders.simulated, false))).limit(100)
   const ids = waiting.map((o) => o.orderCommandId).filter((id): id is number => id != null)
   if (!ids.length) return
   const commands = await db.select({ id: orderCommands.id, status: orderCommands.status, message: orderCommands.resultMessage, updatedAt: orderCommands.updatedAt }).from(orderCommands).where(and(eq(orderCommands.userId, userId), inArray(orderCommands.id, ids)))
-  const keys = liveKeys.get(state.positions)
   for (const o of waiting) {
     const c = commands.find((x) => x.id === o.orderCommandId)
     if (!c || c.status === "pending" || c.status === "sent") continue
     const filled = c.status === "filled"
-    let price: number | null = null
-    if (filled && (o.action === "open" || o.action === "increase")) {
-      // the follower's own position, as its broker now reports it
-      const live = state.positions.find((p) => !p.simulated && p.accountId === o.followerAccountId && p.symbol.toUpperCase() === o.symbol.toUpperCase() && p.side === o.side)
-      if (live) {
-        price = live.entry
-        await db.update(copyPositions).set({ positionRef: keys?.get(live) ?? null, entryPrice: str(live.entry), updatedAt: new Date() }).where(and(eq(copyPositions.userId, userId), eq(copyPositions.correlationId, o.correlationId), eq(copyPositions.status, "open")))
-      }
-    }
+    // the fill price, when the follower's position is already visible
+    const live = filled && (o.action === "open" || o.action === "increase") ? state.positions.find((p) => !p.simulated && p.accountId === o.followerAccountId && p.symbol === o.symbol && p.side === o.side) : undefined
+    const price = live?.entry ?? null
     if (!filled && (o.action === "open" || o.action === "increase")) await db.update(copyPositions).set({ status: "closed", closedAt: new Date(), quantity: "0" }).where(and(eq(copyPositions.userId, userId), eq(copyPositions.correlationId, o.correlationId), eq(copyPositions.status, "open")))
     const requested = num(o.requestedPrice)
     await db.update(copyOrders).set({ status: c.status, reason: filled ? null : c.message, executionPrice: str(price), slippage: price != null && requested != null ? str((price - requested) * (o.side === "long" ? 1 : -1)) : null, latencyMs: filled ? Math.max(0, c.updatedAt.getTime() - o.createdAt.getTime()) : null, updatedAt: new Date() }).where(eq(copyOrders.id, o.id))
@@ -725,8 +737,9 @@ export async function runEngine(userId: string, timeZone: string): Promise<CopyS
   const now = new Date()
   const prop = await propSync(userId)
   let changes = 0
-  for (const group of active) changes += await runGroup({ userId, state, group, mode: state.mode, ...clock(timeZone, now), prop, now })
   if (state.mode === "live") await reconcile(userId, state)
+  for (const group of active) changes += await runGroup({ userId, state, group, mode: state.mode, ...clock(timeZone, now), prop, now })
+  if (state.mode === "live" && changes > 0) await reconcile(userId, state)
   return changes > 0 || state.mode === "live" ? loadCopyState(userId, timeZone) : state
 }
 
