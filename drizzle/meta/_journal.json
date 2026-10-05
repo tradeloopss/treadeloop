@@ -288,6 +288,13 @@
       "when": 1791060000000,
       "tag": "0040_edge_lab_psychology",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791150000000,
+      "tag": "0041_copy_trading",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,8 @@ import { requireAdmin } from "@/lib/admin/guard"
 import { FEATURES, STAGE_LABELS, featureLabel, isFeatureKey } from "@/lib/features/release"
 import { getReleases } from "@/lib/features/server"
 import { AdminPageHeader, Panel, StatePill, fmtDateTime } from "@/components/admin/ui"
-import { ReleaseControl } from "@/components/admin/features/release-controls"
+import { CopyExecutionControl, ReleaseControl } from "@/components/admin/features/release-controls"
+import { engineMode } from "@/lib/copy/server"
 
 export const metadata: Metadata = { title: "Feature releases — TradeLoop admin" }
 
@@ -16,8 +17,9 @@ const RATING_LABELS: Record<string, string> = { love: "Love it", good: "Good", i
 // Who can see each new feature: the team only, or every user as a beta.
 export default async function AdminFeaturesPage() {
   await requireAdmin({ team: ["manage"] })
-  const [releases, feedback, counts] = await Promise.all([
+  const [releases, copyMode, feedback, counts] = await Promise.all([
     getReleases(),
+    engineMode(),
     db
       .select({ id: featureFeedback.id, feature: featureFeedback.feature, rating: featureFeedback.rating, message: featureFeedback.message, page: featureFeedback.page, createdAt: featureFeedback.createdAt, email: user.email })
       .from(featureFeedback)
@@ -50,6 +52,13 @@ export default async function AdminFeaturesPage() {
                 <span className="text-muted-foreground">{stage === "beta" ? "Visible to every signed-in user." : "Visible to admins only."}</span>
               </div>
               <ReleaseControl feature={f.key} label={f.label} stage={stage} />
+              {f.key === "copy_trading" && (
+                <div className="mt-4 border-t pt-4">
+                  <p className="text-sm font-medium">Execution</p>
+                  <p className="mb-2 text-xs text-muted-foreground">Separate from who can see it: whether copies are only worked out, or really sent.</p>
+                  <CopyExecutionControl live={copyMode === "live"} />
+                </div>
+              )}
               {ratings.length > 0 && (
                 <p className="mt-3 text-xs text-muted-foreground">
                   Beta feedback so far: {ratings.map((r) => `${RATING_LABELS[r.rating!] ?? r.rating} ${r.n}`).join(" · ")}

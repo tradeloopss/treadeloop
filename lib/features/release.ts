@@ -11,6 +11,7 @@
 export const FEATURES = [
   { key: "edge_lab", label: "Edge Lab", href: "/edge-lab", description: "Discovers, tests and monitors what makes a trader profitable." },
   { key: "psychology", label: "Psychology", href: "/psychology", description: "Shows how behaviour and state of mind change trading results." },
+  { key: "copy_trading", label: "Copy Trading", href: "/copy-trading", description: "Copies a leader account to follower accounts, each within its own risk limits." },
 ] as const
 
 export type FeatureKey = (typeof FEATURES)[number]["key"]
@@ -24,7 +25,7 @@ export const isStage = (v: unknown): v is Stage => v === "admin" || v === "beta"
 export const STAGE_LABELS: Record<Stage, string> = { admin: "Admin test only", beta: "Beta — all users" }
 
 export type Releases = Record<FeatureKey, Stage>
-export const DEFAULT_RELEASES: Releases = { edge_lab: "admin", psychology: "admin" }
+export const DEFAULT_RELEASES: Releases = { edge_lab: "admin", psychology: "admin", copy_trading: "admin" }
 
 // Whatever is stored, a feature is only ever in a known stage — and anything
 // unreadable means "admin", never "released".

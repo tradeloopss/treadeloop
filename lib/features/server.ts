@@ -38,7 +38,7 @@ export const featureAccess = cache(async (): Promise<FeatureAccess> => {
     userId: session?.user?.id ?? null,
     isAdmin,
     releases,
-    can: { edge_lab: signedIn && canUseFeature(releases.edge_lab, isAdmin), psychology: signedIn && canUseFeature(releases.psychology, isAdmin) },
+    can: { edge_lab: signedIn && canUseFeature(releases.edge_lab, isAdmin), psychology: signedIn && canUseFeature(releases.psychology, isAdmin), copy_trading: signedIn && canUseFeature(releases.copy_trading, isAdmin) },
   }
 })
 

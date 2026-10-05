@@ -53,7 +53,9 @@ export type NavItem = {
   // the plan the page is part of (the page itself explains and offers it)
   plan?: "pro"
   // a feature released in stages from the admin panel (lib/features)
-  feature?: "edge_lab" | "psychology"
+  feature?: "edge_lab" | "psychology" | "copy_trading"
+  // its own pages, listed under it only while the trader is inside it
+  children?: { id: string; label: string; href: string; exact?: boolean }[]
 }
 
 export type NavSection = {
@@ -95,7 +97,19 @@ export const NAV_SECTIONS: NavSection[] = [
     tagline: "Manage your live trading accounts.",
     items: [
       { id: "trade-manager", label: "Trade Manager", icon: "tradeManager", href: "/trade-manager", plan: "pro" },
-      { id: "copy-trading", label: "Copy Trading", icon: "copy", href: null, comingSoon: true },
+      {
+        id: "copy-trading",
+        label: "Copy Trading",
+        icon: "copy",
+        href: "/copy-trading",
+        feature: "copy_trading",
+        children: [
+          { id: "copy-dashboard", label: "Copy Dashboard", href: "/copy-trading", exact: true },
+          { id: "copy-connection", label: "Connection", href: "/copy-trading/connection" },
+          { id: "copy-cockpit", label: "Cockpit", href: "/copy-trading/cockpit" },
+          { id: "copy-risk", label: "Risk Management", href: "/copy-trading/risk-management" },
+        ],
+      },
     ],
   },
   {
@@ -154,7 +168,7 @@ export type NavContext = {
   // an affiliate perk: features still in beta are open to them (lib/beta.ts)
   hasBeta: boolean
   // the staged features this user may open, with the stage each is at
-  features: { edge_lab?: FeatureStage; psychology?: FeatureStage }
+  features: { edge_lab?: FeatureStage; psychology?: FeatureStage; copy_trading?: FeatureStage }
 }
 
 export type NavBadge = "soon" | "pro" | "admin" | "beta" | null

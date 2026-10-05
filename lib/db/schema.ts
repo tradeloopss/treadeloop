@@ -2219,3 +2219,210 @@ export const tradeExcursions = pgTable(
   },
   (t) => [index("trade_excursions_user").on(t.userId)]
 )
+
+// ---------------------------------------------------------------------------
+// Copy Trading (migration 0041). A group has one leader account and one or
+// more followers; orders to a follower go through order_commands.
+
+export const copyGroups = pgTable(
+  "copy_groups",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    name: text("name").notNull(),
+    leaderAccountId: integer("leaderAccountId").notNull(),
+    status: text("status").notNull().default("draft"), // draft | active | paused
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("copy_groups_user").on(t.userId, t.createdAt)]
+)
+
+export const copyGroupFollowers = pgTable(
+  "copy_group_followers",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    groupId: integer("groupId").notNull(),
+    accountId: integer("accountId").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    sizingMode: text("sizingMode").notNull().default("same"), // same | percentage | multiplier | risk | fixed | custom
+    percentage: numeric("percentage", { precision: 12, scale: 4 }),
+    multiplier: numeric("multiplier", { precision: 12, scale: 4 }),
+    fixedQuantity: numeric("fixedQuantity", { precision: 18, scale: 4 }),
+    riskPercentage: numeric("riskPercentage", { precision: 8, scale: 4 }),
+    customFactor: numeric("customFactor", { precision: 12, scale: 4 }),
+    minQuantity: numeric("minQuantity", { precision: 18, scale: 4 }),
+    maxPositionSize: numeric("maxPositionSize", { precision: 18, scale: 4 }),
+    maxDailyLoss: numeric("maxDailyLoss", { precision: 18, scale: 2 }),
+    maxExposure: numeric("maxExposure", { precision: 8, scale: 4 }),
+    roundingRule: text("roundingRule").notNull().default("nearest"), // down | up | nearest | min1
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("copy_group_followers_unique").on(t.groupId, t.accountId), index("copy_group_followers_user").on(t.userId)]
+)
+
+export const copyGroupContracts = pgTable(
+  "copy_group_contracts",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    groupId: integer("groupId").notNull(),
+    symbol: text("symbol").notNull(),
+    root: text("root").notNull(),
+    name: text("name").notNull(),
+    exchange: text("exchange"),
+    type: text("type").notNull(),
+    expiration: text("expiration"),
+    tickSize: numeric("tickSize", { precision: 18, scale: 8 }).notNull(),
+    tickValue: numeric("tickValue", { precision: 18, scale: 6 }),
+    pointValue: numeric("pointValue", { precision: 18, scale: 6 }),
+    contractMultiplier: numeric("contractMultiplier", { precision: 18, scale: 6 }).notNull(),
+    minimumQuantity: numeric("minimumQuantity", { precision: 18, scale: 4 }).notNull(),
+    quantityStep: numeric("quantityStep", { precision: 18, scale: 4 }).notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("copy_group_contracts_unique").on(t.groupId, t.symbol)]
+)
+
+export const copyRules = pgTable("copy_rules", {
+  groupId: integer("groupId").primaryKey(),
+  userId: text("userId").notNull(),
+  marketOrders: boolean("marketOrders").notNull().default(true),
+  limitOrders: boolean("limitOrders").notNull().default(true),
+  stopOrders: boolean("stopOrders").notNull().default(true),
+  stopLoss: boolean("stopLoss").notNull().default(true),
+  takeProfit: boolean("takeProfit").notNull().default(true),
+  modifications: boolean("modifications").notNull().default(true),
+  partialClose: boolean("partialClose").notNull().default(true),
+  fullClose: boolean("fullClose").notNull().default(true),
+  cancel: boolean("cancel").notNull().default(true),
+  trailingStop: boolean("trailingStop").notNull().default(true),
+  direction: text("direction").notNull().default("both"), // both | long | short
+  symbolScope: text("symbolScope").notNull().default("selected"), // all | selected
+  hoursFrom: text("hoursFrom"),
+  hoursTo: text("hoursTo"),
+  days: jsonb("days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
+export const copyRiskLimits = pgTable("copy_risk_limits", {
+  groupId: integer("groupId").primaryKey(),
+  userId: text("userId").notNull(),
+  defaultMode: text("defaultMode").notNull().default("same"),
+  defaultRatio: numeric("defaultRatio", { precision: 12, scale: 4 }).notNull().default("1"),
+  globalRiskPct: numeric("globalRiskPct", { precision: 8, scale: 4 }).notNull().default("1"),
+  respectPropSync: boolean("respectPropSync").notNull().default(true),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
+export const copySymbolMappings = pgTable(
+  "copy_symbol_mappings",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    followerId: integer("followerId").notNull(),
+    leaderSymbol: text("leaderSymbol").notNull(),
+    followerSymbol: text("followerSymbol").notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("copy_symbol_mappings_unique").on(t.followerId, t.leaderSymbol)]
+)
+
+export const copyAccountPrefs = pgTable(
+  "copy_account_prefs",
+  {
+    accountId: integer("accountId").primaryKey(),
+    userId: text("userId").notNull(),
+    role: text("role").notNull().default("unassigned"), // leader | follower | both | unassigned
+    lastLatencyMs: integer("lastLatencyMs"),
+    lastHeartbeatAt: timestamp("lastHeartbeatAt"),
+    lastTestStatus: text("lastTestStatus"),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("copy_account_prefs_user").on(t.userId)]
+)
+
+export const copyPositions = pgTable(
+  "copy_positions",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    groupId: integer("groupId").notNull(),
+    accountId: integer("accountId").notNull(),
+    role: text("role").notNull(), // leader | follower
+    symbol: text("symbol").notNull(),
+    side: text("side").notNull(),
+    quantity: numeric("quantity", { precision: 18, scale: 4 }).notNull(),
+    entryPrice: numeric("entryPrice", { precision: 18, scale: 8 }),
+    stopLoss: numeric("stopLoss", { precision: 18, scale: 8 }),
+    takeProfit: numeric("takeProfit", { precision: 18, scale: 8 }),
+    positionRef: text("positionRef"),
+    leaderPositionId: integer("leaderPositionId"),
+    correlationId: text("correlationId"),
+    // bumped on every change the engine copies; part of each order id
+    version: integer("version").notNull().default(0),
+    status: text("status").notNull().default("open"), // open | closed
+    simulated: boolean("simulated").notNull().default(true),
+    realizedPnl: numeric("realizedPnl", { precision: 18, scale: 2 }),
+    openedAt: timestamp("openedAt").notNull().defaultNow(),
+    closedAt: timestamp("closedAt"),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("copy_positions_group").on(t.groupId, t.status)]
+)
+
+export const copyOrders = pgTable(
+  "copy_orders",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    groupId: integer("groupId").notNull(),
+    correlationId: text("correlationId").notNull(),
+    masterOrderId: text("masterOrderId").notNull(),
+    masterAccountId: integer("masterAccountId").notNull(),
+    followerAccountId: integer("followerAccountId").notNull(),
+    action: text("action").notNull(),
+    symbol: text("symbol").notNull(),
+    leaderSymbol: text("leaderSymbol").notNull(),
+    side: text("side").notNull(),
+    quantity: numeric("quantity", { precision: 18, scale: 4 }).notNull(),
+    leaderQuantity: numeric("leaderQuantity", { precision: 18, scale: 4 }),
+    requestedPrice: numeric("requestedPrice", { precision: 18, scale: 8 }),
+    executionPrice: numeric("executionPrice", { precision: 18, scale: 8 }),
+    stopLoss: numeric("stopLoss", { precision: 18, scale: 8 }),
+    takeProfit: numeric("takeProfit", { precision: 18, scale: 8 }),
+    status: text("status").notNull().default("pending"),
+    reason: text("reason"),
+    decision: jsonb("decision").$type<Record<string, unknown>>(),
+    slippage: numeric("slippage", { precision: 18, scale: 8 }),
+    latencyMs: integer("latencyMs"),
+    simulated: boolean("simulated").notNull().default(true),
+    orderCommandId: integer("orderCommandId"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("copy_orders_correlation").on(t.correlationId), index("copy_orders_group").on(t.groupId, t.createdAt), index("copy_orders_user").on(t.userId, t.createdAt)]
+)
+
+export const copyEvents = pgTable(
+  "copy_events",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    groupId: integer("groupId"),
+    accountId: integer("accountId"),
+    level: text("level").notNull().default("info"), // info | success | warning | error
+    code: text("code").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    action: text("action"),
+    masterOrderId: text("masterOrderId"),
+    data: jsonb("data").$type<Record<string, unknown>>(),
+    readAt: timestamp("readAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("copy_events_user").on(t.userId, t.createdAt)]
+)

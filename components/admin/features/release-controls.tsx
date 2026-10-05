@@ -4,6 +4,7 @@ import { useTransition } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { setFeatureStage } from "@/app/actions/features"
+import { setCopyTradingLive } from "@/app/actions/copy-trading"
 import { STAGES, STAGE_LABELS, type Stage } from "@/lib/features/release"
 
 const NOTES: Record<Stage, string> = {
@@ -46,6 +47,36 @@ export function ReleaseControl({ feature, label, stage }: { feature: string; lab
             {STAGE_LABELS[s]}
           </span>
           <span className="mt-1 block ps-6 text-xs text-muted-foreground">{NOTES[s]}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Copy Trading only: whether the engine works copies out (simulation) or also
+// sends them to brokers (live). Switching to live asks twice.
+export function CopyExecutionControl({ live }: { live: boolean }) {
+  const [pending, startTransition] = useTransition()
+  const choose = (next: boolean) => {
+    if (next === live) return
+    if (next && !window.confirm("Switch Copy Trading to LIVE?\n\nFollower orders will be sent to brokers for every active copy group. Live mode has not been run against a broker yet: test it on demo accounts first.")) return
+    if (next && window.prompt("Type LIVE to confirm.") !== "LIVE") return
+    startTransition(async () => {
+      const result = await setCopyTradingLive(next)
+      if (result.ok) toast.success(result.message)
+      else toast.error(result.error)
+    })
+  }
+  const options: [boolean, string, string][] = [
+    [false, "Simulation", "The engine reads the Leader, sizes every follower and records each copy. Nothing is sent to a broker."],
+    [true, "Live", "Follower orders go to the broker order queue (MetaTrader 5 accounts with a master password), through the prop-rule guard."],
+  ]
+  return (
+    <div role="radiogroup" aria-label="Copy Trading execution" className="grid gap-2 sm:grid-cols-2">
+      {options.map(([value, label, text]) => (
+        <button key={label} type="button" role="radio" aria-checked={value === live} disabled={pending} onClick={() => choose(value)} className={cn("rounded-lg border p-3 text-start transition-colors disabled:opacity-60", value === live ? (value ? "border-[var(--loss)] bg-[var(--loss)]/5 ring-1 ring-[var(--loss)]" : "border-primary bg-primary/5 ring-1 ring-primary") : "hover:bg-muted/60")}>
+          <span className="block text-sm font-medium">{label}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{text}</span>
         </button>
       ))}
     </div>

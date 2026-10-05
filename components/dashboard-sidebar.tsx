@@ -113,7 +113,7 @@ function ItemBadge({ badge, t }: { badge: ResolvedItem["badge"]; t: T }) {
 
 // One page of a product area. A page that isn't released is drawn as plain,
 // muted text: no link, no handler, out of the tab order and deaf to the pointer.
-function PageRow({ item, active, roomy, hideBadge, t }: { item: ResolvedItem; active: boolean; roomy?: boolean; hideBadge?: boolean; t: T }) {
+function PageRow({ item, active, roomy, hideBadge, pathname, t }: { item: ResolvedItem; active: boolean; roomy?: boolean; hideBadge?: boolean; pathname: string; t: T }) {
   const Icon = ICONS[item.icon]
   if (!item.enabled)
     return (
@@ -125,10 +125,13 @@ function PageRow({ item, active, roomy, hideBadge, t }: { item: ResolvedItem; ac
         </span>
       </div>
     )
+  // the pages of the item itself, shown once the trader is inside it
+  const children = active ? item.children : undefined
   return (
+    <>
     <Link
       href={item.href!}
-      aria-current={active ? "page" : undefined}
+      aria-current={active && !children ? "page" : undefined}
       title={item.description}
       className={cn(
         "relative flex items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -139,8 +142,23 @@ function PageRow({ item, active, roomy, hideBadge, t }: { item: ResolvedItem; ac
       <Icon className={cn("size-4 shrink-0", active && "text-primary")} />
       <span className="min-w-0 flex-1 truncate">{t(item.label)}</span>
       {!hideBadge && <ItemBadge badge={item.badge} t={t} />}
-      {roomy && <ChevronRight className="size-4 shrink-0 text-muted-foreground/60 rtl:rotate-180" />}
+      {roomy && <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground/60 rtl:rotate-180", children && "rotate-90 rtl:rotate-90")} />}
     </Link>
+    {children && (
+      <ul className="ms-5 flex flex-col gap-0.5 border-s ps-2">
+        {children.map((c) => {
+          const on = c.exact ? pathname === c.href : pathname === c.href || pathname.startsWith(`${c.href}/`)
+          return (
+            <li key={c.id}>
+              <Link href={c.href} aria-current={on ? "page" : undefined} className={cn("block rounded-md px-3 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", roomy ? "py-2.5" : "py-1.5", on ? "font-medium text-primary" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground")}>
+                {t(c.label)}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    )}
+    </>
   )
 }
 
@@ -170,7 +188,7 @@ function SectionPages({ section, activeId, pathname, roomy, t }: { section: Reso
       )}
       <nav aria-label={t(section.label)} className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2">
         {section.items.map((item) => (
-          <PageRow key={item.id} item={item} active={item.id === activeId} roomy={roomy} hideBadge={!!stage && item.badge === stage} t={t} />
+          <PageRow key={item.id} item={item} active={item.id === activeId} roomy={roomy} hideBadge={!!stage && item.badge === stage} pathname={pathname} t={t} />
         ))}
       </nav>
     </>
@@ -288,11 +306,11 @@ export function DashboardSidebar({
   // can use features still in beta (lib/beta.ts)
   hasBeta?: boolean
   // the staged features this user may open, with their release stage
-  insights?: { edge_lab?: FeatureStage; psychology?: FeatureStage }
+  insights?: { edge_lab?: FeatureStage; psychology?: FeatureStage; copy_trading?: FeatureStage }
 }) {
   const pathname = usePathname()
   const t = useT()
-  const sections = useMemo(() => resolveNavigation({ isAdmin, isPro, hasBeta, features: { edge_lab: insights?.edge_lab, psychology: insights?.psychology } }), [isAdmin, isPro, hasBeta, insights?.edge_lab, insights?.psychology])
+  const sections = useMemo(() => resolveNavigation({ isAdmin, isPro, hasBeta, features: { edge_lab: insights?.edge_lab, psychology: insights?.psychology, copy_trading: insights?.copy_trading } }), [isAdmin, isPro, hasBeta, insights?.edge_lab, insights?.psychology, insights?.copy_trading])
 
   // The product area the current page belongs to, and the one whose pages are
   // shown — the same until another area is picked to look into.

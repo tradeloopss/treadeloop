@@ -61,7 +61,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     : null
   // Someone logged in as a user sees what that user sees: featureAccess gives
   // an impersonating admin no admin rights.
-  const insights = { edge_lab: features.can.edge_lab ? features.releases.edge_lab : undefined, psychology: features.can.psychology ? features.releases.psychology : undefined }
+  const insights = { edge_lab: features.can.edge_lab ? features.releases.edge_lab : undefined, psychology: features.can.psychology ? features.releases.psychology : undefined, copy_trading: features.can.copy_trading ? features.releases.copy_trading : undefined }
   const bottomBar = !!(insights.edge_lab || insights.psychology)
   const locked = plan === null
   // Only matters for the paywall: whether to offer the free trial or (once

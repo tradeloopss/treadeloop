@@ -6,7 +6,7 @@ import { NAV_SECTIONS, itemForPath, resolveNavigation, sectionForPath, type NavC
 // redesign still reachable, and what isn't released impossible to open.
 
 const user: NavContext = { isAdmin: false, isPro: true, hasBeta: false, features: {} }
-const admin: NavContext = { isAdmin: true, isPro: true, hasBeta: false, features: { edge_lab: "admin", psychology: "admin" } }
+const admin: NavContext = { isAdmin: true, isPro: true, hasBeta: false, features: { edge_lab: "admin", psychology: "admin", copy_trading: "admin" } }
 const items = (ctx: NavContext) => resolveNavigation(ctx).flatMap((s) => s.items)
 const byId = (ctx: NavContext, id: string) => items(ctx).find((i) => i.id === id)!
 
@@ -76,8 +76,12 @@ test("what isn't released can't be opened by a user", () => {
   const sections = resolveNavigation(user)
   assert.deepEqual(sections.filter((s) => !s.enabled).map((s) => s.id), ["agents"])
   // a page with no address is closed to everyone, the team included
-  assert.equal(byId(admin, "copy-trading").enabled, false)
   assert.equal(byId(admin, "agents").enabled, false)
+  // Copy Trading follows its own release stage, and lists its four pages
+  assert.deepEqual([byId(admin, "copy-trading").enabled, byId(admin, "copy-trading").badge], [true, "admin"])
+  assert.deepEqual(byId(admin, "copy-trading").children?.map((c) => c.label), ["Copy Dashboard", "Connection", "Cockpit", "Risk Management"])
+  assert.equal(sectionForPath("/copy-trading/risk-management"), "account-manager")
+  assert.equal(itemForPath("/copy-trading/cockpit")?.item.id, "copy-trading")
 })
 
 test("the team keeps a way in to what it is still testing", () => {
