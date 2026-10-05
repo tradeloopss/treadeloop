@@ -233,10 +233,15 @@ async function assign() {
     // leaders first: without its leader read fast, a follower's terminal is no use
     .orderBy(sql`(${metatraderConnections.copyRole} = 'follower')`, metatraderConnections.id)) as Connection[]
   const byId = new Map(wanted.map((c) => [c.id, c]))
+  // An account that has just stopped copying may still have orders waiting for
+  // its terminal here (the closes of a Flatten All). Those first: it is let go after.
+  const leaving = slots.some((s) => s.connection && !byId.has(s.connection.id))
+  const waiting = leaving ? new Set((await db.selectDistinct({ accountId: orderCommands.accountId }).from(orderCommands).where(and(eq(orderCommands.broker, "mt5c"), eq(orderCommands.status, "pending")))).map((r) => r.accountId)) : new Set<number>()
   for (const s of slots) {
     if (!s.connection) continue
     const still = byId.get(s.connection.id)
     if (!still) {
+      if (s.connection.accountId != null && waiting.has(s.connection.accountId)) continue
       console.log(`[lane] ${s.slot}: released (connection ${s.connection.id})`)
       s.connection = null
       clear(s)
@@ -718,7 +723,9 @@ async function finish(id: number, set: Partial<Command>) {
 }
 
 async function execute(s: Slot, cmd: Command) {
-  const c = s.connection!
+  const c = s.connection
+  // the account lost its terminal between the order being taken and its turn: the sync worker sends it
+  if (!c || c.accountId !== cmd.accountId || !trades(c)) return finish(cmd.id, { broker: "mt5" })
   const startedAt = Date.now()
   try {
     const result = await callBridge<Sent>(s, "/order", { login: c.login, password: secret(c), server: c.server, kind: cmd.kind, positionRef: cmd.positionRef, orderRef: cmd.orderRef, symbol: cmd.symbol, side: cmd.side, volume: num(cmd.volume), price: num(cmd.price), stopLoss: num(cmd.stopLoss), takeProfit: num(cmd.takeProfit), orderType: cmd.orderType, fast: true }, 25_000)

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
@@ -844,15 +844,20 @@ async function reconcile(userId: string, state: CopyState) {
 // Tells the sync server which accounts are copying right now, so its copy lane
 // can keep a terminal open for each: the leader of a group that is switched
 // on, and each follower of it that is switched on. Everything else is cleared.
+//
+// A follower whose positions are still being closed keeps its terminal until
+// the broker has confirmed them, whatever has become of its group: Flatten All
+// pauses the group, and that is exactly when its closes must go out fastest.
 export async function syncCopyRoles(userId: string): Promise<void> {
-  const [groups, followers, connections] = await Promise.all([
+  const [groups, followers, connections, owed] = await Promise.all([
     db.select({ id: copyGroups.id, leaderAccountId: copyGroups.leaderAccountId }).from(copyGroups).where(and(eq(copyGroups.userId, userId), eq(copyGroups.status, "active"))),
     db.select({ groupId: copyGroupFollowers.groupId, accountId: copyGroupFollowers.accountId }).from(copyGroupFollowers).where(and(eq(copyGroupFollowers.userId, userId), eq(copyGroupFollowers.enabled, true))),
     db.select({ id: metatraderConnections.id, accountId: metatraderConnections.accountId, copyRole: metatraderConnections.copyRole }).from(metatraderConnections).where(eq(metatraderConnections.userId, userId)),
+    db.selectDistinct({ accountId: copyPositions.accountId }).from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open"), eq(copyPositions.simulated, false), isNotNull(copyPositions.closeRequestedAt), lte(copyPositions.closeAttempts, CLOSE_ATTEMPTS))),
   ])
   const active = new Set(groups.map((g) => g.id))
   const leads = new Set(groups.map((g) => g.leaderAccountId))
-  const follows = new Set(followers.filter((f) => active.has(f.groupId)).map((f) => f.accountId))
+  const follows = new Set([...followers.filter((f) => active.has(f.groupId)).map((f) => f.accountId), ...owed.map((o) => o.accountId)])
   for (const c of connections) {
     const role = c.accountId == null ? null : leads.has(c.accountId) && follows.has(c.accountId) ? "both" : leads.has(c.accountId) ? "leader" : follows.has(c.accountId) ? "follower" : null
     if (role !== (c.copyRole ?? null)) await db.update(metatraderConnections).set({ copyRole: role, ...(role === "leader" || role === "both" ? {} : { copyPlan: null }) }).where(eq(metatraderConnections.id, c.id))
