@@ -160,7 +160,7 @@ export function CopyDashboard() {
             </dl>
             <p className="text-xs text-muted-foreground">
               {state.engine.background && state.engine.lastRunAt && Date.now() - new Date(state.engine.lastRunAt).getTime() <= 120_000
-                ? "The engine runs in the background every few seconds: your groups copy whether or not this page is open. A MetaTrader leader is re-read about every 15 seconds, a Rithmic leader about once a minute — that is how soon a new trade can be seen."
+                ? "The engine runs in the background every few seconds: your groups copy whether or not this page is open. A MetaTrader leader is re-read about every 30 seconds, a Rithmic leader about once a minute — that is how soon a new trade can be seen."
                 : "The background engine isn't running right now, so groups copy only while a Copy Trading page is open."}
             </p>
           </Section>

@@ -5,7 +5,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { FlaskConical, Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { refreshCopy } from "@/app/actions/copy-trading"
 import { groupCopies, type AccountView, type CopyState, type GroupView } from "@/lib/copy/view"
@@ -126,22 +125,5 @@ export function CopyTabs() {
         )
       })}
     </nav>
-  )
-}
-
-// Says, on every page, whether orders are really being sent.
-export function ModeBanner() {
-  const { state } = useCopy()
-  const live = state.mode === "live"
-  const Icon = live ? Radio : FlaskConical
-  return (
-    <div role="status" className={cn("flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm", live ? "border-[var(--gain)]/40 bg-[var(--gain)]/10" : "border-primary/30 bg-primary/5")}>
-      <Icon className={cn("mt-0.5 size-4 shrink-0", live ? "text-[var(--gain)]" : "text-primary")} aria-hidden />
-      <p>
-        <span className="font-semibold">{live ? "Live." : "Simulation."}</span>{" "}
-        <span className="text-muted-foreground">{live ? "Follower orders are sent to your brokers through the same guarded path as the Trade Manager." : "The engine reads your Leader, sizes every follower and records each copy and the reason for it. Nothing is sent to a broker."}</span>
-        {!state.liveData && <span className="text-[var(--warning)]"> Live positions couldn't be read just now, so nothing was copied on this pass.</span>}
-      </p>
-    </div>
   )
 }

@@ -21,7 +21,10 @@ import { BACKGROUND_SETTING, engineMode, runEngine } from "./server"
 // How often a leader's MetaTrader connection is re-read while its group is
 // copying. The worker's own pace is once a minute, which is too slow to copy
 // from; this asks for the leader sooner. Followers keep the normal pace.
-export const LEADER_SYNC_SECONDS = 15
+// Not faster than this: the worker shares two MetaTrader terminals between
+// every account, and at 15 seconds the extra logins made other accounts'
+// syncs fail several times as often (seen in production, 2026-10-05).
+export const LEADER_SYNC_SECONDS = 30
 // Traders handled in one pass, and how long a pass may take.
 const MAX_TRADERS = 50
 

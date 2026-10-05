@@ -7,14 +7,15 @@ import { loadCopyState } from "@/lib/copy/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import { FeedbackButton } from "@/components/insights/client"
 import { StageBadge } from "@/components/insights/ui"
-import { CopyProvider, CopyTabs, ModeBanner } from "@/components/copy/store"
+import { CopyProvider, CopyTabs } from "@/components/copy/store"
+import { ModeBanner } from "@/components/copy/mode-banner"
 
 export const metadata: Metadata = { title: "Copy Trading — TradeLoop" }
 
 // Copy Trading's shell. Who may open it is set in the admin panel
 // (lib/features); every page under it, and every action, checks again.
 export default async function CopyTradingLayout({ children }: { children: React.ReactNode }) {
-  const { userId, stage } = await requireFeature("copy_trading")
+  const { userId, stage, isAdmin } = await requireFeature("copy_trading")
   const state = await loadCopyState(userId, resolveTimeZone(await headers()))
   return (
     // the pages read the selected group from the address, which is only known in the browser
@@ -37,7 +38,7 @@ export default async function CopyTradingLayout({ children }: { children: React.
             <CopyTabs />
           </header>
           <div className="flex-1 space-y-4 p-4 sm:space-y-5 sm:p-6">
-            <ModeBanner />
+            <ModeBanner admin={isAdmin} />
             {children}
           </div>
         </div>
