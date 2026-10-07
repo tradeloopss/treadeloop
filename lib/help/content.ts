@@ -149,7 +149,7 @@ export const HELP: Category[] = [
         author: "TradeLoop Team",
         date: "2026-10-07",
         body: [
-          { t: "warn", text: "TradeLoop does not connect to FundingPips accounts and never asks for a FundingPips password. FundingPips does not allow a trading account to be opened from a server, and TradeLoop syncs from one. If you enter a FundingPips server on the connect form, TradeLoop refuses it to protect your account." },
+          { t: "warn", text: "TradeLoop does not connect to FundingPips accounts and never asks for a FundingPips password. FundingPips does not allow a trading account to be opened from a server, even with the read-only investor password, and TradeLoop syncs from one. If you enter a FundingPips server on the connect form, TradeLoop refuses it to protect your account." },
           { t: "h", text: "How it works" },
           { t: "p", text: "FundingPips has its own Trade Copier in your FundingPips dashboard. It copies your FundingPips account's trades to your other FundingPips accounts, and to accounts you hold with other brokers. TradeLoop takes over from one of those outside accounts: you connect it to TradeLoop and copy from it to the rest of your accounts." },
           { t: "p", text: "Your FundingPips account stays the source of every trade. TradeLoop only ever sees the outside account." },
@@ -158,8 +158,8 @@ export const HELP: Category[] = [
             "Open a MetaTrader 5 account with a broker TradeLoop can connect, for example Exness or JustMarkets. This is your relay account.",
             "In your FundingPips dashboard, open Trade Copier and create a portfolio: your FundingPips account as the Lead, the relay account as a Follower.",
             "Still in FundingPips, map each symbol you trade to the relay broker's name for it, and choose the lot sizing.",
-            "In TradeLoop, go to Accounts → Add account → MetaTrader 5 and connect the relay account with its investor (read-only) password.",
-            "In Copy Trading, create a copy group with the relay account as the Leader and your other accounts as followers.",
+            "In TradeLoop, open Copy Trading → Connection → Connect Account and choose FundingPips account. It walks you through connecting the relay account with its investor (read-only) password. (Accounts → Add account → MetaTrader 5 does the same.)",
+            "Create a copy group with the relay account as the Leader and your other accounts as followers.",
           ] },
           { t: "link", prefix: "FundingPips' own guide", label: "Trade Copier", href: "https://help.fundingpips.com/hc/en-us/articles/49580068780817-Trade-Copier" },
           { t: "note", text: "Copy Trading is being released in stages. If it shows “Coming soon” in your menu, it hasn't been opened to your account yet." },
@@ -172,7 +172,7 @@ export const HELP: Category[] = [
           ] },
           { t: "h", text: "FundingPips rules that stay yours to keep" },
           { t: "list", items: [
-            "Your FundingPips account is always the source. Never copy trades into a FundingPips account from anywhere else.",
+            "Your FundingPips account is always the source. Never copy trades into a FundingPips account from anywhere else, the relay account included.",
             "Copy only to your own accounts. FundingPips prohibits coordinated trading between accounts owned by different people.",
             "Keep every account trading in the same direction as the FundingPips account. FundingPips prohibits taking opposite positions across accounts.",
             "To copy between two of your own FundingPips accounts, use FundingPips' Trade Copier. TradeLoop cannot do that part.",

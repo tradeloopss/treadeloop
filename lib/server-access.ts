@@ -12,8 +12,16 @@ import { HELP_URL, siteHref } from "@/lib/urls"
 //
 // FundingPips: "Connecting to a VPN or VPS while accessing your trading
 // account is not permitted" (Trading Conduct and Security Standards, read
-// 2026-10-07). It has a copier of its own that can feed an account outside
-// FundingPips, which TradeLoop then copies from: that is what the guide says.
+// 2026-10-07). Its support, asked that day, in writing: "using a VPS or VPN
+// for the setup is not permitted, and using the investor password does not
+// override this restriction"; and "copying trades onward from an external
+// follower account into a FundingPips account using another tool is not
+// permitted". So a FundingPips account is neither read nor written from here,
+// and is never in a copy group. It has a copier of its own, which copies
+// between a trader's own FundingPips accounts and can feed an account outside
+// FundingPips; TradeLoop copies from that one. That is what the guide says.
+// Its MT5 servers, from its own help pages: FundingPips-Trial, -Prime, -SIM,
+// -SIM1 and FundingPips2-SIM.
 //
 // Never add a broker pack for one of these to the sync server.
 const FIRMS: { firm: string; names: string[]; guide: string }[] = [{ firm: "FundingPips", names: ["fundingpips"], guide: "/connecting-accounts/fundingpips" }]
@@ -29,6 +37,12 @@ export type ServerAccessBlock = {
   guide: { label: string; href: string }
 }
 
+// The same rule in Copy Trading: such an account is neither copied from nor to.
+export const copyBlockMessage = (block: ServerAccessBlock) => `${block.firm} accounts can't be in a copy group. ${block.firm} doesn't allow TradeLoop to reach them, and nothing may be copied into one.`
+
+// Where Copy Trading sends a FundingPips trader.
+export const FUNDINGPIPS_GUIDE = helpHref("/connecting-accounts/fundingpips")
+
 export function serverAccessBlock(server: string): ServerAccessBlock | null {
   // "FundingPips2-SIM", "Funding Pips - Live": the firm's name however it is spaced
   const name = server.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -36,7 +50,7 @@ export function serverAccessBlock(server: string): ServerAccessBlock | null {
   if (!hit) return null
   return {
     firm: hit.firm,
-    message: `${hit.firm} accounts can't be connected to TradeLoop. ${hit.firm} doesn't allow a trading account to be opened from a server, and TradeLoop syncs from one, so connecting it could cost you the account.`,
+    message: `${hit.firm} accounts can't be connected to TradeLoop. ${hit.firm} doesn't allow a trading account to be opened from a server, even with the read-only password, and TradeLoop syncs from one. Connecting it could cost you the account.`,
     guide: { label: `How to use TradeLoop with a ${hit.firm} account`, href: helpHref(hit.guide) },
   }
 }

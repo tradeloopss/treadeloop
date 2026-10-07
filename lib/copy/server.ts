@@ -6,6 +6,7 @@ import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
+import { copyBlockMessage, serverAccessBlock } from "@/lib/server-access"
 import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
@@ -106,7 +107,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const [accountRows, mt, rith, prov, prefs, groupRows, followerRows, contractRows, ruleRows, limitRows, mappingRows, managed, orderRows, eventRows, closed, mode, live, prop, traded, background, beat] = await Promise.all([
     db.select().from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false))),
     db
-      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt, copyPingMs: metatraderConnections.copyPingMs })
+      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, server: metatraderConnections.server, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt, copyPingMs: metatraderConnections.copyPingMs })
       .from(metatraderConnections)
       .where(eq(metatraderConnections.userId, userId)),
     db.select({ accountId: rithmicConnections.accountId, login: rithmicConnections.login, lastSyncedAt: rithmicConnections.lastSyncedAt, lastSyncStatus: rithmicConnections.lastSyncStatus }).from(rithmicConnections).where(eq(rithmicConnections.userId, userId)),
@@ -175,7 +176,9 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     const leads = groups.some((g) => g.as === "leader")
     const follows = groups.some((g) => g.as === "follower")
     const preferred = (pref?.role ?? "unassigned") as Role
-    const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading
+    // a firm that forbids server access (lib/server-access.ts): no order is ever sent to its account
+    const barred = m ? serverAccessBlock(m.server) : null
+    const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading && !barred
     return {
       id: a.id,
       name: a.name,
@@ -196,7 +199,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       role: leads && follows ? "both" : leads ? "leader" : follows ? "follower" : preferred,
       groups,
       canExecute,
-      executionNote: canExecute ? "Orders can be placed on this account." : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : "Add the account's master (trading) password in the Trade Manager to allow orders.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
+      executionNote: canExecute ? "Orders can be placed on this account." : barred ? copyBlockMessage(barred) : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : "Add the account's master (trading) password in the Trade Manager to allow orders.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
       dayPnl: (closedToday.get(a.id) ?? 0) + (openPnl ?? 0),
       openPnl,
       openNotional: mine.reduce((s, x) => {
@@ -253,6 +256,18 @@ async function ownAccounts(userId: string, ids: number[]): Promise<void> {
   if (!unique.length) return
   const rows = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), inArray(tradingAccounts.id, unique), eq(tradingAccounts.archived, false)))
   if (rows.length !== unique.length) throw new Error("One of those accounts isn't yours, or has been archived.")
+}
+// An account at a firm that forbids server access is in no copy group, as
+// Leader or as follower (lib/server-access.ts). It can't be connected in the
+// first place; this is the rule for one that somehow is.
+async function copyable(userId: string, ids: number[]): Promise<void> {
+  const unique = [...new Set(ids)]
+  if (!unique.length) return
+  const rows = await db.select({ server: metatraderConnections.server }).from(metatraderConnections).where(and(eq(metatraderConnections.userId, userId), inArray(metatraderConnections.accountId, unique)))
+  for (const r of rows) {
+    const barred = serverAccessBlock(r.server)
+    if (barred) throw new Error(copyBlockMessage(barred))
+  }
 }
 async function ownGroup(userId: string, groupId: number) {
   const [g] = await db.select().from(copyGroups).where(and(eq(copyGroups.id, groupId), eq(copyGroups.userId, userId))).limit(1)
@@ -315,6 +330,7 @@ export async function createGroup(userId: string, input: GroupInput): Promise<nu
   if (new Set(followers.map((f) => f.accountId)).size !== followers.length) throw new Error("An account is listed twice.")
   if (followers.length > MAX_FOLLOWERS) throw new Error(`A group can have up to ${MAX_FOLLOWERS} followers.`)
   await ownAccounts(userId, [leader, ...followers.map((f) => f.accountId)])
+  await copyable(userId, [leader, ...followers.map((f) => f.accountId)])
   const existing = await db.select({ id: copyGroups.id, name: copyGroups.name }).from(copyGroups).where(eq(copyGroups.userId, userId))
   if (existing.length >= MAX_GROUPS) throw new Error(`You can have up to ${MAX_GROUPS} copy groups.`)
   if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) throw new Error("You already have a group with that name.")
@@ -386,6 +402,7 @@ async function baseline(userId: string, g: GroupView, state: CopyState) {
 export async function changeLeader(userId: string, groupId: number, accountId: number, timeZone: string): Promise<void> {
   const g = await ownGroup(userId, groupId)
   await ownAccounts(userId, [accountId])
+  await copyable(userId, [accountId])
   if (g.leaderAccountId === accountId) return
   // a follower promoted to leader stops following
   const [was] = await db.select({ id: copyGroupFollowers.id }).from(copyGroupFollowers).where(and(eq(copyGroupFollowers.groupId, groupId), eq(copyGroupFollowers.accountId, accountId)))
@@ -411,6 +428,7 @@ export async function saveFollowers(userId: string, groupId: number, input: Foll
   if (list.some((f) => f.accountId === g.leaderAccountId)) throw new Error("The Leader can't also follow itself.")
   if (new Set(list.map((f) => f.accountId)).size !== list.length) throw new Error("An account is listed twice.")
   await ownAccounts(userId, list.map((f) => f.accountId))
+  await copyable(userId, list.map((f) => f.accountId))
   const existing = await db.select().from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, groupId))
   const gone = existing.filter((e) => !list.some((f) => f.accountId === e.accountId))
   if (gone.length) {
@@ -476,6 +494,7 @@ export async function saveLimits(userId: string, groupId: number, l: Partial<Gro
 export async function setAccountRole(userId: string, accountId: number, role: string): Promise<void> {
   await ownAccounts(userId, [accountId])
   const clean = (["leader", "follower", "both", "unassigned"] as const).find((r) => r === role) ?? "unassigned"
+  if (clean !== "unassigned") await copyable(userId, [accountId])
   await db.insert(copyAccountPrefs).values({ accountId, userId, role: clean }).onConflictDoUpdate({ target: copyAccountPrefs.accountId, set: { role: clean, updatedAt: new Date() } })
 }
 
