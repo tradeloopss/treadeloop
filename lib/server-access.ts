@@ -1,4 +1,4 @@
-import { HELP_URL } from "@/lib/urls"
+import { HELP_URL, siteHref } from "@/lib/urls"
 
 // Prop firms that do not allow a trading account to be reached from a server.
 //
@@ -18,6 +18,10 @@ import { HELP_URL } from "@/lib/urls"
 // Never add a broker pack for one of these to the sync server.
 const FIRMS: { firm: string; names: string[]; guide: string }[] = [{ firm: "FundingPips", names: ["fundingpips"], guide: "/connecting-accounts/fundingpips" }]
 
+// The Help Center is on the public site: on the app's own address /help goes to
+// the dashboard (proxy.ts).
+const helpHref = (path: string) => `${HELP_URL.startsWith("http") ? HELP_URL : siteHref(HELP_URL)}${path}`
+
 export type ServerAccessBlock = {
   firm: string
   message: string
@@ -33,6 +37,6 @@ export function serverAccessBlock(server: string): ServerAccessBlock | null {
   return {
     firm: hit.firm,
     message: `${hit.firm} accounts can't be connected to TradeLoop. ${hit.firm} doesn't allow a trading account to be opened from a server, and TradeLoop syncs from one, so connecting it could cost you the account.`,
-    guide: { label: `How to use TradeLoop with a ${hit.firm} account`, href: `${HELP_URL}${hit.guide}` },
+    guide: { label: `How to use TradeLoop with a ${hit.firm} account`, href: helpHref(hit.guide) },
   }
 }
