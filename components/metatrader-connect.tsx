@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { connectMetaTrader, getMetaTraderConnection, type MetaTraderConnectionView } from "@/app/actions/metatrader"
+import { serverAccessBlock, type ServerAccessBlock } from "@/lib/server-access"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -56,6 +57,11 @@ export function ConnectFlow({
   const [platform, setPlatform] = useState<"mt5" | "mt4">(initial?.platform === "mt4" ? "mt4" : "mt5")
   const [history, setHistory] = useState("all")
   const [error, setError] = useState<string | null>(null)
+  const [guide, setGuide] = useState<ServerAccessBlock["guide"] | null>(null)
+  // A firm that forbids access from a server (FundingPips): said as the server
+  // name is typed, before a password is. The action refuses it either way.
+  const [server, setServer] = useState(initial?.server ?? "")
+  const blocked = serverAccessBlock(server)
   const [watching, setWatching] = useState<{ id: number; startedAt: number } | null>(null)
   const [result, setResult] = useState<MetaTraderConnectionView | null>(null)
 
@@ -96,13 +102,16 @@ export function ConnectFlow({
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
+    setGuide(null)
+    if (blocked) return
     const formData = new FormData(e.currentTarget)
     formData.set("platform", platform)
     formData.set("history", history)
     startTransition(async () => {
-      const res = await connectMetaTrader(formData).catch(() => ({ ok: false as const, error: "Could not connect" }))
+      const res = await connectMetaTrader(formData).catch((): Awaited<ReturnType<typeof connectMetaTrader>> => ({ ok: false, error: "Could not connect" }))
       if (!res.ok) {
         setError(t(res.error))
+        setGuide(res.guide ?? null)
         return
       }
       setResult(null)
@@ -230,8 +239,20 @@ export function ConnectFlow({
         )}
         <div className="space-y-2">
           <Label htmlFor="mt-server" className="text-xs font-semibold">{t("Server")}</Label>
-          <Input id="mt-server" name="server" defaultValue={initial?.server} placeholder={platform === "mt5" ? t("e.g. FTMO-Server3") : t("e.g. Exness-Real6")} autoComplete="off" required className="h-10" />
-          <p className="text-xs text-muted-foreground">{t("Exactly as shown in MetaTrader → File → Login to Trade Account.")}</p>
+          <Input id="mt-server" name="server" defaultValue={initial?.server} onChange={(e) => setServer(e.target.value)} placeholder={platform === "mt5" ? t("e.g. FTMO-Server3") : t("e.g. Exness-Real6")} autoComplete="off" required aria-invalid={blocked ? true : undefined} aria-describedby={blocked ? "mt-server-blocked" : undefined} className="h-10" />
+          {blocked ? (
+            <div id="mt-server-blocked" role="alert" className="flex items-start gap-2 rounded-lg border border-loss/40 bg-loss/10 p-3 text-xs">
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-loss" />
+              <p>
+                {t(blocked.message)}{" "}
+                <a href={blocked.guide.href} target="_blank" rel="noreferrer" className="font-semibold text-primary underline underline-offset-2">
+                  {t(blocked.guide.label)}
+                </a>
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("Exactly as shown in MetaTrader → File → Login to Trade Account.")}</p>
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -272,10 +293,21 @@ export function ConnectFlow({
       </div>
       {error && (
         <p className="flex items-start gap-1.5 text-sm text-loss" role="alert">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" /> {error}
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {error}
+            {guide && (
+              <>
+                {" "}
+                <a href={guide.href} target="_blank" rel="noreferrer" className="font-semibold text-primary underline underline-offset-2">
+                  {t(guide.label)}
+                </a>
+              </>
+            )}
+          </span>
         </p>
       )}
-      <Button type="submit" disabled={pending} className="h-11 w-full">
+      <Button type="submit" disabled={pending || blocked != null} className="h-11 w-full">
         {pending ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
         {pending ? t("Connecting…") : t("Connect")}
       </Button>

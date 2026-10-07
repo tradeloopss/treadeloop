@@ -201,6 +201,13 @@ Scripts must reach the server with LF line endings (`.gitattributes` pins
 them; a CRLF `add-broker` fails with `python3
 : No such file or directory`).
 
+**Never add a pack for FundingPips.** Its rules forbid reaching a trading
+account from a server ("Connecting to a VPN or VPS while accessing your
+trading account is not permitted"), and this is one. The app refuses the
+server name before a connection row is written (`lib/server-access.ts`); the
+missing pack is the second lock. A firm with the same rule goes on that list,
+not in here.
+
 **Set up (2026-09-26):** MT5 packs `exness`, `ftmo` (prefix `FTMO`: every
 FTMO-Server/-Demo, incl. free trials), `acgmarkets` (prefixes `ACGMarkets`,
 `ACG`: ACGMarkets-Main…), `fundednext` (prefix `FundedNext`: -Demo…, -Server…);

@@ -8,6 +8,7 @@ import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
 import { metatraderLimitError } from "@/lib/plan-limits"
+import { serverAccessBlock, type ServerAccessBlock } from "@/lib/server-access"
 
 // MetaTrader accounts are synced by our own MT5 terminals on the sync VPS
 // (worker/mt5): these actions only record what the user asked for — the
@@ -83,13 +84,18 @@ export async function getMetaTraderConnection(connectionId: number): Promise<Met
 
 const HISTORY_DAYS: Record<string, number | null> = { "30d": 30, "90d": 90, "1y": 365, all: null }
 
-export async function connectMetaTrader(formData: FormData): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+export async function connectMetaTrader(formData: FormData): Promise<{ ok: true; id: number } | { ok: false; error: string; guide?: ServerAccessBlock["guide"] }> {
   const userId = await getUserId()
   const login = String(formData.get("login") ?? "").trim()
   const investorPassword = String(formData.get("investorPassword") ?? "")
   const server = String(formData.get("server") ?? "").trim()
   const platform = String(formData.get("platform") ?? "mt5") === "mt4" ? "mt4" : "mt5"
   const range = String(formData.get("history") ?? "all")
+
+  // A firm that forbids access from a server is never connected, whatever
+  // else was typed (lib/server-access.ts). Nothing of the request is kept.
+  const blocked = serverAccessBlock(server)
+  if (blocked) return { ok: false, error: blocked.message, guide: blocked.guide }
 
   if (!/^\d{3,15}$/.test(login)) return { ok: false, error: "Enter your MetaTrader account number (digits only)." }
   if (!investorPassword) return { ok: false, error: "Enter your investor (read-only) password." }
