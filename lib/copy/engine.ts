@@ -19,7 +19,7 @@ export const SIZING_MODES: { key: SizingMode; label: string; hint: string }[] = 
   { key: "multiplier", label: "Multiplier", hint: "The Leader's quantity times a multiplier." },
   { key: "risk", label: "Risk percentage", hint: "Sized from this account's own equity, the stop and the contract." },
   { key: "fixed", label: "Fixed quantity", hint: "Always the same quantity, whatever the Leader trades." },
-  { key: "custom", label: "Custom", hint: "Scaled by account size against the Leader, times a factor." },
+  { key: "custom", label: "Equity proportional", hint: "Scaled by this account's equity against the Leader's, times a factor (100% = in proportion)." },
 ]
 export const ROUNDING_RULES: { key: RoundingRule; label: string }[] = [
   { key: "down", label: "Round down" },
