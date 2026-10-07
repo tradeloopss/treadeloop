@@ -32,6 +32,7 @@ import {
   Handshake,
   HeartPulse,
   HelpCircle,
+  House,
   LayoutDashboard,
   ListChecks,
   Lock,
@@ -48,6 +49,7 @@ import {
   Sparkles,
   Sun,
   Target,
+  UserRound,
   Users,
   Wallet,
   X,
@@ -385,7 +387,16 @@ export function DashboardSidebar({
   const shown = sections.find((s) => s.id === (pane ?? lastPane)) ?? sections[0]
   const docked = desktop && !collapsed
   const quick = QUICK_NAV.map((id) => sections.flatMap((s) => s.items).find((i) => i.id === id)).filter((i): i is ResolvedItem => !!i?.enabled)
-  const bottomBar = quick.some((i) => i.feature)
+  // On the Copy Trading pages the phone's bar is the copy trader's own: Home, Trade, Copy Trading, Account.
+  const item = (id: string) => sections.flatMap((s) => s.items).find((i) => i.id === id)
+  const copyBar = pathname.startsWith("/copy-trading") && !!item("copy-trading")?.enabled
+  const copyNav = [
+    { href: "/dashboard", label: "Home", Icon: House, on: false },
+    { href: item("trade-manager")?.enabled ? "/trade-manager" : "/trades", label: "Trade", Icon: ICONS.tradeManager, on: false },
+    { href: "/copy-trading", label: "Copy Trading", Icon: ICONS.copy, on: true },
+    { href: "/accounts", label: "Account", Icon: UserRound, on: false },
+  ]
+  const bottomBar = !copyBar && quick.some((i) => i.feature)
 
   return (
     <TooltipProvider>
@@ -577,6 +588,27 @@ export function DashboardSidebar({
 
       {/* The phone's bottom bar, for users who have the insight features: the
           few places they move between, and the full menu one tap away. */}
+      {copyBar && (
+        <nav data-copy-bar aria-label={t("Quick navigation")} className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-sidebar pb-[env(safe-area-inset-bottom)] text-sidebar-foreground md:hidden">
+          {copyNav.map(({ href, label, Icon, on }) => (
+            <Link key={href} href={href} aria-current={on ? "page" : undefined} className={cn("flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium", on ? "font-semibold text-primary" : "text-muted-foreground")}>
+              <Icon className="size-5 shrink-0" />
+              <span className="max-w-full truncate">{t(label)}</span>
+            </Link>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setPane(null)
+              setMenu(true)
+            }}
+            className="flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium text-muted-foreground"
+          >
+            <MoreHorizontal className="size-5 shrink-0" />
+            <span>{t("More")}</span>
+          </button>
+        </nav>
+      )}
       {bottomBar && (
         <nav aria-label={t("Quick navigation")} className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-sidebar pb-[env(safe-area-inset-bottom)] text-sidebar-foreground md:hidden">
           {quick.map((item) => {

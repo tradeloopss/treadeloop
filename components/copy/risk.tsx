@@ -166,10 +166,10 @@ export function RiskManagement() {
 
   return (
     <>
-      <PageHead title="Risk Management" subtitle="Control how much each account copies from your Leader.">
+      <PageHead title="Risk Management" subtitle="Control exactly how much each follower copies from the Leader.">
         <GroupSelect />
         <Pill tone={group.status === "active" ? "good" : "none"}>{group.status === "active" ? "Risk system active" : "Group not copying"}</Pill>
-        <button type="button" disabled={!dirty || pending} className={linkBtnPrimary} onClick={save}>
+        <button type="button" disabled={!dirty || pending} className={cn(linkBtnPrimary, "max-md:h-11")} onClick={save}>
           {pending ? "Saving…" : "Save Changes"}
         </button>
       </PageHead>
@@ -219,7 +219,7 @@ export function RiskManagement() {
           </label>
         </Section>
 
-        <Section title="What happens when the Leader trades?" description="Change the example and every account's size updates at once.">
+        <Section title="What will happen?" description={`If my Leader opens ${formatQuantity(order.quantity)} ${unit}, how much will each account open? Change the example and every size updates at once.`}>
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
             <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Symbol
@@ -409,7 +409,7 @@ export function RiskManagement() {
                       ))}
                     </dl>
                     {!dec.allowed && <p className="text-xs text-[var(--loss)]">{dec.reason}</p>}
-                    <button type="button" className={cn(linkBtn, "w-full")} onClick={() => setEditing(d.accountId)}>
+                    <button type="button" className={cn(linkBtn, "h-11 w-full")} onClick={() => setEditing(d.accountId)}>
                       Edit
                     </button>
                   </li>

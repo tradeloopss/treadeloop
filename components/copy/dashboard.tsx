@@ -2,15 +2,19 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { Plus, Settings } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import { ArrowLeft, ArrowUpDown, ChevronRight, Layers, Plus, Settings, ShieldCheck, SlidersHorizontal, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { syncSummary } from "@/lib/copy/engine"
-import { ago, copyStats, groupCopies, money, type GroupView } from "@/lib/copy/view"
+import { saveCopyRules } from "@/app/actions/copy-trading"
+import { syncSummary, type CopyRules } from "@/lib/copy/engine"
+import { ago, copyStats, groupCopies, money, sizingSummary, type GroupView } from "@/lib/copy/view"
+import { Sheet, useAction } from "@/components/insights/client"
 import { NotEnough, Pill, Section, linkBtn, linkBtnPrimary, type PillTone } from "@/components/insights/ui"
-import { ConnectAccountDialog, GroupWizard } from "./dialogs"
+import { AccountDrawer, ConnectAccountDialog, ContractDialog, GroupWizard, RulesEditor } from "./dialogs"
 import { AlertList, CopyFeed } from "./history"
 import { useCopy } from "./store"
-import { GroupStatusPill, PageHead, Stat, isOnline } from "./ui"
+import { AccountCard, GroupSelect, GroupStatusPill, PageHead, Stat, isOnline } from "./ui"
 
 const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA")
 
@@ -27,8 +31,14 @@ function WeekBars({ counts }: { counts: number[] }) {
 }
 
 export function CopyDashboard() {
-  const { state, account } = useCopy()
-  const [dialog, setDialog] = useState<"wizard" | "connect" | null>(null)
+  const { state, group, account, refresh } = useCopy()
+  const router = useRouter()
+  const { pending, run } = useAction()
+  const [dialog, setDialog] = useState<"wizard" | "connect" | "contract" | null>(null)
+  const [manage, setManage] = useState<number | null>(null)
+  // the phone's settings screens: one thing each
+  const [setting, setSetting] = useState<"symbols" | "protection" | null>(null)
+  const [rules, setRules] = useState<CopyRules | null>(null)
   const today = new Date().toLocaleDateString("en-CA")
   const copies = useMemo(() => groupCopies(state.orders), [state.orders])
   const stats = copyStats(state.orders, today, dayOf)
@@ -41,6 +51,8 @@ export function CopyDashboard() {
   const openPnl = state.positions.filter((p) => used.some((a) => a!.id === p.accountId) && p.openPnl != null)
   const activeGroups = state.groups.filter((g) => g.status === "active").length
   const system: { label: string; tone: PillTone } = !state.liveData ? { label: "Degraded", tone: "warn" } : used.length > 0 && healthy === 0 ? { label: "Offline", tone: "bad" } : healthy < used.length || (sync.total > 0 && sync.synced < sync.total) ? { label: "Warning", tone: "warn" } : { label: "All systems operational", tone: "good" }
+  const engineOn = state.engine.background && !!state.engine.lastRunAt && Date.now() - new Date(state.engine.lastRunAt).getTime() <= 120_000
+  const fast = used.length > 0 && used.every((a) => a!.lane === "fast")
 
   const card = (g: GroupView) => {
     const orders = state.orders.filter((o) => o.groupId === g.id)
@@ -60,6 +72,7 @@ export function CopyDashboard() {
             <p className="text-xs text-muted-foreground">
               Leader: {account(g.leaderAccountId)?.name ?? "—"} · {g.followers.length} {g.followers.length === 1 ? "follower" : "followers"}
             </p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">Contracts: {g.contracts.length ? g.contracts.map((c) => c.symbol).join(", ") : g.rules.symbolScope === "all" ? "all symbols" : "none imported"}</p>
           </div>
           {limited ? <Pill tone="warn">Limited</Pill> : <GroupStatusPill status={g.status} />}
         </div>
@@ -74,7 +87,7 @@ export function CopyDashboard() {
               <dd className="font-semibold tabular-nums">{s.total}</dd>
             </div>
             <div>
-              <dt className="text-[11px] text-muted-foreground">Success</dt>
+              <dt className="text-[11px] text-muted-foreground">Sync success</dt>
               <dd className="font-semibold tabular-nums">{s.successRate == null ? "—" : `${(s.successRate * 100).toFixed(1)}%`}</dd>
             </div>
           </dl>
@@ -82,7 +95,7 @@ export function CopyDashboard() {
         </div>
         <div className="mt-auto flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">Last activity: {orders[0] ? ago(orders[0].createdAt) : "none yet"}</span>
-          <Link href={`/copy-trading/cockpit?group=${g.id}`} className={linkBtnPrimary}>
+          <Link href={`/copy-trading/cockpit?group=${g.id}`} className={cn(linkBtnPrimary, "max-md:h-11")}>
             Open Cockpit
           </Link>
         </div>
@@ -90,16 +103,96 @@ export function CopyDashboard() {
     )
   }
 
+  // the phone's Copy Settings: what the selected group does, each row its own screen
+  const protection = group ? (group.rules.stopLoss && group.rules.takeProfit ? "Copy" : group.rules.stopLoss ? "Stop loss only" : group.rules.takeProfit ? "Take profit only" : "Off") : "—"
+  const limitsOn = group ? group.limits.respectPropSync || group.followers.some((f) => f.config.maxPositionSize != null || f.config.maxDailyLoss != null || f.config.maxExposure != null) : false
+  const settingRow = "flex min-h-14 w-full items-center gap-3 px-3.5 text-start text-sm transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+  const rowBody = (Icon: typeof Layers, label: string, value: string) => (
+    <>
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1 font-medium">{label}</span>
+      <span className="shrink-0 text-muted-foreground">{value}</span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+    </>
+  )
+
   return (
     <>
-      <PageHead title="Copy Trading" subtitle="Monitor your copy trading activity in real time.">
-        <button type="button" className={linkBtnPrimary} onClick={() => setDialog("wizard")}>
-          <Plus className="size-3.5" /> Create Copy Group
+      <div className="hidden md:block">
+        <PageHead title="Copy Dashboard" subtitle="Monitor your copy trading activity in real time.">
+          <button type="button" className={linkBtnPrimary} onClick={() => setDialog("wizard")}>
+            <Plus className="size-3.5" /> Create Group
+          </button>
+          <Link href="/copy-trading/risk-management" className={linkBtn}>
+            <Settings className="size-3.5" /> Settings
+          </Link>
+        </PageHead>
+      </div>
+
+      {/* ------------------------------------------------------------ phone: accounts first, then how they copy */}
+      <div className="space-y-5 md:hidden">
+        <div className="flex items-center gap-2">
+          <Link href="/dashboard" aria-label="Back to Home" className="-ms-2 flex size-11 items-center justify-center rounded-full text-muted-foreground hover:bg-muted">
+            <ArrowLeft className="size-5" />
+          </Link>
+          <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold tracking-tight">Copy Trading</h1>
+          <Link href="/copy-trading/risk-management" aria-label="Risk settings" className="-me-2 flex size-11 items-center justify-center rounded-full text-muted-foreground hover:bg-muted">
+            <SlidersHorizontal className="size-5" />
+          </Link>
+        </div>
+
+        <section aria-labelledby="my-accounts" className="space-y-2.5">
+          <div>
+            <h2 id="my-accounts" className="text-base font-semibold">
+              My Accounts
+            </h2>
+            <p className="text-sm text-muted-foreground">Copy your trading activity across your accounts.</p>
+          </div>
+          {state.accounts.length === 0 ? (
+            <p className="rounded-2xl border border-dashed p-4 text-center text-sm text-muted-foreground">No trading accounts connected yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {state.accounts.map((a) => (
+                <li key={a.id}>
+                  <AccountCard account={a} onOpen={() => setManage(a.id)} />
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link href="/copy-trading/connection" className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-primary/10 text-sm font-semibold text-primary transition-colors hover:bg-primary/15">
+            <Plus className="size-4" /> Add / Manage Accounts
+          </Link>
+        </section>
+
+        {group && (
+          <section aria-labelledby="copy-settings" className="space-y-2.5">
+            <div>
+              <h2 id="copy-settings" className="text-base font-semibold">
+                Copy Settings
+              </h2>
+              <p className="text-sm text-muted-foreground">Control how your accounts copy trades.</p>
+            </div>
+            {state.groups.length > 1 && <GroupSelect className="[&>select]:h-11 [&>select]:w-full [&>select]:max-w-none" />}
+            <div className="divide-y overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
+              <Link href={`/copy-trading/risk-management?group=${group.id}`} className={settingRow}>
+                {rowBody(ArrowUpDown, "Lot Size", sizingSummary(group))}
+              </Link>
+              <button type="button" className={settingRow} onClick={() => (setRules(group.rules), setSetting("symbols"))}>
+                {rowBody(Layers, "Symbols", group.rules.symbolScope === "all" ? "All" : `${group.contracts.length} selected`)}
+              </button>
+              <button type="button" className={settingRow} onClick={() => (setRules(group.rules), setSetting("protection"))}>
+                {rowBody(Target, "Stop Loss / Take Profit", protection)}
+              </button>
+              <Link href={`/copy-trading/risk-management?group=${group.id}`} className={settingRow}>
+                {rowBody(ShieldCheck, "Risk Management", limitsOn ? "Enabled" : "No limits")}
+              </Link>
+            </div>
+          </section>
+        )}
+        <button type="button" className={cn(linkBtnPrimary, "h-12 w-full")} onClick={() => setDialog("wizard")}>
+          <Plus className="size-4" /> Create Group
         </button>
-        <Link href="/copy-trading/risk-management" className={linkBtn}>
-          <Settings className="size-3.5" /> Settings
-        </Link>
-      </PageHead>
+      </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         <Stat label="Day P&L" value={money(used.reduce((s, a) => s + a!.dayPnl, 0), true)} tone={used.reduce((s, a) => s + a!.dayPnl, 0)} />
@@ -108,7 +201,7 @@ export function CopyDashboard() {
         <Stat label="Active groups" value={activeGroups} sub={`of ${state.groups.length}`} />
         <Stat label="Connected accounts" value={`${healthy} / ${used.length}`} />
         <Stat label="Copies today" value={stats.today} sub={`${stats.todayFilled} filled`} />
-        <Stat label="Success rate" value={stats.successRate == null ? "—" : `${(stats.successRate * 100).toFixed(1)}%`} sub={stats.total ? `${stats.filled} of ${stats.total}` : "No copies yet"} />
+        <Stat label="Sync success" value={stats.successRate == null ? "—" : `${(stats.successRate * 100).toFixed(1)}%`} sub={stats.total ? `${stats.filled} of ${stats.total}` : "No copies yet"} />
       </div>
 
       <Section title="Copy groups" description="Each group has one Leader and the accounts that copy it.">
@@ -146,11 +239,11 @@ export function CopyDashboard() {
             </Pill>
             <dl className="divide-y text-sm">
               {[
-                ["Copy engine", state.mode === "live" ? "Live" : "Simulation"],
+                ["Copy engine", state.mode === "live" ? (engineOn ? "Connected" : "Live, not running") : "Simulation"],
                 ["Leader data", state.liveData ? "Reading" : "Unavailable"],
-                ["Background engine", !state.engine.background ? "Off" : !state.engine.lastRunAt ? "No signal yet" : Date.now() - new Date(state.engine.lastRunAt).getTime() > 120_000 ? `No signal for ${ago(state.engine.lastRunAt).replace(" ago", "")}` : "Running"],
-                ["Account connections", used.length ? `${healthy}/${used.length} healthy` : "No accounts in a group"],
-                ["Follower sync", sync.total ? `${Math.round((sync.synced / sync.total) * 100)}%` : "—"],
+                ["Background engine", !state.engine.background ? "Off" : !state.engine.lastRunAt ? "No signal yet" : !engineOn ? `No signal for ${ago(state.engine.lastRunAt).replace(" ago", "")}` : "Running"],
+                ["Accounts", used.length ? `${healthy}/${used.length} healthy` : "No accounts in a group"],
+                ["Sync", sync.total ? `${Math.round((sync.synced / sync.total) * 100)}%` : "—"],
               ].map(([k, v]) => (
                 <div key={k} className="flex items-center justify-between gap-3 py-1.5">
                   <dt className="text-muted-foreground">{k}</dt>
@@ -159,9 +252,11 @@ export function CopyDashboard() {
               ))}
             </dl>
             <p className="text-xs text-muted-foreground">
-              {state.engine.background && state.engine.lastRunAt && Date.now() - new Date(state.engine.lastRunAt).getTime() <= 120_000
-                ? "The engine runs in the background every few seconds: your groups copy whether or not this page is open. A MetaTrader leader is re-read about every 30 seconds, a Rithmic leader about once a minute — that is how soon a new trade can be seen."
-                : "The background engine isn't running right now, so groups copy only while a Copy Trading page is open."}
+              {!engineOn
+                ? "The background engine isn't running right now, so groups copy only while a Copy Trading page is open."
+                : fast
+                  ? "Your groups copy whether or not this page is open. Every account in them is on the fast lane: a Leader's trade is seen within milliseconds and sent at once."
+                  : "Your groups copy whether or not this page is open. An account on the fast lane is copied within milliseconds; one on the standard lane is read about every 30 seconds (a Rithmic leader about once a minute). The Cockpit shows which is which."}
             </p>
           </Section>
           <Section title="Alerts" description="What happened, why, and what you can do.">
@@ -172,6 +267,47 @@ export function CopyDashboard() {
 
       <GroupWizard open={dialog === "wizard"} onClose={() => setDialog(null)} />
       <ConnectAccountDialog open={dialog === "connect"} onClose={() => setDialog(null)} />
+      <AccountDrawer accountId={manage} onClose={() => setManage(null)} />
+      {group && <ContractDialog open={dialog === "contract"} onClose={() => setDialog(null)} group={group} />}
+      {group && (
+        <Sheet
+          open={setting != null}
+          onClose={() => setSetting(null)}
+          title={setting === "symbols" ? "Symbols" : "Stop Loss / Take Profit"}
+          description={setting === "symbols" ? `Which of the Leader's trades “${group.name}” copies.` : `Whether “${group.name}” copies the Leader's stop and target.`}
+          footer={
+            <button
+              type="button"
+              disabled={pending || !rules}
+              className={cn(linkBtnPrimary, "h-11 flex-1")}
+              onClick={() =>
+                run(
+                  () => saveCopyRules(group.id, rules),
+                  async () => {
+                    toast.success("Saved.")
+                    setSetting(null)
+                    await refresh()
+                    router.refresh()
+                  },
+                )
+              }
+            >
+              {pending ? "Saving…" : "Save"}
+            </button>
+          }
+        >
+          {rules && setting && <RulesEditor value={rules} onChange={setRules} only={setting} />}
+          {setting === "symbols" && rules?.symbolScope === "selected" && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Contracts</p>
+              <p className="text-sm">{group.contracts.length ? group.contracts.map((c) => c.symbol).join(", ") : "None imported yet."}</p>
+              <button type="button" className={cn(linkBtn, "h-11 w-full")} onClick={() => (setSetting(null), setDialog("contract"))}>
+                <Plus className="size-4" /> Import a contract
+              </button>
+            </div>
+          )}
+        </Sheet>
+      )}
     </>
   )
 }

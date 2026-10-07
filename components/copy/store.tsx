@@ -115,7 +115,7 @@ export function CopyTabs() {
   const params = useSearchParams()
   const group = params.get("group")
   return (
-    <nav aria-label="Copy Trading" className="-mb-px flex gap-1 overflow-x-auto px-4 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <nav aria-label="Copy Trading" className="-mb-px flex min-w-0 flex-1 gap-1 overflow-x-auto px-4 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {TABS.map((tab) => {
         const active = pathname === tab.href
         return (

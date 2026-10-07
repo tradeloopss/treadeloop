@@ -2,6 +2,7 @@ import type React from "react"
 import { redirect } from "next/navigation"
 import { cookies, headers } from "next/headers"
 import { and, eq, gt, isNull, or } from "drizzle-orm"
+import { cn } from "@/lib/utils"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { announcements, userSettings } from "@/lib/db/schema"
@@ -89,7 +90,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           inert={locked || undefined}
         >
           <DashboardSidebar userName={session.user.name || session.user.email} userImage={session.user.image} isAdmin={isAdmin} isPro={plan === "pro"} hasBeta={hasBeta} insights={insights} />
-          <main className={bottomBar ? "flex-1 overflow-y-auto pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" : "flex-1 overflow-y-auto"}>
+          <main className={cn("flex-1 overflow-y-auto max-md:[nav[data-copy-bar]~&]:pb-[calc(3.5rem+env(safe-area-inset-bottom))]", bottomBar && "pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0")}>
             <AnnouncementBanners items={live} />
             {children}
           </main>

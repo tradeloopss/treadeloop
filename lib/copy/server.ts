@@ -6,10 +6,10 @@ import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
-import { pointValueAt, specFor, type ContractSpec } from "./contracts"
+import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
-import type { AccountView, CopyState, EventView, FollowerView, GroupLimits, GroupStatus, GroupView, OrderView, PositionView, Role } from "./view"
+import { symbolScope, type AccountView, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
 // turns a change on the leader's account into orders for the followers.
@@ -641,7 +641,7 @@ async function copyChange(ctx: Ctx, leader: typeof copyPositions.$inferSelect, v
     const takeProfit = action === "modify_tp" ? translatePrice({ leaderPrice: p.takeProfit, leaderEntry: num(leader.entryPrice), followerEntry: num(pos.entryPrice), leaderSymbol: leader.symbol, followerSymbol: pos.symbol }) : num(pos.takeProfit)
     // a follower that was switched off after it entered still follows the exit; nothing else
     const off = follower && !follower.config.enabled && action !== "close" && action !== "partial_close"
-    const skip = !allowed.ok ? allowed.reason : off ? "Copying is switched off for this account." : action === "partial_close" && closing <= 0 ? "The proportional close is below the minimum quantity." : null
+    const skip = !allowed.ok ? allowed.reason : off ? "Copying is switched off for this account." : action === "partial_close" && closing <= 0 ? "The proportional close is below the minimum quantity." : action === "close" && pos.closeRequestedAt ? "This position is already being closed." : null
     const [order] = await db
       .insert(copyOrders)
       .values({ userId: ctx.userId, groupId: g.id, correlationId: followerOrderId(master, pos.accountId), masterOrderId: master, masterAccountId: g.leaderAccountId, followerAccountId: pos.accountId, action, symbol: pos.symbol, leaderSymbol: leader.symbol, side: pos.side, quantity: String(closing || quantity), leaderQuantity: String(p.quantity), requestedPrice: str(p.price ?? p.entry), stopLoss: str(stopLoss), takeProfit: str(takeProfit), status: skip ? "skipped" : "pending", reason: skip, decision: { positionId: pos.id }, simulated: pos.simulated })
@@ -972,37 +972,122 @@ export async function disableAll(userId: string, groupId: number): Promise<void>
   await note(userId, { groupId, level: "warning", code: "disabled_all", title: "All followers disabled", body: "No new trades are copied. Open positions were not closed.", action: "Switch followers back on in the Cockpit, then activate the group." })
 }
 
-// Withdraws copy orders that haven't reached a broker yet.
-export async function cancelOrders(userId: string, groupId: number): Promise<number> {
+// Withdraws the copy orders of one symbol that haven't reached a broker yet
+// (every symbol of the group when none is given). Open positions are not touched.
+export async function cancelOrders(userId: string, groupId: number, symbol?: string | null): Promise<number> {
   await ownGroup(userId, groupId)
-  const open = await db.select({ id: copyOrders.id, commandId: copyOrders.orderCommandId }).from(copyOrders).where(and(eq(copyOrders.groupId, groupId), eq(copyOrders.userId, userId), inArray(copyOrders.status, ["pending", "sent"])))
+  const waiting = await db.select({ id: copyOrders.id, commandId: copyOrders.orderCommandId, symbol: copyOrders.symbol, leaderSymbol: copyOrders.leaderSymbol }).from(copyOrders).where(and(eq(copyOrders.groupId, groupId), eq(copyOrders.userId, userId), inArray(copyOrders.status, ["pending", "sent"])))
+  const open = symbol ? waiting.filter((o) => sameInstrument(o.leaderSymbol, symbol) || sameInstrument(o.symbol, symbol)) : waiting
   const commands = open.map((o) => o.commandId).filter((id): id is number => id != null)
   // only what the executor hasn't picked up: an order already at the broker is the broker's
   const stopped = commands.length ? await db.update(orderCommands).set({ status: "blocked", resultMessage: "Cancelled from Copy Trading before it was sent.", updatedAt: new Date() }).where(and(eq(orderCommands.userId, userId), inArray(orderCommands.id, commands), eq(orderCommands.status, "pending"))).returning({ id: orderCommands.id }) : []
   const cancelled = open.filter((o) => o.commandId == null || stopped.some((s) => s.id === o.commandId))
   if (cancelled.length) await db.update(copyOrders).set({ status: "cancelled", reason: "Cancelled from the Cockpit.", updatedAt: new Date() }).where(inArray(copyOrders.id, cancelled.map((o) => o.id)))
-  await note(userId, { groupId, level: "warning", code: "orders_cancelled", title: `${cancelled.length} pending copy ${cancelled.length === 1 ? "order" : "orders"} cancelled`, body: open.length > cancelled.length ? `${open.length - cancelled.length} had already been sent to a broker and could not be withdrawn.` : null, action: open.length > cancelled.length ? "Cancel those in the Trade Manager or on the broker's platform." : null })
+  const what = symbol ? `${symbol} ` : ""
+  await note(userId, { groupId, level: "warning", code: "orders_cancelled", title: `${cancelled.length} pending ${what}copy ${cancelled.length === 1 ? "order" : "orders"} cancelled`, body: open.length > cancelled.length ? `${open.length - cancelled.length} had already been sent to a broker and could not be withdrawn.` : null, action: open.length > cancelled.length ? "Cancel those in the Trade Manager or on the broker's platform." : null })
   return cancelled.length
 }
 
-// Closes every position the group's followers hold through Copy Trading. A
-// simulated position is closed here and now. A live one is asked closed at its
-// broker, and counts as closed only when the broker confirms — a close the
-// broker refuses is sent again (see reconcile).
-export async function flattenAll(userId: string, groupId: number, confirm: string, timeZone: string): Promise<{ closed: number; requested: number }> {
-  if (confirm !== "FLATTEN") throw new Error("Type FLATTEN to confirm.")
+export type FlattenResult = {
+  // open positions of that symbol found on the accounts asked for
+  total: number
+  // simulated positions, closed here and now
+  closed: number
+  // live positions a close was sent for; each shows as closed once its broker confirms
+  requested: number
+  // what couldn't be closed from TradeLoop, and why
+  skipped: { accountId: number; name: string; reason: string }[]
+}
+
+// Flatten: closes the open positions of ONE symbol across a group — the
+// Leader's and every follower's — or one account's when `accountId` is given.
+// Other symbols are not touched, pending orders are not touched (that is
+// Cancel Orders), and nothing is paused: the group goes on copying.
+//
+// Which positions those are is worked out here, from the brokers' own lists and
+// with the same function the Cockpit counts with (symbolScope), never from what
+// the browser sent. A simulated position is closed in the books. A live one
+// gets a close order at market and counts as closed only when its broker
+// confirms; a refused close is sent again (reconcile). In Simulation no order
+// goes to a broker, so live positions are left and named.
+export async function flattenSymbol(userId: string, groupId: number, symbol: string, accountId: number | null, timeZone: string): Promise<FlattenResult> {
   await ownGroup(userId, groupId)
-  const now = new Date()
-  const held = await db.select().from(copyPositions).where(and(eq(copyPositions.groupId, groupId), eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open")))
-  const simulated = held.filter((p) => p.simulated)
-  const live = held.filter((p) => !p.simulated)
-  if (simulated.length) await db.update(copyPositions).set({ status: "closed", closedAt: now, quantity: "0", updatedAt: now }).where(inArray(copyPositions.id, simulated.map((p) => p.id)))
-  if (live.length) await db.update(copyPositions).set({ closeRequestedAt: now, closeAttempts: 0, updatedAt: new Date(0) }).where(inArray(copyPositions.id, live.map((p) => p.id)))
-  await db.update(copyGroupFollowers).set({ enabled: false, updatedAt: now }).where(eq(copyGroupFollowers.groupId, groupId))
-  await db.update(copyGroups).set({ status: "paused", updatedAt: now }).where(and(eq(copyGroups.id, groupId), eq(copyGroups.status, "active")))
-  // send the closes now rather than on the next pass
+  const contract = String(symbol ?? "").trim()
+  if (!contract || contract.length > 40) throw new Error("Choose the contract to flatten.")
   const state = await loadCopyState(userId, timeZone)
-  if (live.length && state.liveData) await reconcile(userId, state)
-  await note(userId, { groupId, level: "warning", code: "flattened", title: `Flatten All: ${simulated.length ? `${simulated.length} simulated ${simulated.length === 1 ? "position" : "positions"} closed` : ""}${simulated.length && live.length ? ", " : ""}${live.length ? `${live.length} close ${live.length === 1 ? "order" : "orders"} sent to the broker` : ""}${!held.length ? "nothing was open" : ""}`, body: `${live.length ? "A live position shows as closed once its broker confirms; a close the broker refuses is sent again. " : ""}Copying is paused and every follower is switched off. The Leader's own positions were not touched.`, action: "Switch followers back on and activate the group when you are ready." })
-  return { closed: simulated.length, requested: live.length }
+  const group = state.groups.find((g) => g.id === groupId)
+  if (!group) throw new Error("That copy group no longer exists.")
+  // an unreadable feed must not be taken for "nothing is open"
+  if (!state.liveData) throw new Error("Live positions couldn't be read just now, so nothing was closed. Try again in a moment.")
+  const scope = symbolScope(group, state.accounts, state.positions, contract)
+  const rows = accountId == null ? scope : scope.filter((r) => r.accountId === accountId)
+  if (accountId != null && !rows.length) throw new Error("That account isn't part of this group.")
+
+  const keys = liveKeys.get(state.positions)
+  const now = new Date()
+  const managed = await db.select().from(copyPositions).where(and(eq(copyPositions.groupId, groupId), eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open")))
+  const prop = await propSync(userId)
+  const out: FlattenResult = { total: rows.reduce((n, r) => n + r.positions.length, 0), closed: 0, requested: 0, skipped: [] }
+  const skip = (id: number, reason: string) => {
+    if (!out.skipped.some((s) => s.accountId === id)) out.skipped.push({ accountId: id, name: state.accounts.find((a) => a.id === id)?.name ?? "An account", reason })
+  }
+  let owed = false
+
+  for (const row of rows) {
+    const account = state.accounts.find((a) => a.id === row.accountId)
+    // simulated copies of this symbol on this account: closed in the books
+    const sim = managed.filter((m) => m.simulated && m.accountId === row.accountId && sameInstrument(m.symbol, row.symbol))
+    if (row.positions.some((p) => p.simulated) && sim.length) {
+      await db.update(copyPositions).set({ status: "closed", closedAt: now, quantity: "0", updatedAt: now }).where(inArray(copyPositions.id, sim.map((m) => m.id)))
+      out.closed += row.positions.filter((p) => p.simulated).length
+    }
+    for (const p of row.positions.filter((x) => !x.simulated)) {
+      if (state.mode !== "live") {
+        skip(row.accountId, "Simulation mode: no order is sent to a broker. Close it on the broker's platform, or switch to Live.")
+        continue
+      }
+      if (!account?.canExecute) {
+        skip(row.accountId, account?.executionNote ?? "This account can't receive orders from TradeLoop.")
+        continue
+      }
+      const ref = keys?.get(p)
+      if (!ref) {
+        skip(row.accountId, "The broker hasn't given this position a ticket yet. Try again in a moment.")
+        continue
+      }
+      const mine = managed.find((m) => !m.simulated && m.accountId === row.accountId && m.positionRef === ref)
+      if (mine) {
+        // a copied position: owed a close, sent below and again if the broker refuses it
+        if (!mine.closeRequestedAt) await db.update(copyPositions).set({ closeRequestedAt: now, closeAttempts: 0, updatedAt: new Date(0) }).where(eq(copyPositions.id, mine.id))
+        owed = true
+        out.requested++
+        continue
+      }
+      // the Leader's own position, or one opened by hand on a follower: a close of its own, once
+      const [flying] = await db.select({ id: orderCommands.id }).from(orderCommands).where(and(eq(orderCommands.userId, userId), eq(orderCommands.accountId, row.accountId), eq(orderCommands.positionRef, ref), eq(orderCommands.kind, "close"), inArray(orderCommands.status, ["pending", "sent"]))).limit(1)
+      if (!flying) {
+        const sent = await queue({ userId, state, prop }, row.accountId, { kind: "close", symbol: p.symbol, side: p.side, volume: p.quantity, positionRef: ref })
+        if (sent.status !== "sent") {
+          skip(row.accountId, sent.reason ?? "The close order couldn't be queued.")
+          continue
+        }
+      }
+      out.requested++
+    }
+  }
+  // send the owed closes now rather than on the next pass
+  if (owed) await reconcile(userId, await loadCopyState(userId, timeZone))
+
+  const who = accountId != null ? ` — ${state.accounts.find((a) => a.id === accountId)?.name ?? "one account"}` : ""
+  const parts = [out.requested ? `${out.requested} close ${out.requested === 1 ? "order" : "orders"} sent` : "", out.closed ? `${out.closed} simulated ${out.closed === 1 ? "position" : "positions"} closed` : ""].filter(Boolean)
+  await note(userId, {
+    groupId,
+    accountId,
+    level: out.skipped.length ? "warning" : "info",
+    code: "flattened",
+    title: `Flatten ${contract}${who}: ${parts.join(", ") || "nothing was open"}`,
+    body: [out.requested ? "A live position shows as closed once its broker confirms; a close the broker refuses is sent again." : "", ...out.skipped.map((s) => `${s.name} was not closed. ${s.reason}`)].filter(Boolean).join(" ") || null,
+    action: out.skipped.length ? "Close what is left on the broker's platform." : null,
+  })
+  return out
 }

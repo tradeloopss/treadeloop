@@ -21,19 +21,43 @@ import { ConfirmDialog, HealthPill, Heartbeat, RolePill, Toggle, isOnline } from
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 // What a group copies, and when. Used by the wizard and by the Cockpit.
-export function RulesEditor({ value, onChange }: { value: CopyRules; onChange: (next: CopyRules) => void }) {
+// `only` shows one part of them, for the phone's single-purpose settings screens.
+const PROTECTION: (keyof CopyRules)[] = ["stopLoss", "takeProfit", "trailingStop", "modifications"]
+export function RulesEditor({ value, onChange, only }: { value: CopyRules; onChange: (next: CopyRules) => void; only?: "protection" | "symbols" }) {
   const set = (patch: Partial<CopyRules>) => onChange({ ...value, ...patch })
+  const toggles = only === "protection" ? RULE_TOGGLES.filter((r) => PROTECTION.includes(r.key)) : only === "symbols" ? [] : RULE_TOGGLES
+  if (only === "symbols")
+    return (
+      <div className="space-y-3">
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Which symbols are copied
+          <select className={cn(fieldClass, "h-11")} value={value.symbolScope} onChange={(e) => set({ symbolScope: e.target.value as CopyRules["symbolScope"] })}>
+            <option value="selected">Selected symbols (the group&apos;s contracts)</option>
+            <option value="all">All symbols</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Direction
+          <select className={cn(fieldClass, "h-11")} value={value.direction} onChange={(e) => set({ direction: e.target.value as CopyRules["direction"] })}>
+            <option value="both">Long + Short</option>
+            <option value="long">Long only</option>
+            <option value="short">Short only</option>
+          </select>
+        </label>
+      </div>
+    )
   return (
     <div className="space-y-4">
-      <ul className="grid gap-x-4 gap-y-2.5 sm:grid-cols-2">
-        {RULE_TOGGLES.map((r) => (
-          <li key={r.key} className="flex items-center justify-between gap-3 text-sm">
+      <ul className={cn("grid gap-x-4 gap-y-2.5", !only && "sm:grid-cols-2")}>
+        {toggles.map((r) => (
+          <li key={r.key} className={cn("flex items-center justify-between gap-3 text-sm", only && "min-h-11")}>
             <span>{r.label}</span>
             <Toggle checked={value[r.key] as boolean} onChange={(v) => set({ [r.key]: v } as Partial<CopyRules>)} label={r.label} />
           </li>
         ))}
       </ul>
-      <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+      {only === "protection" && <p className="text-xs text-muted-foreground">A follower&apos;s stop and target are placed at the Leader&apos;s prices, or the same distance from its own entry when the two trade at different prices.</p>}
+      <div className={cn("grid gap-3 border-t pt-4 sm:grid-cols-2", only && "hidden")}>
         <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
           Direction
           <select className={fieldClass} value={value.direction} onChange={(e) => set({ direction: e.target.value as CopyRules["direction"] })}>
