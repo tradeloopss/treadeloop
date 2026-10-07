@@ -4,17 +4,17 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { ArrowLeft, ArrowUpDown, ChevronRight, Layers, Plus, Settings, ShieldCheck, SlidersHorizontal, Target } from "lucide-react"
+import { ArrowLeft, ArrowUpDown, ChevronRight, Layers, Pause, Plus, Settings, ShieldCheck, SlidersHorizontal, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { saveCopyRules } from "@/app/actions/copy-trading"
+import { pauseAllCopying, saveCopyRules } from "@/app/actions/copy-trading"
 import { syncSummary, type CopyRules } from "@/lib/copy/engine"
-import { ago, copyStats, groupCopies, money, sizingSummary, type GroupView } from "@/lib/copy/view"
+import { ago, copyStats, copySummary, groupCopies, money, sizingSummary, type GroupView } from "@/lib/copy/view"
 import { Sheet, useAction } from "@/components/insights/client"
 import { NotEnough, Pill, Section, linkBtn, linkBtnPrimary, type PillTone } from "@/components/insights/ui"
 import { AccountDrawer, ConnectAccountDialog, ContractDialog, GroupWizard, RulesEditor } from "./dialogs"
 import { AlertList, CopyFeed } from "./history"
 import { useCopy } from "./store"
-import { AccountCard, GroupSelect, GroupStatusPill, PageHead, Stat, isOnline } from "./ui"
+import { AccountCard, ConfirmDialog, GroupSelect, GroupStatusPill, PageHead, Stat, isOnline } from "./ui"
 
 const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA")
 
@@ -34,7 +34,7 @@ export function CopyDashboard() {
   const { state, group, account, refresh } = useCopy()
   const router = useRouter()
   const { pending, run } = useAction()
-  const [dialog, setDialog] = useState<"wizard" | "connect" | "contract" | null>(null)
+  const [dialog, setDialog] = useState<"wizard" | "connect" | "contract" | "pauseAll" | null>(null)
   const [manage, setManage] = useState<number | null>(null)
   // the phone's settings screens: one thing each
   const [setting, setSetting] = useState<"symbols" | "protection" | null>(null)
@@ -50,6 +50,7 @@ export function CopyDashboard() {
   const sync = syncSummary(followers)
   const openPnl = state.positions.filter((p) => used.some((a) => a!.id === p.accountId) && p.openPnl != null)
   const activeGroups = state.groups.filter((g) => g.status === "active").length
+  const summary = copySummary(state)
   const system: { label: string; tone: PillTone } = !state.liveData ? { label: "Degraded", tone: "warn" } : used.length > 0 && healthy === 0 ? { label: "Offline", tone: "bad" } : healthy < used.length || (sync.total > 0 && sync.synced < sync.total) ? { label: "Warning", tone: "warn" } : { label: "All systems operational", tone: "good" }
   const engineOn = state.engine.background && !!state.engine.lastRunAt && Date.now() - new Date(state.engine.lastRunAt).getTime() <= 120_000
   const fast = used.length > 0 && used.every((a) => a!.lane === "fast")
@@ -123,6 +124,11 @@ export function CopyDashboard() {
           <button type="button" className={linkBtnPrimary} onClick={() => setDialog("wizard")}>
             <Plus className="size-3.5" /> Create Group
           </button>
+          {activeGroups > 0 && (
+            <button type="button" className={linkBtn} onClick={() => setDialog("pauseAll")}>
+              <Pause className="size-3.5" /> Pause all
+            </button>
+          )}
           <Link href="/copy-trading/risk-management" className={linkBtn}>
             <Settings className="size-3.5" /> Settings
           </Link>
@@ -192,17 +198,38 @@ export function CopyDashboard() {
         <button type="button" className={cn(linkBtnPrimary, "h-12 w-full")} onClick={() => setDialog("wizard")}>
           <Plus className="size-4" /> Create Group
         </button>
+        {activeGroups > 0 && (
+          <button type="button" className={cn(linkBtn, "h-11 w-full")} onClick={() => setDialog("pauseAll")}>
+            <Pause className="size-4" /> Pause all copying
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
         <Stat label="Day P&L" value={money(used.reduce((s, a) => s + a!.dayPnl, 0), true)} tone={used.reduce((s, a) => s + a!.dayPnl, 0)} />
         <Stat label="Open P&L" value={money(openPnl.reduce((s, p) => s + p.openPnl!, 0), true)} tone={openPnl.reduce((s, p) => s + p.openPnl!, 0)} />
         <Stat label="Total balance" value={money(used.reduce((s, a) => s + (a!.balance ?? 0), 0))} />
         <Stat label="Active groups" value={activeGroups} sub={`of ${state.groups.length}`} />
+        <Stat label="Masters / Followers" value={`${summary.masters} / ${summary.followers}`} sub="accounts" />
         <Stat label="Connected accounts" value={`${healthy} / ${used.length}`} />
+        <Stat label="Open on followers" value={summary.openOnFollowers} sub={summary.openOnFollowers === 1 ? "position" : "positions"} />
         <Stat label="Copies today" value={stats.today} sub={`${stats.todayFilled} filled`} />
-        <Stat label="Sync success" value={stats.successRate == null ? "—" : `${(stats.successRate * 100).toFixed(1)}%`} sub={stats.total ? `${stats.filled} of ${stats.total}` : "No copies yet"} />
+        <Stat label="Execution success" value={stats.successRate == null ? "—" : `${(stats.successRate * 100).toFixed(1)}%`} sub={stats.total ? `${stats.filled} of ${stats.total}${stats.failed ? ` · ${stats.failed} failed` : ""}` : "No copies yet"} />
+        <Stat label="Avg latency" value={stats.avgLatencyMs == null ? "—" : `${stats.avgLatencyMs} ms`} sub={stats.avgLatencyMs == null ? "Not measured yet" : `last ${stats.lastLatencyMs} · max ${stats.maxLatencyMs} ms`} />
       </div>
+      <ConfirmDialog
+        open={dialog === "pauseAll"}
+        onClose={() => setDialog(null)}
+        title="Pause all copying?"
+        action="Pause all copying"
+        pending={pending}
+        onConfirm={() => run(pauseAllCopying, async (res) => (toast.success(res.paused === 1 ? "1 group paused." : `${res.paused} groups paused.`, { description: "Open positions were left as they are." }), setDialog(null), await refresh(), router.refresh()))}
+      >
+        <p>
+          {activeGroups === 1 ? "The group that is copying stops" : `All ${activeGroups} groups that are copying stop`} taking new trades from the Leader, at once.
+        </p>
+        <p>Nothing is closed: every open position stays exactly as it is. To close positions, use Flatten in the Cockpit.</p>
+      </ConfirmDialog>
 
       <Section title="Copy groups" description="Each group has one Leader and the accounts that copy it.">
         {state.accounts.length === 0 ? (

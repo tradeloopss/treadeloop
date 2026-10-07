@@ -124,6 +124,25 @@ export function GroupStatusPill({ status, blocked }: { status: GroupView["status
   return <Pill tone={GROUP_STATUS[status].tone}>{GROUP_STATUS[status].label}</Pill>
 }
 
+// Why a group can't copy as it is set up: what its accounts' providers have
+// against it (lib/compliance), account by account. Nothing when there is nothing.
+export function ComplianceNotice({ group, className }: { group: GroupView; className?: string }) {
+  const { account } = useCopy()
+  if (!group.compliance.length) return null
+  return (
+    <div role="alert" className={cn("rounded-lg border border-loss/40 bg-loss/10 px-3 py-2 text-sm", className)}>
+      <p className="font-semibold">Copying unavailable: the provider&apos;s rules don&apos;t allow this group as it is set up.</p>
+      <ul className="mt-1 space-y-0.5">
+        {group.compliance.map((p) => (
+          <li key={`${p.accountId}${p.reasonCode}`}>
+            <span className="font-medium">{account(p.accountId)?.name ?? "Account"}:</span> {p.message}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 // A connection's heartbeat: when it last answered. Latency is shown only when
 // a connection reports it — it is never estimated.
 export function Heartbeat({ account }: { account: AccountView }) {

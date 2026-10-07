@@ -8,6 +8,7 @@ import { ArrowDown, ArrowDownRight, ArrowUpRight, CircleAlert, CircleCheck, Crow
 import { cn } from "@/lib/utils"
 import { readCopyAlerts, retryCopyOrder } from "@/app/actions/copy-trading"
 import { formatQuantity } from "@/lib/copy/contracts"
+import { classifyFailure } from "@/lib/copy/errors"
 import { ACTION_LABELS, ORDER_BUCKETS, ORDER_STATUS, ORDER_TYPES, isFailure, latencyParts, orderBucket, orderSide, price, type Copy, type EventView, type OrderBucket, type OrderView } from "@/lib/copy/view"
 import { useAction } from "@/components/insights/client"
 import { NotEnough, Pill, fieldClass, linkBtn } from "@/components/insights/ui"
@@ -86,7 +87,12 @@ export function CopyFeed({ copies, limit = 6, detailed }: { copies: Copy[]; limi
                         </span>
                       )}
                     </div>
-                    {o.reason && <p className="mt-0.5 text-xs text-muted-foreground">{o.reason}</p>}
+                    {o.reason && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {isFailure(o.status) && <span className="font-medium text-foreground">{classifyFailure(o.reason).label}: </span>}
+                        {o.reason}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -371,7 +377,12 @@ export function OrderHistory({ orders }: { orders: OrderView[] }) {
                   <span className="shrink-0">{l.type}</span>
                   {l.price != null && <span className="shrink-0 tabular-nums">@ {price(l.price)}</span>}
                 </p>
-                {l.reason && <p className="text-xs text-muted-foreground">{l.reason}</p>}
+                {l.reason && (
+                  <p className="text-xs text-muted-foreground">
+                    {l.bucket === "failed" && <span className="font-medium text-foreground">{classifyFailure(l.reason).label}: </span>}
+                    {l.reason}
+                  </p>
+                )}
               </li>
             ))}
           </ul>

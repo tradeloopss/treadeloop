@@ -289,5 +289,31 @@ export function copyStats(orders: OrderView[], today: string, dayOf: (iso: strin
   const done = orders.filter((o) => o.status !== "pending" && o.status !== "sent" && o.status !== "skipped" && o.status !== "cancelled")
   const filled = done.filter((o) => isFilled(o.status)).length
   const todays = orders.filter((o) => dayOf(o.createdAt) === today)
-  return { total: done.length, filled, successRate: done.length ? filled / done.length : null, today: todays.length, todayFilled: todays.filter((o) => isFilled(o.status)).length }
+  // Latency is what was measured at a broker: a simulated fill took no time there, and is left out.
+  const timed = done.filter((o) => isFilled(o.status) && !o.simulated && o.latencyMs != null).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const ms = timed.map((o) => o.latencyMs!)
+  return {
+    total: done.length,
+    filled,
+    failed: done.length - filled,
+    successRate: done.length ? filled / done.length : null,
+    today: todays.length,
+    todayFilled: todays.filter((o) => isFilled(o.status)).length,
+    lastLatencyMs: ms.length ? ms[0] : null,
+    avgLatencyMs: ms.length ? Math.round(ms.reduce((s, v) => s + v, 0) / ms.length) : null,
+    maxLatencyMs: ms.length ? Math.max(...ms) : null,
+  }
+}
+
+// The dashboard's counts: each Master and each Follower once, however many
+// groups it is in, and the positions open on the followers' accounts.
+export function copySummary(state: Pick<CopyState, "groups" | "positions">): { activeGroups: number; groups: number; masters: number; followers: number; openOnFollowers: number } {
+  const followers = new Set(state.groups.flatMap((g) => g.followers.map((f) => f.accountId)))
+  return {
+    activeGroups: state.groups.filter((g) => g.status === "active").length,
+    groups: state.groups.length,
+    masters: new Set(state.groups.map((g) => g.leaderAccountId)).size,
+    followers: followers.size,
+    openOnFollowers: state.positions.filter((p) => followers.has(p.accountId)).length,
+  }
 }

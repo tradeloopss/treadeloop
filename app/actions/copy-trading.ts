@@ -8,7 +8,7 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenPositions, importContract, markEventsRead, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenPositions, importContract, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
@@ -103,6 +103,8 @@ export const retryCopyOrder = async (orderId: number) => act(({ userId, timeZone
 // closes everything the group's accounts hold (symbol null), or one contract,
 // or one account's; Cancel acts on one contract. Which positions and orders
 // that means is worked out on the server, not taken from here.
+// Pause All Copying: every group stops taking new copies. Nothing is closed.
+export const pauseAllCopying = async () => act(async ({ userId }) => ({ paused: await pauseAll(userId) }))
 export const disableAllFollowers = async (groupId: number) => act(({ userId }) => disableAll(userId, Number(groupId)))
 export const cancelCopyOrders = async (groupId: number, symbol: string) => act<{ cancelled: number }>(async ({ userId }) => ({ cancelled: await cancelOrders(userId, Number(groupId), String(symbol ?? "").slice(0, 40) || null) }))
 export const flattenCopyPositions = async (groupId: number, symbol: string | null, accountId?: number | null) => act<FlattenResult>(({ userId, timeZone }) => flattenPositions(userId, Number(groupId), symbol == null ? null : String(symbol), accountId == null ? null : Number(accountId), timeZone))

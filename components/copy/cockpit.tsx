@@ -16,7 +16,7 @@ import { NotEnough, Pill, linkBtn, linkBtnPrimary, type PillTone } from "@/compo
 import { AccountDrawer, ChangeLeaderDialog, ContractDialog, GroupWizard, RulesEditor } from "./dialogs"
 import { ActivityFeed, AlertList, OrderHistory } from "./history"
 import { useCopy } from "./store"
-import { ConfirmDialog, GroupSelect, GroupStatusPill, MarketStatus, PageHead, PlatformIcon, RolePill, RunningBadge, Toggle, dangerBtn, isOnline } from "./ui"
+import { ComplianceNotice, ConfirmDialog, GroupSelect, GroupStatusPill, MarketStatus, PageHead, PlatformIcon, RolePill, RunningBadge, Toggle, dangerBtn, isOnline } from "./ui"
 
 // The Cockpit: one group, one contract, live. Who leads, who follows, what
 // each holds of the contract in front of you, and the controls to stop it.
@@ -64,6 +64,8 @@ export function Cockpit() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [manage, setManage] = useState<number | null>(null)
   const [flattenOne, setFlattenOne] = useState<number | null>(null)
+  // Flatten Account: the account's positions in every symbol, not only the contract in front of the trader
+  const [wholeAccount, setWholeAccount] = useState(false)
   const [openRow, setOpenRow] = useState<number | null>(null)
   const [rules, setRules] = useState<CopyRules | null>(null)
   const after = async () => {
@@ -125,6 +127,7 @@ export function Cockpit() {
   // the number on a button is the number that will be closed
   const closable = running - blocked.reduce((n, r) => n + live(r.positions), 0)
   const one = flattenOne != null ? rows.find((r) => r.accountId === flattenOne) : undefined
+  const oneEverything = one ? state.positions.filter((p) => p.accountId === one.accountId) : []
   // Flatten All: everything the group's accounts hold, in every symbol, the Leader's included
   const everything = groupScope(group, state.positions)
     .map((r) => ({ ...r, account: account(r.accountId) }))
@@ -203,13 +206,13 @@ export function Cockpit() {
     <>
       {/* ------------------------------------------------------------ desktop: the terminal */}
       <div className="hidden space-y-3 lg:block">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
           <div className="flex min-w-0 items-center gap-2.5">
             <h1 className="text-2xl font-semibold tracking-tight">Cockpit</h1>
             <GroupSelect />
             <GroupStatusPill status={group.status} blocked={group.compliance.length > 0} />
           </div>
-          <RunningBadge count={running} symbol={contract} />
+          <RunningBadge count={running} symbol={contract} className="justify-self-center" />
           <MarketStatus spec={spec} className="justify-self-end" />
         </div>
 
@@ -269,6 +272,7 @@ export function Cockpit() {
           </div>
         </dl>
 
+        <ComplianceNotice group={group} />
         {problems.length > 0 && (
           <button type="button" onClick={() => setDialog("alerts")} className="flex w-full items-center gap-2 rounded-lg border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-start text-sm">
             <TriangleAlert className="size-4 shrink-0 text-[var(--warning)]" aria-hidden />
@@ -424,6 +428,7 @@ export function Cockpit() {
           ))}
         </dl>
 
+        <ComplianceNotice group={group} />
         {problems.length > 0 && (
           <button type="button" onClick={() => setDialog("alerts")} className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-start text-sm">
             <TriangleAlert className="size-4 shrink-0 text-[var(--warning)]" aria-hidden />
@@ -697,12 +702,12 @@ export function Cockpit() {
       </ConfirmDialog>
       <ConfirmDialog
         open={!!one}
-        onClose={() => setFlattenOne(null)}
-        title={one ? `Flatten ${one.symbol} for ${one.account?.name ?? "this account"}?` : ""}
-        action="Flatten"
+        onClose={() => (setFlattenOne(null), setWholeAccount(false))}
+        title={one ? (wholeAccount ? `Flatten every position on ${one.account?.name ?? "this account"}?` : `Flatten ${one.symbol} for ${one.account?.name ?? "this account"}?`) : ""}
+        action={wholeAccount ? "Flatten account" : "Flatten"}
         danger
         pending={pending}
-        onConfirm={() => one && contract && run(() => flattenCopyPositions(group.id, contract, one.accountId), async (res) => (flattened(one.symbol)(res), setFlattenOne(null), await after()))}
+        onConfirm={() => one && contract && run(() => flattenCopyPositions(group.id, wholeAccount ? null : contract, one.accountId), async (res) => (flattened(wholeAccount ? "" : one.symbol)(res), setFlattenOne(null), setWholeAccount(false), await after()))}
       >
         {one && (
           <>
@@ -710,6 +715,17 @@ export function Cockpit() {
               Closes this account&apos;s {one.positions.length === 1 ? `open ${one.symbol} position` : `${one.positions.length} open ${one.symbol} positions`} ({one.net.side === "long" ? "Long" : "Short"} {formatQuantity(one.net.quantity)}) at market.
             </p>
             <p>{one.leader ? "This is the Leader: its followers close their copies of it too." : "Other accounts are not touched, and this account keeps copying new trades."}</p>
+            {oneEverything.length > one.positions.length && (
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm">
+                <input type="checkbox" className="mt-0.5 size-4 accent-[var(--primary)]" checked={wholeAccount} onChange={(e) => setWholeAccount(e.target.checked)} />
+                <span>
+                  <span className="block font-medium">Flatten the whole account</span>
+                  <span className="block text-xs text-muted-foreground">
+                    All {oneEverything.length} open positions on this account, in every symbol ({symbolCounts(oneEverything)}).
+                  </span>
+                </span>
+              </label>
+            )}
           </>
         )}
       </ConfirmDialog>

@@ -11,6 +11,7 @@ import { ComplianceError, parties, recordBlock, ruleSets } from "@/lib/complianc
 import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
+import { classifyFailure } from "./errors"
 import { groupScope, symbolScope, type AccountScope, type AccountView, type ComplianceProblem, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
@@ -723,7 +724,7 @@ async function place(ctx: Ctx, orderId: number, o: { leaderPositionId: number; a
   await db.update(copyOrders).set({ status, reason, orderCommandId: commandId, executionPrice: ctx.mode === "simulation" ? str(o.entry) : null, updatedAt: new Date() }).where(eq(copyOrders.id, orderId))
   if (status !== "filled" && status !== "sent") {
     const name = ctx.state.accounts.find((a) => a.id === o.accountId)?.name ?? "A follower"
-    await note(ctx.userId, { groupId: ctx.group.id, accountId: o.accountId, level: "error", code: `order_${status}`, title: `Order ${status === "unsupported" ? "not sent" : status} — ${name}`, body: reason, action: status === "unsupported" ? "Use a MetaTrader 5 account with its master password added, or keep this group in simulation." : "Check the account in the Trade Manager." })
+    await note(ctx.userId, { groupId: ctx.group.id, accountId: o.accountId, level: "error", code: `order_${status}`, title: `${status === "unsupported" ? "Order not sent" : `${classifyFailure(reason).label}: order ${status}`} — ${name}`, body: reason, action: status === "unsupported" ? "Use a MetaTrader 5 account with its master password added, or keep this group in simulation." : classifyFailure(reason).action })
     return
   }
   // the follower's own position: added to when it already holds this trade
@@ -902,7 +903,7 @@ async function reconcile(userId: string, state: CopyState) {
     const requested = num(o.requestedPrice)
     await db.update(copyOrders).set({ status: c.status, reason: filled ? null : c.message, executionPrice: str(price), slippage: entry && price != null && requested != null ? str((price - requested) * (o.side === "long" ? 1 : -1)) : null, latencyMs: filled ? (timed?.latencyMs ?? Math.max(0, c.updatedAt.getTime() - o.createdAt.getTime())) : null, tradeloopMs: filled ? (timed?.tradeloopMs ?? null) : null, updatedAt: new Date() }).where(eq(copyOrders.id, o.id))
     // a refused close is not reported yet: it is about to be tried again
-    if (!filled && o.action !== "close") await note(userId, { groupId: o.groupId, accountId: o.followerAccountId, level: "error", code: `order_${c.status}`, title: `Order ${c.status} — ${name(o.followerAccountId)}`, body: c.message, action: "Check the account in the Trade Manager.", masterOrderId: o.masterOrderId })
+    if (!filled && o.action !== "close") await note(userId, { groupId: o.groupId, accountId: o.followerAccountId, level: "error", code: `order_${c.status}`, title: `${classifyFailure(c.message).label}: order ${c.status} — ${name(o.followerAccountId)}`, body: c.message, action: classifyFailure(c.message).action, masterOrderId: o.masterOrderId })
   }
 
   // 2. a position recorded as closed that its broker still lists is not closed:
@@ -1069,6 +1070,17 @@ export async function retryOrder(userId: string, orderId: number, timeZone: stri
 }
 
 // ------------------------------------------------------------------ emergency controls
+
+// Pause All Copying: every group of the trader's stops taking new copies, at
+// once. Nothing is closed: pausing and flattening are different things, and
+// only Flatten closes a position. Returns how many groups were running.
+export async function pauseAll(userId: string): Promise<number> {
+  const paused = await db.update(copyGroups).set({ status: "paused", updatedAt: new Date() }).where(and(eq(copyGroups.userId, userId), eq(copyGroups.status, "active"))).returning({ id: copyGroups.id })
+  // the sync server stops acting for this trader by itself, now
+  await clearPlans(userId)
+  for (const g of paused) await note(userId, { groupId: g.id, level: "warning", code: "group_paused", title: "Copying paused (Pause all)", body: "No new trades are copied. Positions that are already open are left as they are.", action: "Activate the group again in the Cockpit when you want it to copy." })
+  return paused.length
+}
 
 // Stops new copies for every follower of the group. Nothing is closed.
 export async function disableAll(userId: string, groupId: number): Promise<void> {
