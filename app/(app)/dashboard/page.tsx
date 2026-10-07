@@ -10,7 +10,6 @@ import { analyze, formatCurrency, type TradeStat } from "@/lib/calc"
 import { computeDayPnl } from "@/lib/day-pnl"
 import { computeDailyAccountPnl, computeAccountPnlInRange } from "@/lib/daily-account-pnl"
 import { resolveTimeZone, localDay } from "@/lib/timezone"
-import { InsightCards } from "@/components/insights/dashboard-cards"
 import { resolvePnlPeriod } from "@/lib/pnl-period"
 import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
 import { DashboardHeaderActions } from "@/components/dashboard-header-actions"
@@ -398,12 +397,6 @@ export default async function DashboardPage() {
       />
 
       <div className="p-4 sm:p-6">
-        {/* Edge Lab and Psychology, for who has them: reads what is already saved. */}
-        {session?.user && (
-          <Suspense fallback={null}>
-            <InsightCards userId={session.user.id} timeZone={tz} />
-          </Suspense>
-        )}
         <Suspense fallback={null}>
           <DashboardCanvas template={template} statNodes={statWidgets} panelNodes={panelWidgets} />
         </Suspense>

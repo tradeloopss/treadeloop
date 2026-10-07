@@ -11,6 +11,7 @@ import type { ProviderRuleSet } from "./rules"
 export type ReasonCode =
   | "INTEGRATION_DISABLED"
   | "CLOUD_CONNECTION_NOT_APPROVED"
+  | "RISK_NOT_ACKNOWLEDGED"
   | "MASTER_CREDENTIAL"
   | "EXECUTION_BLOCKED"
   | "INBOUND_COPY_BLOCKED"
@@ -34,22 +35,34 @@ export function detectProvider(sets: ProviderRuleSet[], server: string | null | 
   return sets.find((s) => s.servers.some((part) => name.includes(plain(part)))) ?? null
 }
 
+// What a trader is told, and must accept, before an account is connected
+// against its provider's rule on access from a server. Said plainly: it is the
+// trader's account that is at stake.
+export const riskNotice = (set: ProviderRuleSet) =>
+  `${set.name} does not permit a trading account to be reached from a server (a VPS or VPN), even with the read-only password. TradeLoop connects from its own server, ${set.name} will see that login, and it can restrict or close an account for it. If you connect, you do so at your own risk.`
+
 // May this account be connected at all, the way TradeLoop connects (from its
-// servers), with this kind of password?
-export function validateConnection(set: ProviderRuleSet | null, how: { credential: "investor" | "trading" }): Verdict {
+// servers), with this kind of password? Where the provider forbids a server
+// and TradeLoop connects at the trader's own risk, only once the trader has
+// accepted that risk (`acknowledged`).
+export function validateConnection(set: ProviderRuleSet | null, how: { credential: "investor" | "trading"; acknowledged?: boolean }): Verdict {
   if (!set) return ok(null)
   if (set.status === "disabled") return no(set, "INTEGRATION_DISABLED", `${set.name} accounts can't be connected to TradeLoop at the moment.`)
-  if (set.rules.cloudConnection !== "allowed")
+  if (set.rules.cloudConnection === "own_risk" && !how.acknowledged) return no(set, "RISK_NOT_ACKNOWLEDGED", riskNotice(set))
+  if (set.rules.cloudConnection === "approval_required")
     return no(set, "CLOUD_CONNECTION_NOT_APPROVED", `${set.name} accounts can't be connected to TradeLoop. ${set.name} doesn't allow a trading account to be reached from a server, even with the read-only password, and TradeLoop connects from its servers.`)
   if (how.credential === "trading" && (set.rules.masterCredential === "investor_only" || set.rules.execution === "blocked"))
     return no(set, "MASTER_CREDENTIAL", `${set.name} accounts are connected with the investor (read-only) password only. TradeLoop doesn't keep a trading password for one.`)
   return ok(set)
 }
 
+// An account that is already connected: its trader accepted the risk, where there was one, when connecting it.
+const connected = (set: ProviderRuleSet | null) => validateConnection(set, { credential: "investor", acknowledged: true })
+
 // May TradeLoop place an order on this account?
 export function validateExecution(set: ProviderRuleSet | null): Verdict {
   if (!set) return ok(null)
-  const connection = validateConnection(set, { credential: "investor" })
+  const connection = connected(set)
   if (!connection.allowed) return connection
   if (set.rules.execution === "blocked") return no(set, "EXECUTION_BLOCKED", `TradeLoop places no orders on ${set.name} accounts: ${set.name}'s rules don't allow it.`)
   return ok(set)
@@ -71,10 +84,10 @@ export function validateDirection(master: Party, follower: Party): Verdict {
   const m = master.set
   const f = follower.set
   // the Master must be an account TradeLoop may read
-  const reading = validateConnection(m, { credential: "investor" })
+  const reading = connected(m)
   if (!reading.allowed) return reading
   if (f) {
-    const connection = validateConnection(f, { credential: "investor" })
+    const connection = connected(f)
     if (m && m.provider === f.provider) {
       if (master.sharedLogin || follower.sharedLogin) {
         if (f.rules.crossUser === "blocked") return no(f, "CROSS_USER_BLOCKED", `${f.name} doesn't permit copying between accounts that belong to different people, and one of these accounts is also connected by another TradeLoop user.`)
@@ -100,7 +113,7 @@ export function validateGroup<T extends Party & { accountId: number }>(master: T
 
 // May this account be given this role at all (before any group exists)?
 export function validateRole(party: Party, role: "leader" | "follower" | "both"): Verdict {
-  const reading = validateConnection(party.set, { credential: "investor" })
+  const reading = connected(party.set)
   if (!reading.allowed) return reading
   if (role === "leader") return ok(party.set)
   return validateExecution(party.set)
@@ -108,12 +121,13 @@ export function validateRole(party: Party, role: "leader" | "follower" | "both")
 
 // ------------------------------------------------------------------ what the pages show
 
-export type IntegrationStatus = "supported" | "restricted" | "approval_required" | "disabled"
-export const INTEGRATION_LABELS: Record<IntegrationStatus, string> = { supported: "Supported", restricted: "Supported with restrictions", approval_required: "Approval required", disabled: "Disabled" }
+export type IntegrationStatus = "supported" | "restricted" | "own_risk" | "approval_required" | "disabled"
+export const INTEGRATION_LABELS: Record<IntegrationStatus, string> = { supported: "Supported", restricted: "Supported with restrictions", own_risk: "At your own risk", approval_required: "Approval required", disabled: "Disabled" }
 
 export function integrationStatus(set: ProviderRuleSet): IntegrationStatus {
   if (set.status === "disabled") return "disabled"
-  if (set.rules.cloudConnection !== "allowed") return "approval_required"
+  if (set.rules.cloudConnection === "approval_required") return "approval_required"
+  if (set.rules.cloudConnection === "own_risk") return "own_risk"
   const r = set.rules
   return [r.execution, r.toExternal, r.fromExternal, r.ownToOwn, r.crossUser].includes("blocked") ? "restricted" : "supported"
 }
@@ -149,8 +163,12 @@ export type ProviderProfile = {
   sources: { label: string; url: string }[]
   ownCopier: { name: string; url: string } | null
   guide: string | null
-  // connecting an account of this provider, as TradeLoop connects
+  // connecting an account of this provider, as TradeLoop connects, before the trader has accepted anything
   connection: Verdict
+  // whether an account of this provider can be connected at all
+  connectable: boolean
+  // what the trader must accept first, when connecting goes against the provider's own rule; null otherwise
+  risk: string | null
 }
 
 export function providerProfile(set: ProviderRuleSet): ProviderProfile {
@@ -170,5 +188,7 @@ export function providerProfile(set: ProviderRuleSet): ProviderProfile {
     ownCopier: set.ownCopier,
     guide: set.guide,
     connection: validateConnection(set, { credential: "investor" }),
+    connectable: connected(set).allowed,
+    risk: set.status === "active" && set.rules.cloudConnection === "own_risk" ? riskNotice(set) : null,
   }
 }

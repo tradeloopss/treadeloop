@@ -223,15 +223,21 @@ Scripts must reach the server with LF line endings (`.gitattributes` pins
 them; a CRLF `add-broker` fails with `python3
 : No such file or directory`).
 
-**Never add a pack for FundingPips.** Its rules forbid reaching a trading
-account from a server ("Connecting to a VPN or VPS while accessing your
-trading account is not permitted"), and this is one. The app refuses the
-server name before a connection row is written: the provider's rule set says
-so (`lib/compliance/rules.ts`, or the version an administrator has published
-at /admin/providers). The missing pack is the second lock. Add the pack only
-once a published version of FundingPips' rules allows the connection, which
-needs FundingPips' approval in writing; a firm with the same rule gets a rule
-set of its own, not a line in here.
+**FundingPips packs exist by the owner's decision (7 Oct 2026), against
+FundingPips' own rule.** Its rules forbid reaching a trading account from a
+server ("Connecting to a VPN or VPS while accessing your trading account is
+not permitted"), and its support has confirmed that the investor password
+changes nothing. The app connects a FundingPips account only for a trader who
+has been shown that, in those words, and has ticked the box accepting the
+risk (rule set v2, `cloudConnection: "own_risk"`, `lib/compliance/rules.ts`;
+or the version an administrator has published at /admin/providers). Read-only:
+no trading password is kept for one and no order is ever sent to one. Packs:
+`fundingpips2` (prefix `FundingPips2-`, company "FundingPips Corp (2)", the
+installer FundingPips' own help page links) and `fundingpips` (prefix
+`FundingPips-`: -Trial, -Prime, -SIM, -SIM1), if its installer exists. If a
+later version of the rules goes back to "not connected", the app stops new
+connections at once; an account already connected keeps syncing until it is
+disconnected, so say so to its trader.
 
 **Set up (2026-09-26):** MT5 packs `exness`, `ftmo` (prefix `FTMO`: every
 FTMO-Server/-Demo, incl. free trials), `acgmarkets` (prefixes `ACGMarkets`,

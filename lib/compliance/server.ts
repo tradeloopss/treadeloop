@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { copyEvents, metatraderConnections, providerRuleSets } from "@/lib/db/schema"
-import { BUILT_IN_RULE_SETS, cleanRuleSet, type ProviderRuleSet } from "./rules"
+import { BUILT_IN_HISTORY, BUILT_IN_RULE_SETS, cleanRuleSet, type ProviderRuleSet } from "./rules"
 import { detectProvider, type Party, type Verdict } from "./engine"
 
 // The rule sets in force, and the facts about an account the engine is handed.
@@ -18,7 +18,11 @@ export async function ruleSets(): Promise<ProviderRuleSet[]> {
   const rows = await db.select({ provider: providerRuleSets.provider, ruleSet: providerRuleSets.ruleSet }).from(providerRuleSets).orderBy(desc(providerRuleSets.version))
   const newest = new Map<string, ProviderRuleSet>()
   for (const r of rows) if (!newest.has(r.provider)) newest.set(r.provider, r.ruleSet)
-  const sets = BUILT_IN_RULE_SETS.map((b) => newest.get(b.provider) ?? b)
+  // the later of the two: a published version stands until a built-in one outnumbers it
+  const sets = BUILT_IN_RULE_SETS.map((b) => {
+    const published = newest.get(b.provider)
+    return published && published.version >= b.version ? published : b
+  })
   cached = { at: Date.now(), sets }
   return sets
 }
@@ -32,8 +36,8 @@ export type PublishedVersion = { version: number; ruleSet: ProviderRuleSet; publ
 // Every version of a provider's rules, newest first; the built-in one last.
 export async function ruleSetHistory(provider: string): Promise<PublishedVersion[]> {
   const rows = await db.select().from(providerRuleSets).where(eq(providerRuleSets.provider, provider)).orderBy(desc(providerRuleSets.version))
-  const builtIn = BUILT_IN_RULE_SETS.find((b) => b.provider === provider)
-  return [...rows.map((r) => ({ version: r.version, ruleSet: r.ruleSet, publishedByEmail: r.publishedByEmail, createdAt: r.createdAt })), ...(builtIn ? [{ version: builtIn.version, ruleSet: builtIn, publishedByEmail: "TradeLoop", createdAt: new Date(`${builtIn.effectiveDate}T00:00:00Z`) }] : [])]
+  const builtIn = BUILT_IN_HISTORY.filter((b) => b.provider === provider && !rows.some((r) => r.version === b.version))
+  return [...rows.map((r) => ({ version: r.version, ruleSet: r.ruleSet, publishedByEmail: r.publishedByEmail, createdAt: r.createdAt })), ...builtIn.map((b) => ({ version: b.version, ruleSet: b, publishedByEmail: "TradeLoop", createdAt: new Date(`${b.effectiveDate}T00:00:00Z`) }))].sort((a, b) => b.version - a.version)
 }
 
 // A new version of a provider's rules. It is checked as typed, numbered after
@@ -90,6 +94,13 @@ export async function recordBlock(userId: string, verdict: Extract<Verdict, { al
     .insert(copyEvents)
     .values({ userId, groupId: where.groupId ?? null, accountId: where.accountId ?? null, level: "warning", code: "compliance_blocked", title: `${verdict.provider}: not permitted`, body: verdict.message, data: { provider: verdict.provider, reasonCode: verdict.reasonCode, action: where.action } })
     .catch(() => {})
+}
+
+// A trader connecting an account against its provider's rule on servers has
+// been shown the notice and has accepted the risk: kept, with which account
+// and which version of the rules, so it can be shown what they were told.
+export async function recordAcknowledgement(userId: string, set: ProviderRuleSet, account: { server: string; login: string }, notice: string): Promise<void> {
+  await db.insert(copyEvents).values({ userId, level: "warning", code: "risk_acknowledged", title: `${set.name}: connected at your own risk`, body: notice, data: { provider: set.name, version: set.version, server: account.server, login: account.login } })
 }
 
 // What a refusal is thrown as: the sentence, and the code with it.

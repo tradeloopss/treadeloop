@@ -9,8 +9,8 @@ import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
 import { metatraderLimitError } from "@/lib/plan-limits"
 import { helpHref } from "@/lib/urls"
-import { validateConnection } from "@/lib/compliance/engine"
-import { recordBlock, ruleSetFor } from "@/lib/compliance/server"
+import { riskNotice, validateConnection } from "@/lib/compliance/engine"
+import { recordAcknowledgement, recordBlock, ruleSetFor } from "@/lib/compliance/server"
 
 // MetaTrader accounts are synced by our own MT5 terminals on the sync VPS
 // (worker/mt5): these actions only record what the user asked for — the
@@ -94,13 +94,16 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   const platform = String(formData.get("platform") ?? "mt5") === "mt4" ? "mt4" : "mt5"
   const range = String(formData.get("history") ?? "all")
 
-  // An account is connected only as its provider's rules allow (lib/compliance):
-  // one that forbids access from a server is never connected, whatever else
-  // was typed. Nothing of the request is kept.
+  // An account is connected only as its provider's rule set says (lib/compliance).
+  // Where the provider forbids access from a server and TradeLoop connects at
+  // the trader's own risk, only once the trader has accepted that risk on the
+  // form; until then, and where it isn't connected at all, nothing of the
+  // request is kept.
   const set = await ruleSetFor(server)
-  const permitted = validateConnection(set, { credential: "investor" })
+  const acceptsRisk = formData.get("acceptRisk") === "yes"
+  const permitted = validateConnection(set, { credential: "investor", acknowledged: acceptsRisk })
   if (!permitted.allowed) {
-    await recordBlock(userId, permitted, { action: "connect_account" })
+    if (permitted.reasonCode !== "RISK_NOT_ACKNOWLEDGED") await recordBlock(userId, permitted, { action: "connect_account" })
     return { ok: false, error: permitted.message, guide: set?.guide ? { label: `How to use TradeLoop with a ${set.name} account`, href: helpHref(set.guide) } : undefined }
   }
 
@@ -111,6 +114,9 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   // Pro syncs any number of accounts; Essential one (lib/plan-limits.ts).
   const limit = await metatraderLimitError(userId, { platform, login, server })
   if (limit) return { ok: false, error: limit }
+
+  // the risk the trader accepted, on record with the account it was accepted for
+  if (set && set.rules.cloudConnection === "own_risk") await recordAcknowledgement(userId, set, { server, login }, riskNotice(set))
 
   const days = range in HISTORY_DAYS ? HISTORY_DAYS[range] : null
   const historyFrom = days == null ? null : new Date(Date.now() - days * 86_400_000)

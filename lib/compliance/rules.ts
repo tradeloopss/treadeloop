@@ -14,8 +14,12 @@ export type Permission = "allowed" | "blocked"
 export type ProviderRules = {
   // TradeLoop reaching the account from its own servers, which is how every
   // MetaTrader connection is made (worker/mt5). "approval_required": the
-  // provider forbids access from a server (a VPS, to it) and has not approved ours.
-  cloudConnection: "allowed" | "approval_required"
+  // provider forbids access from a server (a VPS, to it) and has not approved
+  // ours, so its accounts are not connected. "own_risk": the provider forbids
+  // it all the same, and TradeLoop connects the account of a trader who has
+  // been told so, in those words, and has accepted the risk. Only "allowed"
+  // says the provider permits it.
+  cloudConnection: "allowed" | "approval_required" | "own_risk"
   // what a Master (Leader) connection may be made with
   masterCredential: "investor_only" | "any"
   // TradeLoop placing orders on the provider's accounts
@@ -102,7 +106,22 @@ export const FUNDINGPIPS_V1: ProviderRuleSet = {
   note: "FundingPips' published rules, and its support's written answer of 7 Oct 2026.",
 }
 
-export const BUILT_IN_RULE_SETS: ProviderRuleSet[] = [FUNDINGPIPS_V1]
+// TradeLoop's own decision, 7 Oct 2026: a FundingPips account may be connected,
+// read-only, by a trader who has been told that FundingPips does not permit
+// it and accepts the risk. Nothing about what FundingPips allows has changed,
+// and nothing here says it has: no order is placed on its accounts, no trading
+// password is kept for one, and nothing is copied into one.
+export const FUNDINGPIPS_V2: ProviderRuleSet = {
+  ...FUNDINGPIPS_V1,
+  version: 2,
+  rules: { ...FUNDINGPIPS_V1.rules, cloudConnection: "own_risk" },
+  note: "TradeLoop's decision of 7 Oct 2026: FundingPips accounts may be connected read-only, at the trader's own risk. FundingPips has not approved access from a server; the trader is told so and must accept the risk before connecting.",
+}
+
+// The version in force for each provider until an administrator publishes a later one.
+export const BUILT_IN_RULE_SETS: ProviderRuleSet[] = [FUNDINGPIPS_V2]
+// Every built-in version, newest first: what was in force before stays readable.
+export const BUILT_IN_HISTORY: ProviderRuleSet[] = [FUNDINGPIPS_V2, FUNDINGPIPS_V1]
 
 const PERMISSIONS: Permission[] = ["allowed", "blocked"]
 const oneOf = <T extends string>(v: unknown, list: readonly T[]): T | null => (list.includes(v as T) ? (v as T) : null)
@@ -112,7 +131,7 @@ const oneOf = <T extends string>(v: unknown, list: readonly T[]): T | null => (l
 export function cleanRuleSet(raw: unknown, base: ProviderRuleSet): ProviderRuleSet | string {
   const r = (raw ?? {}) as Partial<ProviderRuleSet> & { rules?: Partial<ProviderRules> }
   const rules: Partial<ProviderRules> = r.rules ?? {}
-  const cloudConnection = oneOf(rules.cloudConnection, ["allowed", "approval_required"] as const)
+  const cloudConnection = oneOf(rules.cloudConnection, ["allowed", "approval_required", "own_risk"] as const)
   const masterCredential = oneOf(rules.masterCredential, ["investor_only", "any"] as const)
   const execution = oneOf(rules.execution, PERMISSIONS)
   const toExternal = oneOf(rules.toExternal, PERMISSIONS)
@@ -134,7 +153,7 @@ export function cleanRuleSet(raw: unknown, base: ProviderRuleSet): ProviderRuleS
   const note = String(r.note ?? "").trim().slice(0, 500)
   if (note.length < 10) return "Say why this version is published (at least a sentence)."
   // an order can't be sent to an account TradeLoop may not reach
-  if (execution === "allowed" && cloudConnection !== "allowed") return "Orders can't be allowed while the connection from TradeLoop's servers is not."
+  if (execution === "allowed" && cloudConnection === "approval_required") return "Orders can't be allowed while the connection from TradeLoop's servers is not."
   return {
     // what the provider is, and how its accounts are recognised, don't change with a version
     provider: base.provider,

@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { BUILT_IN_RULE_SETS, FUNDINGPIPS_V1, cleanRuleSet, type ProviderRuleSet } from "@/lib/compliance/rules"
-import { detectProvider, integrationStatus, providerProfile, ruleLines, validateConnection, validateDirection, validateExecution, validateGroup, validateRole, type Party } from "@/lib/compliance/engine"
+import { BUILT_IN_HISTORY, BUILT_IN_RULE_SETS, FUNDINGPIPS_V1, FUNDINGPIPS_V2, cleanRuleSet, type ProviderRuleSet } from "@/lib/compliance/rules"
+import { detectProvider, integrationStatus, providerProfile, riskNotice, ruleLines, validateConnection, validateDirection, validateExecution, validateGroup, validateRole, type Party } from "@/lib/compliance/engine"
 
 // A provider's rules are data, and one engine answers every question about
 // them. What these hold it to: FundingPips' accounts are recognised by their
@@ -107,7 +107,7 @@ test("what the trader is shown is the rule set itself: the Safe Mode lines, the 
     ],
   )
   const p = providerProfile(FP)
-  assert.deepEqual([p.profile, p.statusLabel, p.masterCredential, p.connection.allowed, p.guide], ["FUNDINGPIPS_V1", "Approval required", "Investor / read-only", false, "/connecting-accounts/fundingpips"])
+  assert.deepEqual([p.profile, p.statusLabel, p.masterCredential, p.connection.allowed, p.connectable, p.risk, p.guide], ["FUNDINGPIPS_V1", "Approval required", "Investor / read-only", false, false, null, "/connecting-accounts/fundingpips"])
   // official pages only
   assert.ok(p.sources.length >= 1 && p.sources.every((s) => s.url.startsWith("https://help.fundingpips.com/")))
   assert.equal(providerProfile(APPROVED).statusLabel, "Supported with restrictions")
@@ -127,4 +127,37 @@ test("a new version of the rules is checked as typed: a value that isn't an opti
   assert.match(String(bad({}, { maxAllocation: -5 })), /maximum allocation/)
   // orders can't be switched on for an account TradeLoop may not even reach
   assert.match(String(bad({}, { execution: "allowed" })), /Orders can't be allowed/)
+})
+
+test("connected at the trader's own risk: only once the risk is accepted, read-only, and the provider's rule is still said as it is", () => {
+  // the version in force; the one before it stays readable
+  assert.deepEqual(BUILT_IN_RULE_SETS.map((s) => [s.provider, s.version, s.rules.cloudConnection]), [["fundingpips", 2, "own_risk"]])
+  assert.deepEqual(BUILT_IN_HISTORY.map((s) => s.version), [2, 1])
+  const V2 = FUNDINGPIPS_V2
+  // not until the trader has accepted the risk; and the refusal is the notice itself
+  const before = validateConnection(V2, { credential: "investor" })
+  assert.deepEqual(before.allowed ? null : [before.reasonCode, before.message], ["RISK_NOT_ACKNOWLEDGED", riskNotice(V2)])
+  assert.match(riskNotice(V2), /does not permit .* even with the read-only password/)
+  assert.match(riskNotice(V2), /at your own risk/)
+  assert.equal(code(validateConnection(V2, { credential: "investor", acknowledged: true })), "ALLOWED")
+  // accepting the risk is not a trading password: the account stays read-only, and receives no order
+  assert.equal(code(validateConnection(V2, { credential: "trading", acknowledged: true })), "MASTER_CREDENTIAL")
+  assert.equal(code(validateExecution(V2)), "EXECUTION_BLOCKED")
+  assert.equal(code(validateRole(fp(V2), "follower")), "EXECUTION_BLOCKED")
+  // a connected one may be a Master to external accounts, and nothing is copied into it
+  assert.equal(code(validateRole(fp(V2), "leader")), "ALLOWED")
+  assert.equal(code(validateDirection(fp(V2), external)), "ALLOWED")
+  assert.equal(code(validateDirection(external, fp(V2))), "INBOUND_COPY_BLOCKED")
+  assert.equal(code(validateDirection(fp(V2), fp(V2))), "OWNERSHIP_UNVERIFIED")
+  // what the trader is shown never says the provider permits it
+  const p = providerProfile(V2)
+  assert.deepEqual([p.profile, p.status, p.statusLabel, p.connectable, p.connection.allowed], ["FUNDINGPIPS_V2", "own_risk", "At your own risk", true, false])
+  assert.equal(p.risk, riskNotice(V2))
+  assert.deepEqual(p.lines.find((l) => l.key === "cloudConnection"), { key: "cloudConnection", label: "VPS/VPN-based connection", allowed: false })
+  assert.equal(integrationStatus(V2), "own_risk")
+  // a switched-off integration connects nothing, risk accepted or not
+  assert.equal(code(validateConnection({ ...V2, status: "disabled" }, { credential: "investor", acknowledged: true })), "INTEGRATION_DISABLED")
+  // an administrator may set it, and may not switch orders on for an account that isn't connected at all
+  const next = cleanRuleSet({ ...FUNDINGPIPS_V1, rules: { ...FUNDINGPIPS_V1.rules, cloudConnection: "own_risk" }, note: "The owner's decision, knowing FundingPips does not permit it." }, FUNDINGPIPS_V1)
+  assert.equal(typeof next === "string" ? next : next.rules.cloudConnection, "own_risk")
 })

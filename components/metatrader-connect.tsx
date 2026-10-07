@@ -81,7 +81,12 @@ export function ConnectFlow({
   }, [server])
   // (an answer is for the name it was asked about, not for what has been typed since)
   const profile = found && found.server === server.trim() ? found.profile : null
-  const blocked = profile && !profile.connection.allowed ? profile : null
+  const blocked = profile && !profile.connectable ? profile : null
+  // The provider forbids a server and TradeLoop connects at the trader's own
+  // risk: the trader accepts it here, for this server name, before Connect works.
+  const [acceptedFor, setAcceptedFor] = useState<string | null>(null)
+  const risk = profile?.risk ?? null
+  const accepted = risk != null && acceptedFor === server.trim()
   const [watching, setWatching] = useState<{ id: number; startedAt: number } | null>(null)
   const [result, setResult] = useState<MetaTraderConnectionView | null>(null)
 
@@ -123,8 +128,9 @@ export function ConnectFlow({
     e.preventDefault()
     setError(null)
     setGuide(null)
-    if (blocked) return
+    if (blocked || (risk && !accepted)) return
     const formData = new FormData(e.currentTarget)
+    formData.set("acceptRisk", risk && accepted ? "yes" : "no")
     formData.set("platform", platform)
     formData.set("history", history)
     startTransition(async () => {
@@ -262,6 +268,12 @@ export function ConnectFlow({
           <Input id="mt-server" name="server" defaultValue={initial?.server} onChange={(e) => setServer(e.target.value)} placeholder={platform === "mt5" ? t("e.g. FTMO-Server3") : t("e.g. Exness-Real6")} autoComplete="off" required aria-invalid={blocked ? true : undefined} className="h-10" />
           <p className="text-xs text-muted-foreground">{t("Exactly as shown in MetaTrader → File → Login to Trade Account.")}</p>
           {profile && <SafeMode profile={profile} />}
+          {risk && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-loss/40 bg-loss/10 p-3 text-xs">
+              <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--loss)]" checked={accepted} onChange={(e) => setAcceptedFor(e.target.checked ? server.trim() : null)} />
+              <span className="font-medium">{t(`I understand that ${profile!.name} does not permit this connection, and I accept the risk to my account.`)}</span>
+            </label>
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -316,7 +328,7 @@ export function ConnectFlow({
           </span>
         </p>
       )}
-      <Button type="submit" disabled={pending || blocked != null} className="h-11 w-full">
+      <Button type="submit" disabled={pending || blocked != null || (risk != null && !accepted)} className="h-11 w-full">
         {pending ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
         {pending ? t("Connecting…") : t("Connect")}
       </Button>

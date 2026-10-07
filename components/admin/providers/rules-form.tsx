@@ -15,7 +15,7 @@ type Choice<K extends keyof ProviderRules> = { key: K; label: string; hint: stri
 const choice = <K extends keyof ProviderRules>(c: Choice<K>) => c
 
 const RULES = [
-  choice({ key: "cloudConnection", label: "Connection from TradeLoop's servers", hint: "Every MetaTrader connection is made from our servers. To a provider that forbids a VPS, that is one.", options: [["approval_required", "Not permitted until the provider approves"], ["allowed", "Permitted"]] }),
+  choice({ key: "cloudConnection", label: "Connection from TradeLoop's servers", hint: "Every MetaTrader connection is made from our servers. To a provider that forbids a VPS, that is one.", options: [["approval_required", "Not connected: the provider forbids it"], ["own_risk", "Connected at the trader's own risk: the provider forbids it"], ["allowed", "Permitted by the provider"]] }),
   choice({ key: "masterCredential", label: "Master credential", hint: "What a Master connection may log in with.", options: [["investor_only", "Investor / read-only password only"], ["any", "Investor or trading password"]] }),
   choice({ key: "execution", label: "Orders placed by TradeLoop", hint: "Whether TradeLoop may place orders on the provider's accounts.", options: [["blocked", "Blocked"], ["allowed", "Allowed"]] }),
   choice({ key: "toExternal", label: "Provider → external account", hint: "The provider's account is the Master.", options: [["allowed", "Allowed"], ["blocked", "Blocked"]] }),
@@ -44,7 +44,10 @@ export function RulesForm({ set }: { set: ProviderRuleSet }) {
   const [approved, setApproved] = useState(false)
 
   // rules this version would relax, compared with the one in force
-  const loosened = RULES.filter((r) => set.rules[r.key] === STRICT[r.key] && rules[r.key] !== set.rules[r.key]).map((r) => r.label)
+  const CLOUD = { approval_required: 0, own_risk: 1, allowed: 2 }
+  const loosened = RULES.filter((r) => (r.key === "cloudConnection" ? CLOUD[rules.cloudConnection] > CLOUD[set.rules.cloudConnection] : set.rules[r.key] === STRICT[r.key] && rules[r.key] !== set.rules[r.key])).map((r) => r.label)
+  // connecting against the provider's rule is TradeLoop's own decision, not something the provider approved
+  const ownRisk = rules.cloudConnection === "own_risk" && set.rules.cloudConnection === "approval_required"
   if (set.status === "disabled" && status === "active") loosened.push("Integration switched back on")
 
   const publish = () => {
@@ -135,11 +138,14 @@ export function RulesForm({ set }: { set: ProviderRuleSet }) {
             ))}
           </ul>
           <p className="mt-2 text-xs">
-            A trader&apos;s account at {set.name} is what is lost if {set.name} has not agreed to this. Publish it only with {set.name}&apos;s approval in writing, and say where it is in the reason above.
+            A trader&apos;s account at {set.name} is what is lost if {set.name} has not agreed to this.{" "}
+            {ownRisk
+              ? `Connecting at the trader's own risk means ${set.name} has not agreed: each trader is told so and must accept the risk before connecting.`
+              : `Publish it only with ${set.name}'s approval in writing, and say where it is in the reason above.`}
           </p>
           <label className="mt-2 flex items-start gap-2 text-xs font-medium">
             <input type="checkbox" className="mt-0.5 size-4 accent-[var(--primary)]" checked={approved} onChange={(e) => setApproved(e.target.checked)} />
-            I have {set.name}&apos;s written approval for every change listed, and the reason says where it is.
+            {ownRisk && loosened.length === 1 ? `I am allowing this knowing ${set.name} does not permit it.` : `I have ${set.name}'s written approval for every change listed${ownRisk ? " except the connection, which it does not permit" : ""}, and the reason says where it is.`}
           </label>
         </div>
       )}
