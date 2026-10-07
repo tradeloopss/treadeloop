@@ -2353,6 +2353,24 @@ export const copySymbolMappings = pgTable(
   (t) => [uniqueIndex("copy_symbol_mappings_unique").on(t.followerId, t.leaderSymbol)]
 )
 
+// What a broker or prop firm lets a copier do with its accounts (lib/compliance):
+// one row per published version of a provider's rule set. The newest is the one
+// in force; a provider with no row uses the set built into lib/compliance/rules.ts.
+// Never edited in place, never deleted.
+export const providerRuleSets = pgTable(
+  "provider_rule_sets",
+  {
+    id: serial("id").primaryKey(),
+    provider: text("provider").notNull(),
+    version: integer("version").notNull(),
+    ruleSet: jsonb("ruleSet").$type<import("@/lib/compliance/rules").ProviderRuleSet>().notNull(),
+    publishedById: text("publishedById").notNull(),
+    publishedByEmail: text("publishedByEmail").notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("provider_rule_sets_version").on(t.provider, t.version)]
+)
+
 export const copyAccountPrefs = pgTable(
   "copy_account_prefs",
   {

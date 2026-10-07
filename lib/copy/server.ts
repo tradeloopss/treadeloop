@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
@@ -6,11 +6,12 @@ import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
-import { copyBlockMessage, serverAccessBlock } from "@/lib/server-access"
+import { detectProvider, providerProfile, validateDirection, validateExecution, validateRole, type Party, type Verdict } from "@/lib/compliance/engine"
+import { ComplianceError, parties, recordBlock, ruleSets } from "@/lib/compliance/server"
 import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
-import { groupScope, symbolScope, type AccountScope, type AccountView, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
+import { groupScope, symbolScope, type AccountScope, type AccountView, type ComplianceProblem, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
 // turns a change on the leader's account into orders for the followers.
@@ -131,6 +132,11 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     getAppSetting<boolean>(BACKGROUND_SETTING).catch(() => null),
     readHeartbeat("copy_engine").catch(() => null),
   ])
+  // The providers' rules in force (lib/compliance), and what each account is to them.
+  const sets = await ruleSets()
+  const atProvider = mt.filter((m) => m.accountId != null && detectProvider(sets, m.server)).map((m) => m.accountId!)
+  // (whether a login is shared with another user is only looked up for an account that has a provider's rules on it)
+  const party = atProvider.length ? await parties(userId, atProvider) : new Map<number, Party>()
 
   const today = localDay(new Date(), timeZone)
   const closedToday = new Map<number, number>()
@@ -176,9 +182,10 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     const leads = groups.some((g) => g.as === "leader")
     const follows = groups.some((g) => g.as === "follower")
     const preferred = (pref?.role ?? "unassigned") as Role
-    // a firm that forbids server access (lib/server-access.ts): no order is ever sent to its account
-    const barred = m ? serverAccessBlock(m.server) : null
-    const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading && !barred
+    // what the account's provider allows (lib/compliance): no order is sent where it doesn't
+    const set = m ? detectProvider(sets, m.server) : null
+    const execution = validateExecution(set)
+    const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading && execution.allowed
     return {
       id: a.id,
       name: a.name,
@@ -199,7 +206,10 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       role: leads && follows ? "both" : leads ? "leader" : follows ? "follower" : preferred,
       groups,
       canExecute,
-      executionNote: canExecute ? "Orders can be placed on this account." : barred ? copyBlockMessage(barred) : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : "Add the account's master (trading) password in the Trade Manager to allow orders.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
+      provider: set?.provider ?? null,
+      connectedBy: m || r ? "TradeLoop cloud" : p ? (p.provider === "tradingview" ? "Browser extension" : title(p.provider)) : "Not connected",
+      authentication: m ? (m.hasTrading ? "Investor + trading password" : "Investor / read-only") : r ? "Rithmic login" : p ? "Paired session" : null,
+      executionNote: canExecute ? "Orders can be placed on this account." : !execution.allowed ? execution.message : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : "Add the account's master (trading) password in the Trade Manager to allow orders.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
       dayPnl: (closedToday.get(a.id) ?? 0) + (openPnl ?? 0),
       openPnl,
       openNotional: mine.reduce((s, x) => {
@@ -216,6 +226,9 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
 
   const groups: GroupView[] = groupRows.map((g) => {
     const limits = limitRows.find((l) => l.groupId === g.id)
+    const members = followerRows.filter((f) => f.groupId === g.id).map((f) => f.accountId)
+    // only a group with an account at a provider that has rules is asked anything
+    const compliance = [g.leaderAccountId, ...members].some((id) => party.has(id)) ? groupProblems(party, g.leaderAccountId, members) : []
     return {
       id: g.id,
       name: g.name,
@@ -225,6 +238,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       contracts: contractRows.filter((c) => c.groupId === g.id).map(toSpec),
       rules: toRules(ruleRows.find((r) => r.groupId === g.id)),
       limits: { defaultMode: limits?.defaultMode ?? "same", defaultRatio: Number(limits?.defaultRatio ?? 1), globalRiskPct: Number(limits?.globalRiskPct ?? 1), respectPropSync: limits?.respectPropSync ?? true },
+      compliance,
       createdAt: g.createdAt.toISOString(),
     }
   })
@@ -243,7 +257,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const orders: OrderView[] = orderRows.map((o) => ({ id: o.id, groupId: o.groupId, correlationId: o.correlationId, masterOrderId: o.masterOrderId, masterAccountId: o.masterAccountId, followerAccountId: o.followerAccountId, action: o.action, symbol: o.symbol, leaderSymbol: o.leaderSymbol, side: o.side as Side, quantity: Number(o.quantity), leaderQuantity: num(o.leaderQuantity), requestedPrice: num(o.requestedPrice), executionPrice: num(o.executionPrice), status: o.status, reason: o.reason, slippage: num(o.slippage), latencyMs: o.latencyMs, tradeloopMs: o.tradeloopMs, simulated: o.simulated, createdAt: o.createdAt.toISOString(), steps: (Array.isArray((o.decision as { steps?: Step[] } | null)?.steps) ? (o.decision as { steps: Step[] }).steps : []) as Step[] }))
   const events: EventView[] = eventRows.map((e) => ({ id: e.id, groupId: e.groupId, accountId: e.accountId, level: e.level as EventView["level"], code: e.code, title: e.title, body: e.body, action: e.action, masterOrderId: e.masterOrderId, createdAt: e.createdAt.toISOString(), unread: !e.readAt }))
 
-  return { mode, accounts, groups, positions, orders, events, liveData: live != null, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
+  return { mode, accounts, groups, positions, orders, events, providers: sets.map(providerProfile), liveData: live != null, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
 }
 // the broker's own id of each live position, kept beside the state rather than sent to the browser
 const liveKeys = new WeakMap<PositionView[], Map<PositionView, string>>()
@@ -257,17 +271,76 @@ async function ownAccounts(userId: string, ids: number[]): Promise<void> {
   const rows = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), inArray(tradingAccounts.id, unique), eq(tradingAccounts.archived, false)))
   if (rows.length !== unique.length) throw new Error("One of those accounts isn't yours, or has been archived.")
 }
-// An account at a firm that forbids server access is in no copy group, as
-// Leader or as follower (lib/server-access.ts). It can't be connected in the
-// first place; this is the rule for one that somehow is.
-async function copyable(userId: string, ids: number[]): Promise<void> {
-  const unique = [...new Set(ids)]
-  if (!unique.length) return
-  const rows = await db.select({ server: metatraderConnections.server }).from(metatraderConnections).where(and(eq(metatraderConnections.userId, userId), inArray(metatraderConnections.accountId, unique)))
-  for (const r of rows) {
-    const barred = serverAccessBlock(r.server)
-    if (barred) throw new Error(copyBlockMessage(barred))
+// What the providers' rules have against a Master and its Followers
+// (lib/compliance): the first objection to each account. An account at no
+// provider with rules is never asked about.
+function groupProblems(party: Map<number, Party>, leader: number, followers: number[]): ComplianceProblem[] {
+  const master = party.get(leader) ?? { set: null }
+  const problems: ComplianceProblem[] = []
+  const add = (accountId: number, v: Verdict) => {
+    if (!v.allowed) problems.push({ accountId, provider: v.provider, reasonCode: v.reasonCode, message: v.message })
   }
+  // a Master that may not be read is a problem with no follower at all
+  const reading = validateRole(master, "leader")
+  add(leader, reading)
+  for (const id of followers) {
+    const follower = party.get(id) ?? { set: null }
+    const v = validateDirection(master, follower)
+    // the Master's own objection is listed once, against the Master
+    if (!v.allowed && !reading.allowed && v.reasonCode === reading.reasonCode && !follower.set) continue
+    add(id, v)
+  }
+  return problems
+}
+const asVerdict = (p: ComplianceProblem) => ({ allowed: false as const, provider: p.provider, reasonCode: p.reasonCode as Extract<Verdict, { allowed: false }>["reasonCode"], message: p.message })
+
+// A Copy Group is set up only as the providers of its accounts allow: asked
+// here for every change, whatever the page showed. A refusal is recorded.
+async function comply(userId: string, ask: { leader: number; followers: number[]; groupId?: number | null; action: string }): Promise<void> {
+  const party = await parties(userId, [ask.leader, ...ask.followers])
+  // a follower's own objection says more than the Master's (which way round is wrong, not just that it can't be read)
+  const found = groupProblems(party, ask.leader, ask.followers)
+  const first = found.find((p) => p.accountId !== ask.leader) ?? found[0]
+  if (!first) return
+  await recordBlock(userId, asVerdict(first), { groupId: ask.groupId, accountId: first.accountId, action: ask.action })
+  throw new ComplianceError(asVerdict(first))
+}
+// What the review step of the Copy Group wizard is told, before anything is saved.
+export async function previewCompliance(userId: string, leader: number, followers: number[]): Promise<ComplianceProblem[]> {
+  const ids = [leader, ...followers]
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) return []
+  await ownAccounts(userId, ids)
+  return groupProblems(await parties(userId, ids), leader, followers)
+}
+// After a provider's rules change: every active group with one of its
+// accounts is asked again, and one the rules now object to stops copying. Its
+// open positions are left as they are: pausing never closes anything. Returns
+// how many groups were paused.
+export async function revalidateGroups(provider: string): Promise<number> {
+  const sets = await ruleSets()
+  const rows = await db.select({ accountId: metatraderConnections.accountId, server: metatraderConnections.server }).from(metatraderConnections).where(isNotNull(metatraderConnections.accountId))
+  const accounts = rows.filter((r) => detectProvider(sets, r.server)?.provider === provider).map((r) => r.accountId!)
+  if (!accounts.length) return 0
+  const following = await db.select({ groupId: copyGroupFollowers.groupId }).from(copyGroupFollowers).where(inArray(copyGroupFollowers.accountId, accounts))
+  const groups = await db
+    .select({ id: copyGroups.id, userId: copyGroups.userId, leaderAccountId: copyGroups.leaderAccountId })
+    .from(copyGroups)
+    .where(and(eq(copyGroups.status, "active"), following.length ? or(inArray(copyGroups.leaderAccountId, accounts), inArray(copyGroups.id, following.map((f) => f.groupId))) : inArray(copyGroups.leaderAccountId, accounts)))
+  let paused = 0
+  for (const g of groups) {
+    const members = (await db.select({ accountId: copyGroupFollowers.accountId }).from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, g.id))).map((f) => f.accountId)
+    const found = groupProblems(await parties(g.userId, [g.leaderAccountId, ...members]), g.leaderAccountId, members)
+    if (!found.length) continue
+    const first = found.find((p) => p.accountId !== g.leaderAccountId) ?? found[0]
+    await db.update(copyGroups).set({ status: "paused", updatedAt: new Date() }).where(eq(copyGroups.id, g.id))
+    await recordBlock(g.userId, asVerdict(first), { groupId: g.id, accountId: first.accountId, action: "rules_changed" })
+    await note(g.userId, { groupId: g.id, level: "warning", code: "group_paused", title: `Copying paused: ${first.provider}'s rules`, body: `${first.message} Positions that are already open are left as they are.` })
+    // the sync server stops acting for this trader by itself, now
+    await clearPlans(g.userId)
+    await syncCopyRoles(g.userId)
+    paused++
+  }
+  return paused
 }
 async function ownGroup(userId: string, groupId: number) {
   const [g] = await db.select().from(copyGroups).where(and(eq(copyGroups.id, groupId), eq(copyGroups.userId, userId))).limit(1)
@@ -330,7 +403,7 @@ export async function createGroup(userId: string, input: GroupInput): Promise<nu
   if (new Set(followers.map((f) => f.accountId)).size !== followers.length) throw new Error("An account is listed twice.")
   if (followers.length > MAX_FOLLOWERS) throw new Error(`A group can have up to ${MAX_FOLLOWERS} followers.`)
   await ownAccounts(userId, [leader, ...followers.map((f) => f.accountId)])
-  await copyable(userId, [leader, ...followers.map((f) => f.accountId)])
+  await comply(userId, { leader, followers: followers.map((f) => f.accountId), action: "create_group" })
   const existing = await db.select({ id: copyGroups.id, name: copyGroups.name }).from(copyGroups).where(eq(copyGroups.userId, userId))
   if (existing.length >= MAX_GROUPS) throw new Error(`You can have up to ${MAX_GROUPS} copy groups.`)
   if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) throw new Error("You already have a group with that name.")
@@ -385,6 +458,11 @@ export async function setGroupActive(userId: string, groupId: number, active: bo
   const online = (id: number) => ["connected", "syncing", "warning"].includes(byId.get(id)?.health ?? "disconnected")
   const problems = activationProblems({ hasLeader: byId.has(g.leaderAccountId), leaderConnected: online(g.leaderAccountId), followers: g.followers.map((f) => ({ name: byId.get(f.accountId)?.name ?? "A follower", config: f.config, connected: online(f.accountId) })), contracts: g.contracts.length, symbolScope: g.rules.symbolScope })
   if (problems.length) throw new Error(problems.join(" "))
+  if (g.compliance.length) {
+    const first = g.compliance.find((p) => p.accountId !== g.leaderAccountId) ?? g.compliance[0]
+    await recordBlock(userId, asVerdict(first), { groupId, accountId: first.accountId, action: "activate_group" })
+    throw new ComplianceError(asVerdict(first))
+  }
   await baseline(userId, g, state)
   await db.update(copyGroups).set({ status: "active", timeZone, updatedAt: new Date() }).where(eq(copyGroups.id, groupId))
   await note(userId, { groupId, level: "success", code: "group_activated", title: `“${g.name}” is copying`, body: state.mode === "live" ? "New trades on the Leader are sent to the followers." : "Simulation: new trades on the Leader are worked out and recorded for each follower, and nothing is sent to a broker." })
@@ -402,8 +480,9 @@ async function baseline(userId: string, g: GroupView, state: CopyState) {
 export async function changeLeader(userId: string, groupId: number, accountId: number, timeZone: string): Promise<void> {
   const g = await ownGroup(userId, groupId)
   await ownAccounts(userId, [accountId])
-  await copyable(userId, [accountId])
   if (g.leaderAccountId === accountId) return
+  const others = await db.select({ accountId: copyGroupFollowers.accountId }).from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, groupId))
+  await comply(userId, { leader: accountId, followers: others.map((f) => f.accountId).filter((id) => id !== accountId), groupId, action: "change_leader" })
   // a follower promoted to leader stops following
   const [was] = await db.select({ id: copyGroupFollowers.id }).from(copyGroupFollowers).where(and(eq(copyGroupFollowers.groupId, groupId), eq(copyGroupFollowers.accountId, accountId)))
   if (was) {
@@ -428,7 +507,7 @@ export async function saveFollowers(userId: string, groupId: number, input: Foll
   if (list.some((f) => f.accountId === g.leaderAccountId)) throw new Error("The Leader can't also follow itself.")
   if (new Set(list.map((f) => f.accountId)).size !== list.length) throw new Error("An account is listed twice.")
   await ownAccounts(userId, list.map((f) => f.accountId))
-  await copyable(userId, list.map((f) => f.accountId))
+  await comply(userId, { leader: g.leaderAccountId, followers: list.map((f) => f.accountId), groupId, action: "save_followers" })
   const existing = await db.select().from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, groupId))
   const gone = existing.filter((e) => !list.some((f) => f.accountId === e.accountId))
   if (gone.length) {
@@ -494,7 +573,13 @@ export async function saveLimits(userId: string, groupId: number, l: Partial<Gro
 export async function setAccountRole(userId: string, accountId: number, role: string): Promise<void> {
   await ownAccounts(userId, [accountId])
   const clean = (["leader", "follower", "both", "unassigned"] as const).find((r) => r === role) ?? "unassigned"
-  if (clean !== "unassigned") await copyable(userId, [accountId])
+  if (clean !== "unassigned") {
+    const v = validateRole((await parties(userId, [accountId])).get(accountId) ?? { set: null }, clean)
+    if (!v.allowed) {
+      await recordBlock(userId, v, { accountId, action: "set_role" })
+      throw new ComplianceError(v)
+    }
+  }
   await db.insert(copyAccountPrefs).values({ accountId, userId, role: clean }).onConflictDoUpdate({ target: copyAccountPrefs.accountId, set: { role: clean, updatedAt: new Date() } })
 }
 
@@ -579,6 +664,8 @@ async function copyEntry(ctx: Ctx, leader: { id: number; version: number }, p: L
     if (only && f.accountId !== only.accountId) continue
     const account = state.accounts.find((a) => a.id === f.accountId)
     if (!account) continue
+    // a follower its provider's rules don't allow to be copied to gets nothing, in Simulation either (lib/compliance)
+    if (g.compliance.some((c) => c.accountId === f.accountId || c.accountId === g.leaderAccountId)) continue
     const clientRef = named ? entryRef(g.id, p.key, f.accountId) : null
     const theirs = clientRef ? sent.find((c) => c.clientRef === clientRef && c.lane?.decision && c.symbol) : undefined
     const own = decideEntry({
@@ -920,7 +1007,7 @@ async function writePlans(userId: string, state: CopyState, prop: Map<number, Pr
         contracts: g.contracts,
         followers: g.followers.flatMap((f) => {
           const account = state.accounts.find((a) => a.id === f.accountId)
-          if (!account?.canExecute) return []
+          if (!account?.canExecute || g.compliance.some((c) => c.accountId === f.accountId || c.accountId === g.leaderAccountId)) return []
           return [{ accountId: f.accountId, name: account.name, config: f.config, mappings: f.mappings, symbols: account.symbols, closedToday: account.dayPnl - (account.openPnl ?? 0), propSync: g.limits.respectPropSync ? account.propSync : NO_PROPSYNC, guard: guardView(prop.get(f.accountId)?.evaluation ?? null) }]
         }),
         links: held.flatMap((pos) => {

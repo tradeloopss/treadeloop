@@ -9,6 +9,8 @@ import { encrypt } from "@/lib/crypto"
 import { tradingAccounts, metatraderConnections, rithmicConnections, providerAccounts, orderCommands } from "@/lib/db/schema"
 import { getPropMaxAccount } from "@/lib/propmax/account"
 import { guardOrder } from "@/lib/order-execution/guard"
+import { validateConnection } from "@/lib/compliance/engine"
+import { recordBlock, ruleSetFor } from "@/lib/compliance/server"
 import type { OrderBroker, OrderCommandInput, OrderStatus } from "@/lib/order-execution/types"
 
 async function getUserId() {
@@ -70,8 +72,14 @@ export async function getExecutionCapability(accountId: number): Promise<Executi
 export async function setTradingPassword(accountId: number, password: string) {
   const userId = await getUserId()
   if (!password.trim()) throw new Error("Enter your master (trading) password.")
-  const [mt] = await db.select({ id: metatraderConnections.id }).from(metatraderConnections).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId)))
+  const [mt] = await db.select({ id: metatraderConnections.id, server: metatraderConnections.server }).from(metatraderConnections).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId)))
   if (!mt) throw new Error("This account isn't a MetaTrader connection.")
+  // a provider whose accounts are read-only to a copier keeps them so here (lib/compliance)
+  const permitted = validateConnection(await ruleSetFor(mt.server), { credential: "trading" })
+  if (!permitted.allowed) {
+    await recordBlock(userId, permitted, { accountId, action: "set_trading_password" })
+    throw new Error(permitted.message)
+  }
   await db.update(metatraderConnections).set({ tradingPasswordEnc: encrypt(password.trim()) }).where(eq(metatraderConnections.id, mt.id))
   revalidatePath("/trade-manager")
 }

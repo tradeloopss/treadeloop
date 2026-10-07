@@ -22,6 +22,7 @@ export type NavIcon =
   | "affiliates"
   | "settings"
   | "features"
+  | "providers"
 
 export type NavLink = { href: string; label: string; icon: NavIcon; needs?: Permissions }
 
@@ -34,6 +35,7 @@ const L = {
   affiliates: { href: "/admin/affiliates", label: "Affiliates", icon: "affiliates", needs: { affiliates: ["view"] } },
   brokers: { href: "/admin/brokers", label: "Broker health", icon: "brokers", needs: { brokers: ["view"] } },
   propRules: { href: "/admin/prop-rules", label: "Prop rules", icon: "propRules", needs: { brokers: ["view"] } },
+  providers: { href: "/admin/providers", label: "Provider rules", icon: "providers", needs: { brokers: ["view"] } },
   imports: { href: "/admin/imports", label: "File imports", icon: "imports", needs: { brokers: ["view"] } },
   analytics: { href: "/admin/analytics", label: "Analytics", icon: "analytics", needs: { analytics: ["view"] } },
   security: { href: "/admin/security", label: "Security", icon: "security", needs: { security: ["view"] } },
@@ -57,6 +59,7 @@ export const LEGACY_SECTIONS: NavLink[] = [
   L.affiliates,
   L.brokers,
   L.propRules,
+  L.providers,
   L.imports,
   L.analytics,
   L.security,
@@ -73,7 +76,7 @@ export const NAV_GROUPS: { label: string; items: NavLink[] }[] = [
   { label: "Overview", items: [L.overview, L.analytics] },
   { label: "Users", items: [L.users, L.security, L.team] },
   { label: "Revenue", items: [L.billing, L.affiliates, L.cases] },
-  { label: "Trading", items: [L.brokers, L.propRules, L.imports] },
+  { label: "Trading", items: [L.brokers, L.propRules, L.providers, L.imports] },
   { label: "Support", items: [L.support] },
   { label: "Content", items: [L.announcements, L.content] },
   { label: "System", items: [L.audit, L.system, L.features, L.settings] },

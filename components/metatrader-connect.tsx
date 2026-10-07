@@ -4,7 +4,9 @@ import type React from "react"
 import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { connectMetaTrader, getMetaTraderConnection, type MetaTraderConnectionView } from "@/app/actions/metatrader"
-import { serverAccessBlock, type ServerAccessBlock } from "@/lib/server-access"
+import { checkProvider } from "@/app/actions/compliance"
+import type { ProviderProfile } from "@/lib/compliance/engine"
+import { SafeMode } from "@/components/compliance/safe-mode"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,11 +59,29 @@ export function ConnectFlow({
   const [platform, setPlatform] = useState<"mt5" | "mt4">(initial?.platform === "mt4" ? "mt4" : "mt5")
   const [history, setHistory] = useState("all")
   const [error, setError] = useState<string | null>(null)
-  const [guide, setGuide] = useState<ServerAccessBlock["guide"] | null>(null)
-  // A firm that forbids access from a server (FundingPips): said as the server
-  // name is typed, before a password is. The action refuses it either way.
+  const [guide, setGuide] = useState<{ label: string; href: string } | null>(null)
+  // The rules profile of the provider whose server is being typed
+  // (lib/compliance): shown before a password is entered. The action asks the
+  // engine again itself, whatever is shown here.
   const [server, setServer] = useState(initial?.server ?? "")
-  const blocked = serverAccessBlock(server)
+  const [found, setFound] = useState<{ server: string; profile: ProviderProfile | null } | null>(null)
+  useEffect(() => {
+    const name = server.trim()
+    if (name.length < 3) return
+    let stale = false
+    const timer = setTimeout(() => {
+      checkProvider(name)
+        .then((profile) => !stale && setFound({ server: name, profile }))
+        .catch(() => {})
+    }, 300)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
+  }, [server])
+  // (an answer is for the name it was asked about, not for what has been typed since)
+  const profile = found && found.server === server.trim() ? found.profile : null
+  const blocked = profile && !profile.connection.allowed ? profile : null
   const [watching, setWatching] = useState<{ id: number; startedAt: number } | null>(null)
   const [result, setResult] = useState<MetaTraderConnectionView | null>(null)
 
@@ -239,20 +259,9 @@ export function ConnectFlow({
         )}
         <div className="space-y-2">
           <Label htmlFor="mt-server" className="text-xs font-semibold">{t("Server")}</Label>
-          <Input id="mt-server" name="server" defaultValue={initial?.server} onChange={(e) => setServer(e.target.value)} placeholder={platform === "mt5" ? t("e.g. FTMO-Server3") : t("e.g. Exness-Real6")} autoComplete="off" required aria-invalid={blocked ? true : undefined} aria-describedby={blocked ? "mt-server-blocked" : undefined} className="h-10" />
-          {blocked ? (
-            <div id="mt-server-blocked" role="alert" className="flex items-start gap-2 rounded-lg border border-loss/40 bg-loss/10 p-3 text-xs">
-              <AlertCircle className="mt-0.5 size-4 shrink-0 text-loss" />
-              <p>
-                {t(blocked.message)}{" "}
-                <a href={blocked.guide.href} target="_blank" rel="noreferrer" className="font-semibold text-primary underline underline-offset-2">
-                  {t(blocked.guide.label)}
-                </a>
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">{t("Exactly as shown in MetaTrader → File → Login to Trade Account.")}</p>
-          )}
+          <Input id="mt-server" name="server" defaultValue={initial?.server} onChange={(e) => setServer(e.target.value)} placeholder={platform === "mt5" ? t("e.g. FTMO-Server3") : t("e.g. Exness-Real6")} autoComplete="off" required aria-invalid={blocked ? true : undefined} className="h-10" />
+          <p className="text-xs text-muted-foreground">{t("Exactly as shown in MetaTrader → File → Login to Trade Account.")}</p>
+          {profile && <SafeMode profile={profile} />}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">

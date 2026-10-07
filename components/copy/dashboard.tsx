@@ -74,7 +74,7 @@ export function CopyDashboard() {
             </p>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">Contracts: {g.contracts.length ? g.contracts.map((c) => c.symbol).join(", ") : g.rules.symbolScope === "all" ? "all symbols" : "none imported"}</p>
           </div>
-          {limited ? <Pill tone="warn">Limited</Pill> : <GroupStatusPill status={g.status} />}
+          {limited ? <Pill tone="warn">Limited</Pill> : <GroupStatusPill status={g.status} blocked={g.compliance.length > 0} />}
         </div>
         <div className="flex items-end justify-between gap-3">
           <dl className="grid flex-1 grid-cols-3 gap-2 text-sm">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -12,8 +12,11 @@ import { ConnectForm } from "@/components/rithmic-connect"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatQuantity, searchContracts } from "@/lib/copy/contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, RULE_TOGGLES, SIZING_MODES, activationProblems, sizingLabel, type CopyRules, type FollowerConfig, type SizingMode } from "@/lib/copy/engine"
-import { ROLE_LABELS, ago, money, type AccountView, type GroupView, type Role } from "@/lib/copy/view"
-import { FUNDINGPIPS_GUIDE } from "@/lib/server-access"
+import { ROLE_LABELS, ago, money, type AccountView, type ComplianceProblem, type GroupView, type Role } from "@/lib/copy/view"
+import { checkCopyGroup } from "@/app/actions/compliance"
+import { SafeMode } from "@/components/compliance/safe-mode"
+import type { ProviderProfile } from "@/lib/compliance/engine"
+import { helpHref } from "@/lib/urls"
 import { Sheet, useAction } from "@/components/insights/client"
 import { Rows, fieldClass, linkBtn, linkBtnPrimary } from "@/components/insights/ui"
 import { useCopy } from "./store"
@@ -265,6 +268,21 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
   const [contracts, setContracts] = useState<string[]>([])
   const [rules, setRules] = useState<CopyRules>({ ...DEFAULT_RULES })
   const [done, setDone] = useState<{ id: number; activated: boolean; problem?: string } | null>(null)
+  // what the providers' rules have against this Master and these Followers (lib/compliance), asked at the review
+  const [rulesCheck, setRulesCheck] = useState<{ key: string; problems: ComplianceProblem[] } | null>(null)
+  const checkKey = `${leader}:${followers.map((f) => f.accountId).join(",")}`
+  useEffect(() => {
+    if (step !== 6 || leader == null) return
+    let stale = false
+    checkCopyGroup(leader, followers.map((f) => f.accountId)).then((res) => {
+      if (!stale) setRulesCheck({ key: checkKey, problems: res.ok ? res.problems : [] })
+    })
+    return () => {
+      stale = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, checkKey])
+  const compliance = rulesCheck && rulesCheck.key === checkKey ? rulesCheck.problems : null
 
   const reset = () => {
     setStep(0)
@@ -422,6 +440,22 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
                     ["Execution", state.mode === "live" ? "Live — orders are sent to brokers" : "Simulation — nothing is sent to a broker"],
                   ]}
                 />
+                {compliance && compliance.length > 0 ? (
+                  <div role="alert" className="rounded-lg border border-loss/40 bg-loss/10 p-3 text-sm">
+                    <p className="font-semibold">This Copy Group cannot be created</p>
+                    <ul className="mt-1 space-y-1">
+                      {compliance.map((p) => (
+                        <li key={`${p.accountId}${p.reasonCode}`}>
+                          <span className="font-medium">{byId.get(p.accountId)?.name ?? "Account"}:</span> {p.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Check className={cn("size-4", compliance ? "text-[var(--gain)]" : "opacity-40")} aria-hidden /> {compliance ? "Provider rules: nothing against this Master and these Followers." : "Checking the provider rules…"}
+                  </p>
+                )}
                 {problems.length > 0 ? (
                   <div className="rounded-lg border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3 text-sm">
                     <p className="font-medium">This group can be saved, but not activated yet:</p>
@@ -470,10 +504,10 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
                 </button>
               ) : (
                 <>
-                  <button type="button" disabled={pending} className={linkBtn} onClick={() => create(false)}>
+                  <button type="button" disabled={pending || !compliance || compliance.length > 0} className={linkBtn} onClick={() => create(false)}>
                     Save as draft
                   </button>
-                  <button type="button" disabled={pending || problems.length > 0} className={linkBtnPrimary} onClick={() => create(true)}>
+                  <button type="button" disabled={pending || problems.length > 0 || !compliance || compliance.length > 0} className={linkBtnPrimary} onClick={() => create(true)}>
                     {pending ? "Creating…" : "Activate"}
                   </button>
                 </>
@@ -499,8 +533,6 @@ const PLATFORMS: { key: string; label: string; note: string }[] = [
   { key: "rithmic", label: "Rithmic", note: "Futures prop firms. Can lead a group; can't receive orders yet." },
   { key: "tradingview", label: "TradingView", note: "Paper trading, through the TradeLoop browser extension." },
   { key: "other", label: "Tradovate, CSV and others", note: "Every other TradeLoop connection." },
-  // not a connection: FundingPips allows no server to reach its accounts (lib/server-access.ts)
-  { key: "fundingpips", label: "FundingPips account", note: "Copied by FundingPips' own Trade Copier. TradeLoop never connects to it, and takes over from there." },
 ]
 const ROLES: Role[] = ["leader", "follower", "both"]
 
@@ -514,8 +546,12 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
   const [platform, setPlatform] = useState<string | null>(null)
   const [before, setBefore] = useState<number[]>([])
   const [role, setRole] = useState<Role>("follower")
-  // the account being connected is the one FundingPips' Trade Copier copies to
-  const [relay, setRelay] = useState(false)
+  // A provider whose rules keep TradeLoop from connecting to its accounts
+  // (lib/compliance) is listed all the same: what it allows, and the way round
+  // that its own copier offers. The account then connected is the relay one.
+  const restricted = state.providers.filter((p) => !p.connection.allowed)
+  const provider = restricted.find((p) => platform === `provider:${p.provider}`) ?? null
+  const [relay, setRelay] = useState<ProviderProfile | null>(null)
   const [checking, setChecking] = useState(false)
   const added = state.accounts.filter((a) => !before.includes(a.id))
   const account = added[0]
@@ -523,7 +559,7 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
     onClose()
     setStep(0)
     setPlatform(null)
-    setRelay(false)
+    setRelay(null)
   }
   const check = async () => {
     setChecking(true)
@@ -541,19 +577,19 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
         <DialogHeader>
           <DialogTitle>Connect Account</DialogTitle>
           <DialogDescription>
-            Step {step + 1} of 5: {platform === "fundingpips" && step === 1 ? "How FundingPips is copied" : ["Choose platform", "Authenticate", "Test connection", "Choose role", "Complete"][step]}
+            Step {step + 1} of 5: {provider && step === 1 ? `How ${provider.name} is copied` : ["Choose platform", "Authenticate", "Test connection", "Choose role", "Complete"][step]}
           </DialogDescription>
         </DialogHeader>
         {step === 0 && (
           <ul className="space-y-2">
-            {PLATFORMS.map((p) => (
+            {[...PLATFORMS, ...restricted.map((p) => ({ key: `provider:${p.provider}`, label: `${p.name} account`, note: `${p.statusLabel}. TradeLoop doesn't connect to it: see what its rules allow${p.ownCopier ? ", and the way round" : ""}.` }))].map((p) => (
               <li key={p.key}>
                 <button
                   type="button"
                   className="w-full rounded-lg border p-3 text-start transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                   onClick={() => {
                     setPlatform(p.key)
-                    setRelay(false)
+                    setRelay(null)
                     setBefore(state.accounts.map((a) => a.id))
                     setStep(1)
                   }}
@@ -568,49 +604,60 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
         {step === 1 && (
           <div className="space-y-3">
             {/* TradeLoop's own connection forms: the same ones as on the Accounts page */}
-            {platform === "fundingpips" && (
+            {provider && (
               <div className="space-y-3 text-sm">
-                <p className="rounded-lg border border-loss/40 bg-loss/10 p-3">
-                  <span className="font-semibold">TradeLoop never connects to a FundingPips account.</span> FundingPips doesn&apos;t allow any server to reach one, even with the read-only investor password. So there is no login to enter here.
-                </p>
-                <div className="rounded-lg border p-3">
-                  <p className="font-medium">Between your own FundingPips accounts</p>
-                  <p className="mt-1 text-muted-foreground">Use the Trade Copier in your FundingPips dashboard. TradeLoop takes no part in it.</p>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="font-medium">From FundingPips to your other accounts</p>
-                  <ol className="mt-1 list-decimal space-y-1 ps-5 text-muted-foreground">
-                    <li>In FundingPips&apos; Trade Copier, add an ordinary broker account as a Follower of your FundingPips account. That is your relay account.</li>
-                    <li>Connect the relay account here.</li>
-                    <li>Make it the Leader of a Copy Group. Your other accounts follow it.</li>
-                  </ol>
-                </div>
-                <p className="text-xs text-muted-foreground">Nothing is ever copied into a FundingPips account. FundingPips closes accounts for that.</p>
+                <SafeMode profile={provider} />
+                {provider.ownCopier && provider.lines.some((l) => l.key === "ownToOwn" && l.allowed) && (
+                  <div className="rounded-lg border p-3">
+                    <p className="font-medium">Between your own {provider.name} accounts</p>
+                    <p className="mt-1 text-muted-foreground">Use {provider.ownCopier.name}. TradeLoop takes no part in it.</p>
+                  </div>
+                )}
+                {provider.ownCopier && provider.lines.some((l) => l.key === "toExternal" && l.allowed) && (
+                  <div className="rounded-lg border p-3">
+                    <p className="font-medium">From {provider.name} to your other accounts</p>
+                    <ol className="mt-1 list-decimal space-y-1 ps-5 text-muted-foreground">
+                      <li>
+                        In {provider.ownCopier.name}, add an ordinary broker account as a Follower of your {provider.name} account. That is your relay account.
+                      </li>
+                      <li>Connect the relay account here.</li>
+                      <li>Make it the Leader of a Copy Group. Your other accounts follow it.</li>
+                    </ol>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <button type="button" className={linkBtn} onClick={() => setStep(0)}>
                     Back
                   </button>
                   <span className="flex flex-wrap gap-2">
-                    <a href={FUNDINGPIPS_GUIDE} target="_blank" rel="noreferrer" className={linkBtn}>
-                      Read the guide
-                    </a>
-                    <button
-                      type="button"
-                      className={linkBtnPrimary}
-                      onClick={() => {
-                        setRelay(true)
-                        setRole("leader")
-                        setPlatform("mt5")
-                      }}
-                    >
-                      Connect the relay account
-                    </button>
+                    {provider.guide && (
+                      <a href={helpHref(provider.guide)} target="_blank" rel="noreferrer" className={linkBtn}>
+                        Read the guide
+                      </a>
+                    )}
+                    {provider.ownCopier && provider.lines.some((l) => l.key === "toExternal" && l.allowed) && (
+                      <button
+                        type="button"
+                        className={linkBtnPrimary}
+                        onClick={() => {
+                          setRelay(provider)
+                          setRole("leader")
+                          setPlatform("mt5")
+                        }}
+                      >
+                        Connect the relay account
+                      </button>
+                    )}
                   </span>
                 </div>
               </div>
             )}
-            {relay && platform === "mt5" && <p className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">The relay account: the broker account your FundingPips Trade Copier copies to. Not the FundingPips account itself.</p>}
-            {(platform === "mt5" || platform === "mt4") && <ConnectFlow initial={{ platform }} lockPlatform onDone={connected} onBack={() => (setRelay(false), setStep(0))} />}
+            {relay && platform === "mt5" && (
+              <p className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">
+                The relay account: the broker account {relay.ownCopier?.name ?? `${relay.name}'s copier`} copies to. Not the {relay.name} account itself.
+              </p>
+            )}
+            {(platform === "mt5" || platform === "mt4") && <ConnectFlow initial={{ platform }} lockPlatform onDone={connected} onBack={() => (setRelay(null), setStep(0))} />}
             {platform === "rithmic" && <ConnectForm onDone={connected} />}
             {(platform === "tradingview" || platform === "other") && (
               <div className="rounded-lg border border-dashed p-4 text-sm">
@@ -658,7 +705,7 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
         )}
         {step === 3 && account && (
           <div className="space-y-3">
-            {relay && <p className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">A relay account leads: it receives your FundingPips trades, and your other accounts copy it.</p>}
+            {relay && <p className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">A relay account leads: it receives your {relay.name} trades, and your other accounts copy it.</p>}
             <fieldset className="space-y-2">
               <legend className="mb-1 text-sm font-medium">What is {account.name} for?</legend>
               {ROLES.map((r) => (
@@ -734,10 +781,15 @@ export function AccountDrawer({ accountId, onClose }: { accountId: number | null
               <Heartbeat account={a} />
             </div>
             {a.healthNote && a.health !== "connected" && <p className="rounded-lg border border-dashed p-2.5 text-sm text-muted-foreground">{a.healthNote}</p>}
+            {state.providers.filter((p) => p.provider === a.provider).map((p) => (
+              <SafeMode key={p.provider} profile={p} />
+            ))}
             <Rows
               rows={[
                 ["Broker", a.broker ?? "—"],
                 ["Platform", a.platform],
+                ["Connection", a.connectedBy],
+                ["Authentication", a.authentication ?? "—"],
                 ["Account ID", a.login ?? "—"],
                 ["Balance", money(a.balance)],
                 ["Equity", money(a.equity)],

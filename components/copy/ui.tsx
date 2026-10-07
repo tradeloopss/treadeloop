@@ -118,7 +118,9 @@ export function RolePill({ role }: { role: Role }) {
 }
 
 const GROUP_STATUS: Record<GroupView["status"], { label: string; tone: PillTone }> = { active: { label: "Copying", tone: "good" }, paused: { label: "Paused", tone: "warn" }, draft: { label: "Draft", tone: "none" } }
-export function GroupStatusPill({ status }: { status: GroupView["status"] }) {
+// (a group its accounts' providers object to is said to be blocked, whatever else it is: lib/compliance)
+export function GroupStatusPill({ status, blocked }: { status: GroupView["status"]; blocked?: boolean }) {
+  if (blocked) return <Pill tone="bad">Compliance blocked</Pill>
   return <Pill tone={GROUP_STATUS[status].tone}>{GROUP_STATUS[status].label}</Pill>
 }
 

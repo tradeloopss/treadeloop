@@ -1,5 +1,6 @@
 import { resolveFollowerSymbol, sameInstrument, type ContractSpec } from "./contracts"
 import type { CopyRules, FollowerConfig, Health, PropSyncState, Side, Step } from "./engine"
+import type { ProviderProfile } from "@/lib/compliance/engine"
 
 // What the Copy Trading pages are drawn from: everything the server knows
 // about a trader's copy setup, in a form that can be sent to the browser
@@ -31,6 +32,11 @@ export type AccountView = {
   // what the account is used as across the groups it is in
   role: Role
   groups: { id: number; name: string; as: "leader" | "follower" }[]
+  // the provider whose rules apply to it (lib/compliance), by key; null when none has rules of its own
+  provider: string | null
+  // how TradeLoop reaches the account, and what it logs in with: said as it is
+  connectedBy: string
+  authentication: string | null
   // whether TradeLoop can place orders on it (live mode needs this)
   canExecute: boolean
   executionNote: string
@@ -46,6 +52,8 @@ export type AccountView = {
   pingMs: number | null
 }
 
+// A follower (or the Leader itself) the provider's rules don't allow in this group: lib/compliance.
+export type ComplianceProblem = { accountId: number; provider: string; reasonCode: string; message: string }
 export type FollowerView = { id: number; accountId: number; config: FollowerConfig; mappings: { leaderSymbol: string; followerSymbol: string }[] }
 export type GroupLimits = { defaultMode: string; defaultRatio: number; globalRiskPct: number; respectPropSync: boolean }
 export type GroupView = {
@@ -57,6 +65,8 @@ export type GroupView = {
   contracts: ContractSpec[]
   rules: CopyRules
   limits: GroupLimits
+  // what the providers' rules have against this group as it is set up; empty when nothing
+  compliance: ComplianceProblem[]
   createdAt: string
 }
 
@@ -99,6 +109,8 @@ export type CopyState = {
   positions: PositionView[]
   orders: OrderView[]
   events: EventView[]
+  // the providers that have rules of their own, as the trader is shown them
+  providers: ProviderProfile[]
   // false when the live positions couldn't be read this time
   liveData: boolean
   // the background engine: whether it is switched on, and when it last ran

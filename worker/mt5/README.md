@@ -226,9 +226,12 @@ them; a CRLF `add-broker` fails with `python3
 **Never add a pack for FundingPips.** Its rules forbid reaching a trading
 account from a server ("Connecting to a VPN or VPS while accessing your
 trading account is not permitted"), and this is one. The app refuses the
-server name before a connection row is written (`lib/server-access.ts`); the
-missing pack is the second lock. A firm with the same rule goes on that list,
-not in here.
+server name before a connection row is written: the provider's rule set says
+so (`lib/compliance/rules.ts`, or the version an administrator has published
+at /admin/providers). The missing pack is the second lock. Add the pack only
+once a published version of FundingPips' rules allows the connection, which
+needs FundingPips' approval in writing; a firm with the same rule gets a rule
+set of its own, not a line in here.
 
 **Set up (2026-09-26):** MT5 packs `exness`, `ftmo` (prefix `FTMO`: every
 FTMO-Server/-Demo, incl. free trials), `acgmarkets` (prefixes `ACGMarkets`,

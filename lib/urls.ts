@@ -37,3 +37,8 @@ export const portalHref = (path: string) => (/^\/affiliate(?=\/|\?|#|$)/.test(pa
 // NEXT_PUBLIC_HELP_URL to https://help.tradeloop.pro once the subdomain is live.
 export const HELP_URL = process.env.NEXT_PUBLIC_HELP_URL ?? "/help"
 
+// A link to a Help Center page ("/connecting-accounts/metatrader"), from
+// wherever it is shown. On the app's own address /help goes to the dashboard
+// (proxy.ts), so without an address of its own it is the public site's.
+export const helpHref = (path: string) => `${HELP_URL.startsWith("http") ? HELP_URL : siteHref(HELP_URL)}${path}`
+

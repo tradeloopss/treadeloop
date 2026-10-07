@@ -207,7 +207,7 @@ export function Cockpit() {
           <div className="flex min-w-0 items-center gap-2.5">
             <h1 className="text-2xl font-semibold tracking-tight">Cockpit</h1>
             <GroupSelect />
-            <GroupStatusPill status={group.status} />
+            <GroupStatusPill status={group.status} blocked={group.compliance.length > 0} />
           </div>
           <RunningBadge count={running} symbol={contract} />
           <MarketStatus spec={spec} className="justify-self-end" />
@@ -435,7 +435,7 @@ export function Cockpit() {
         <section aria-label="Accounts" className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2.5">
             <h2 className="min-w-0 truncate text-sm font-semibold">{group.name}</h2>
-            <GroupStatusPill status={group.status} />
+            <GroupStatusPill status={group.status} blocked={group.compliance.length > 0} />
             <p className="w-full text-xs text-muted-foreground">
               Leader: {rows[0].account?.name ?? "—"} · Followers: {followers.length}
               {contract ? ` · ${contract}` : ""}
