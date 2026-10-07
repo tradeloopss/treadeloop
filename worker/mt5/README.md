@@ -107,6 +107,28 @@ that do (it blocked this VPS for hours once).
   left alone, 0 of 10), every one a failed sync. A Wine desktop
   (`… - Wine Desktop`, the copy lane's) is never closed: closing it shuts down
   everything inside.
+- **Wine's desktop can lose its owner, and then every terminal dies as it
+  logs in.** The default desktop (the shared terminals' and MT4's) belongs to
+  an `explorer.exe /desktop` that Wine starts by itself, as a child of
+  whichever program first needed a desktop: so it lives in that program's
+  service and dies when that service is restarted. Wine starts no other while
+  anything is still on the desktop, and the desktop window goes on naming the
+  dead owner's cursor-clip window (`__wine_x11_clip_window`). A terminal
+  started after that is killed by the X server the moment it touches the clip:
+  `X Error … BadWindow … X_UnmapWindow` in the bridge's journal, and
+  "MetaTrader login failed: IPC recv failed" (or "send failed") for every
+  account. On 7 Oct 2026 that was 36 failed syncs an hour, from a restart of
+  `mt5-copy-bridge@c1`/`@c2` (their launcher had started that explorer) until
+  it was found. `mend_desktop()` in `bridge_common.py` takes the dead name off
+  before a terminal is started, only when the desktop has no owner. An
+  `explorer /desktop` started afterwards cannot take the desktop over (it
+  exits at once), so there is no service for it.
+- Wine's own services (`services.exe`, `winedevice`, `plugplay`, `rpcss`) are
+  started by the first program after everything was stopped, and live in that
+  program's unit: `mt4-bridge@m1` since 5 Oct 2026 (`systemd-cgls` shows it).
+  Restarting that one unit alone ends them under every running terminal;
+  whether Wine starts them again while other programs are running has not been
+  tried.
 - Services: `mt5-xvfb`, `mt5-openbox`, `mt5-wineserver` (one persistent
   wineserver, so a bridge restart doesn't take the others down),
   `mt5-bridge@t1`, `mt5-bridge@t2` (ports 9101, 9102), `tradeloop-mt5-worker`.

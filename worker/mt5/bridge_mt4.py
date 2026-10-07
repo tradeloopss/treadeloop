@@ -23,7 +23,7 @@ import re
 import subprocess
 import time
 
-from bridge_common import BridgeError, kill_process, serve
+from bridge_common import BridgeError, kill_process, mend_desktop, serve
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--terminal", required=True, help=r"path to terminal.exe, e.g. C:\mt4\m1\terminal.exe")
@@ -91,6 +91,7 @@ def export(account, password, server):
             "ExpertsTrades=false",
             "Script=TradeLoopExport",
         ]) + "\n")
+    mend_desktop()
     proc = subprocess.Popen([args.terminal, "/portable", START_INI], cwd=TERMINAL_DIR)
     try:
         deadline = time.time() + EXPORT_TIMEOUT

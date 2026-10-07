@@ -1,6 +1,7 @@
 """Shared plumbing for the TradeLoop MetaTrader bridges (bridge.py for MT5,
 bridge_mt4.py for MT4): the local-only HTTP server, the shared-token check,
-one-request-at-a-time locking, and ending a terminal process by its path.
+one-request-at-a-time locking, ending a terminal process by its path, and
+keeping Wine's desktop fit to start a terminal on.
 Runs under Windows Python in Wine on the sync VPS (see README.md)."""
 
 import ctypes
@@ -56,6 +57,53 @@ def kill_process(exe_path):
                 k32.CloseHandle(handle)
         more = k32.Process32NextW(snap, ctypes.byref(entry))
     k32.CloseHandle(snap)
+
+
+# Where Wine's X11 driver keeps, on the desktop window, the id of the window it
+# confines the cursor with. It belongs to the desktop's owner (explorer.exe).
+CLIP_WINDOW = "__wine_x11_clip_window"
+
+
+def mend_desktop():
+    """Takes a dead window off Wine's desktop before a terminal starts on it.
+
+    The desktop belongs to an explorer.exe that Wine starts by itself, as a
+    child of whichever program first needed a desktop: so it lives in that
+    program's service and dies when that service is restarted. Wine starts no
+    other while anything is still on the desktop, and the desktop window goes
+    on naming the old owner's cursor-clip window, which is gone. Every program
+    started after that is killed by the X server the moment it touches the
+    cursor clip (BadWindow on X_UnmapWindow). A terminal does as it logs in:
+    the MT5 API then says "IPC recv failed" (or "send failed"), for every
+    account on the shared terminals, until every program has left the desktop.
+    That was 7 Oct 2026, after a restart of the copy lane's bridges.
+
+    With the name taken off, a program skips cursor clipping, which nothing
+    here needs. Only done when the desktop really has no owner: a clip window
+    with a living owner is that owner's, and is left alone. Returns True if
+    the desktop was mended."""
+    try:
+        # a user32 of our own: the argument types set here are nobody else's
+        user32 = ctypes.WinDLL("user32")
+        user32.GetDesktopWindow.restype = wt.HWND
+        user32.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wt.DWORD
+        user32.GetPropW.argtypes = [wt.HWND, wt.LPCWSTR]
+        user32.GetPropW.restype = wt.HANDLE
+        user32.RemovePropW.argtypes = [wt.HWND, wt.LPCWSTR]
+        user32.RemovePropW.restype = wt.HANDLE
+        desktop = user32.GetDesktopWindow()
+        if user32.GetWindowThreadProcessId(desktop, None) or not user32.GetPropW(desktop, CLIP_WINDOW):
+            return False
+        user32.RemovePropW(desktop, CLIP_WINDOW)
+        print("[bridge] the desktop had lost its owner: its dead clip window is taken off", flush=True)
+        return True
+    except Exception as err:  # never the reason a terminal isn't started
+        try:
+            print(f"[bridge] could not check the desktop: {err}", flush=True)
+        except Exception:
+            pass
+        return False
 
 
 # Calls that must not wait behind a long one. A route that waits on purpose

@@ -22,7 +22,7 @@ import time
 
 import MetaTrader5 as mt5
 
-from bridge_common import BridgeError, kill_process, serve, urgent_waiting
+from bridge_common import BridgeError, kill_process, mend_desktop, serve, urgent_waiting
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--terminal", required=True, help=r"path to terminal64.exe, e.g. C:\mt5\t1\terminal64.exe")
@@ -69,6 +69,8 @@ def start_terminal(account, password, server):
     never answers the Python API, so a cold start has to hand over the login
     in initialize() itself rather than log in afterwards."""
     FILLING.clear()
+    # a terminal started on a desktop that names a dead window dies as it logs in
+    mend_desktop()
     if not mt5.initialize(path=args.terminal, portable=True, login=account, password=password, server=server, timeout=90_000):
         code, message = last_error()
         mt5.shutdown()
