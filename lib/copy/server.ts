@@ -9,7 +9,7 @@ import { localDay } from "@/lib/timezone"
 import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
-import { symbolScope, type AccountView, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
+import { groupScope, symbolScope, type AccountScope, type AccountView, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
 // turns a change on the leader's account into orders for the followers.
@@ -999,27 +999,35 @@ export type FlattenResult = {
   skipped: { accountId: number; name: string; reason: string }[]
 }
 
-// Flatten: closes the open positions of ONE symbol across a group — the
-// Leader's and every follower's — or one account's when `accountId` is given.
-// Other symbols are not touched, pending orders are not touched (that is
-// Cancel Orders), and nothing is paused: the group goes on copying.
+// Flatten: closes open positions at market.
+//   symbol null  — everything the group's accounts hold, in every symbol, the
+//                  Leader's included (the Cockpit's Flatten All)
+//   symbol given — what they hold of that one contract, each account in its
+//                  own name for it
+//   accountId    — that account's only
+// Pending orders are not touched (that is Cancel Orders), and nothing is
+// paused: the group goes on copying.
 //
 // Which positions those are is worked out here, from the brokers' own lists and
-// with the same function the Cockpit counts with (symbolScope), never from what
-// the browser sent. A simulated position is closed in the books. A live one
-// gets a close order at market and counts as closed only when its broker
-// confirms; a refused close is sent again (reconcile). In Simulation no order
-// goes to a broker, so live positions are left and named.
-export async function flattenSymbol(userId: string, groupId: number, symbol: string, accountId: number | null, timeZone: string): Promise<FlattenResult> {
+// with the same functions the Cockpit counts with (groupScope / symbolScope),
+// never from what the browser sent. A simulated position is closed in the
+// books. A live one gets a close order at market and counts as closed only
+// when its broker confirms; a refused close is sent again (reconcile). An
+// account TradeLoop can't trade (a read-only connection, or any account while
+// in Simulation) is left as it is and named.
+export async function flattenPositions(userId: string, groupId: number, symbol: string | null, accountId: number | null, timeZone: string): Promise<FlattenResult> {
   await ownGroup(userId, groupId)
-  const contract = String(symbol ?? "").trim()
-  if (!contract || contract.length > 40) throw new Error("Choose the contract to flatten.")
+  const contract = symbol == null ? null : String(symbol).trim()
+  if (contract != null && (!contract || contract.length > 40)) throw new Error("Choose the contract to flatten.")
+  // The copy lane stops acting by itself first: when the Leader's positions
+  // close a moment from now, it must not send the followers a second close.
+  await clearPlans(userId)
   const state = await loadCopyState(userId, timeZone)
   const group = state.groups.find((g) => g.id === groupId)
   if (!group) throw new Error("That copy group no longer exists.")
   // an unreadable feed must not be taken for "nothing is open"
   if (!state.liveData) throw new Error("Live positions couldn't be read just now, so nothing was closed. Try again in a moment.")
-  const scope = symbolScope(group, state.accounts, state.positions, contract)
+  const scope: (AccountScope & { symbol?: string })[] = contract == null ? groupScope(group, state.positions) : symbolScope(group, state.accounts, state.positions, contract)
   const rows = accountId == null ? scope : scope.filter((r) => r.accountId === accountId)
   if (accountId != null && !rows.length) throw new Error("That account isn't part of this group.")
 
@@ -1035,8 +1043,8 @@ export async function flattenSymbol(userId: string, groupId: number, symbol: str
 
   for (const row of rows) {
     const account = state.accounts.find((a) => a.id === row.accountId)
-    // simulated copies of this symbol on this account: closed in the books
-    const sim = managed.filter((m) => m.simulated && m.accountId === row.accountId && sameInstrument(m.symbol, row.symbol))
+    // simulated copies on this account (of the one symbol, or all of them): closed in the books
+    const sim = managed.filter((m) => m.simulated && m.accountId === row.accountId && (row.symbol == null || sameInstrument(m.symbol, row.symbol)))
     if (row.positions.some((p) => p.simulated) && sim.length) {
       await db.update(copyPositions).set({ status: "closed", closedAt: now, quantity: "0", updatedAt: now }).where(inArray(copyPositions.id, sim.map((m) => m.id)))
       out.closed += row.positions.filter((p) => p.simulated).length
@@ -1057,8 +1065,11 @@ export async function flattenSymbol(userId: string, groupId: number, symbol: str
       }
       const mine = managed.find((m) => !m.simulated && m.accountId === row.accountId && m.positionRef === ref)
       if (mine) {
-        // a copied position: owed a close, sent below and again if the broker refuses it
-        if (!mine.closeRequestedAt) await db.update(copyPositions).set({ closeRequestedAt: now, closeAttempts: 0, updatedAt: new Date(0) }).where(eq(copyPositions.id, mine.id))
+        // A copied position: owed a close, sent below and again if the broker
+        // refuses it. Asked for afresh every time (a new request, with tries of
+        // its own): a close that was given up on earlier is sent again, and
+        // one already on its way is not doubled (reconcile looks for that).
+        await db.update(copyPositions).set({ closeRequestedAt: now, closeAttempts: 0, updatedAt: new Date(0) }).where(eq(copyPositions.id, mine.id))
         owed = true
         out.requested++
         continue
@@ -1085,7 +1096,7 @@ export async function flattenSymbol(userId: string, groupId: number, symbol: str
     accountId,
     level: out.skipped.length ? "warning" : "info",
     code: "flattened",
-    title: `Flatten ${contract}${who}: ${parts.join(", ") || "nothing was open"}`,
+    title: `Flatten ${contract ?? "All"}${who}: ${parts.join(", ") || "nothing was open"}`,
     body: [out.requested ? "A live position shows as closed once its broker confirms; a close the broker refuses is sent again." : "", ...out.skipped.map((s) => `${s.name} was not closed. ${s.reason}`)].filter(Boolean).join(" ") || null,
     action: out.skipped.length ? "Close what is left on the broker's platform." : null,
   })

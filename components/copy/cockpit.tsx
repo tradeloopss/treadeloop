@@ -7,10 +7,10 @@ import { toast } from "sonner"
 import { ArrowDownRight, ArrowUpRight, Ban, ChevronDown, ChevronRight, CircleX, Crown, HeartPulse, MoreHorizontal, Plus, Power, RefreshCw, Repeat2, Settings2, ShieldAlert, Trash2, TriangleAlert, X, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { cancelCopyOrders, deleteCopyGroup, disableAllFollowers, flattenCopySymbol, removeCopyContract, saveCopyRules, setCopyFollowerEnabled, setCopyGroupActive } from "@/app/actions/copy-trading"
+import { cancelCopyOrders, deleteCopyGroup, disableAllFollowers, flattenCopyPositions, removeCopyContract, saveCopyRules, setCopyFollowerEnabled, setCopyGroupActive } from "@/app/actions/copy-trading"
 import { formatQuantity, specFor } from "@/lib/copy/contracts"
 import { riskStatus, syncSummary, type CopyRules, type FollowerConfig } from "@/lib/copy/engine"
-import { ago, cockpitContracts, copyStats, groupCopies, money, netPosition, price, symbolScope, type AccountView, type ScopeRow } from "@/lib/copy/view"
+import { ago, cockpitContracts, copyStats, groupCopies, groupScope, money, netPosition, price, symbolCounts, symbolScope, type AccountView, type PositionView, type ScopeRow } from "@/lib/copy/view"
 import { Sheet, useAction } from "@/components/insights/client"
 import { NotEnough, Pill, linkBtn, linkBtnPrimary, type PillTone } from "@/components/insights/ui"
 import { AccountDrawer, ChangeLeaderDialog, ContractDialog, GroupWizard, RulesEditor } from "./dialogs"
@@ -21,10 +21,12 @@ import { ConfirmDialog, GroupSelect, GroupStatusPill, MarketStatus, PageHead, Pl
 // The Cockpit: one group, one contract, live. Who leads, who follows, what
 // each holds of the contract in front of you, and the controls to stop it.
 //
-// Everything on the page is about the selected contract: the positions
-// counted, the rows' figures, and what Cancel and Flatten act on. Which
-// positions that is comes from symbolScope, the same function the server
-// closes with, so the number on the Flatten button is the number closed.
+// The table is about the selected contract: the positions counted, the rows'
+// figures, a row's own Flatten, and Cancel all orders. Flatten All is not: it
+// closes everything the group's accounts hold, in every symbol, the Leader's
+// included. Which positions either means comes from symbolScope / groupScope,
+// the same functions the server closes with, so the number on a Flatten
+// button is the number closed.
 
 const ratioOf = (c: FollowerConfig) => (c.sizingMode === "same" ? "1x" : c.sizingMode === "percentage" ? `${formatQuantity((c.percentage ?? 100) / 100)}x` : c.sizingMode === "multiplier" ? `${formatQuantity(c.multiplier ?? 1)}x` : c.sizingMode === "risk" ? `${formatQuantity(c.riskPercentage ?? 1)}% risk` : c.sizingMode === "fixed" ? `Fixed ${formatQuantity(c.fixedQuantity ?? 1)}` : "By size")
 const tone = (v: number | null | undefined) => (v == null || v === 0 ? "" : v > 0 ? "text-[var(--gain)]" : "text-[var(--loss)]")
@@ -41,7 +43,7 @@ const HEALTH: Record<AccountView["health"], { label: string; tone: PillTone; dot
 }
 
 type Row = ScopeRow & { account: AccountView | undefined; net: ReturnType<typeof netPosition>; risk: ReturnType<typeof riskStatus> | null }
-type Dialog = "contract" | "leader" | "rules" | "disable" | "cancel" | "flatten" | "delete" | "wizard" | "alerts" | null
+type Dialog = "contract" | "leader" | "rules" | "disable" | "cancel" | "flatten" | "flattenContract" | "delete" | "wizard" | "alerts" | null
 
 function SideLabel({ side }: { side: "long" | "short" | null }) {
   if (!side) return <span className="text-muted-foreground">—</span>
@@ -111,27 +113,41 @@ export function Cockpit() {
   const problems = state.events.filter((e) => e.groupId === group.id && e.unread && (e.level === "error" || e.level === "warning"))
 
   // what a Flatten can't close from here, said before it is pressed
-  const blocker = (r: Row): string | null => {
-    const live = r.positions.filter((p) => !p.simulated)
-    if (!live.length) return null
+  const cantClose = (positions: PositionView[], a: AccountView | undefined): string | null => {
+    if (!positions.some((p) => !p.simulated)) return null
     if (state.mode !== "live") return "Simulation mode: no order is sent to a broker."
-    return r.account?.canExecute ? null : (r.account?.executionNote ?? "This account can't receive orders from TradeLoop.")
+    return a?.canExecute ? null : (a?.executionNote ?? "This account can't receive orders from TradeLoop.")
   }
+  const blocker = (r: Row) => cantClose(r.positions, r.account)
+  const live = (positions: PositionView[]) => positions.filter((p) => !p.simulated).length
+  // the selected contract only
   const blocked = rows.filter((r) => blocker(r))
-  // the number on the button is the number that will be closed
-  const closable = running - blocked.reduce((n, r) => n + r.positions.filter((p) => !p.simulated).length, 0)
+  // the number on a button is the number that will be closed
+  const closable = running - blocked.reduce((n, r) => n + live(r.positions), 0)
   const one = flattenOne != null ? rows.find((r) => r.accountId === flattenOne) : undefined
+  // Flatten All: everything the group's accounts hold, in every symbol, the Leader's included
+  const everything = groupScope(group, state.positions)
+    .map((r) => ({ ...r, account: account(r.accountId) }))
+    .filter((r) => r.positions.length > 0)
+  const allOpen = everything.reduce((n, r) => n + r.positions.length, 0)
+  const allBlocked = everything.filter((r) => cantClose(r.positions, r.account))
+  const allClosable = allOpen - allBlocked.reduce((n, r) => n + live(r.positions), 0)
 
   const flattened = (what: string) => (res: { total: number; closed: number; requested: number; skipped: { name: string; reason: string }[] }) => {
     const done = res.closed + res.requested
-    if (done > 0) toast.success(`${done} ${what} ${done === 1 ? "position" : "positions"} flattened`, { description: res.requested ? "Close orders are with the broker: each position shows as closed once the broker confirms." : undefined })
-    else if (!res.skipped.length) toast.message(`No open ${what} positions to flatten.`)
+    const of = what ? `${what} ` : ""
+    if (done > 0) toast.success(`${done} ${of}${done === 1 ? "position" : "positions"} flattened`, { description: res.requested ? "Close orders are with the broker: each position shows as closed once the broker confirms." : undefined })
+    else if (!res.skipped.length) toast.message(`No open ${of}positions to flatten.`)
     for (const s of res.skipped) toast.warning(`${s.name} was not closed`, { description: s.reason })
   }
   const flattenAll = () => {
+    if (allOpen === 0) return void toast.message("No open positions to flatten.")
+    setDialog("flatten")
+  }
+  const flattenContract = () => {
     if (!contract) return
     if (running === 0) return void toast.message(`No open ${contract} positions to flatten.`)
-    setDialog("flatten")
+    setDialog("flattenContract")
   }
   const toggle = (r: Row, v: boolean) => run(() => setCopyFollowerEnabled(group.id, r.accountId, v), async () => (toast.success(v ? "Follower enabled." : "Follower disabled. Its open positions stay open."), await after()))
   const cross = (r: Row) => (r.leader ? "—" : contract ? `${r.symbol}${r.via === "auto" ? " (auto)" : ""}` : "—")
@@ -150,6 +166,10 @@ export function Cockpit() {
         </DropdownMenuItem>
         <DropdownMenuItem disabled={pending} onClick={() => run(() => setCopyGroupActive(group.id, !active), async () => (toast.success(active ? "Copying paused." : "Group activated."), await after()))}>
           <Power className="size-4" /> {active ? "Pause copying" : "Activate group"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!contract} onClick={flattenContract}>
+          <CircleX className="size-4" /> Flatten {contract ?? "this contract"} only
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={active} onClick={() => setDialog("delete")}>
@@ -211,7 +231,7 @@ export function Cockpit() {
             <button type="button" disabled={!contract} className={linkBtn} onClick={() => setDialog("cancel")}>
               <CircleX className="size-3.5" /> Cancel all orders
             </button>
-            <button type="button" disabled={!contract} className={dangerBtn} onClick={flattenAll}>
+            <button type="button" className={dangerBtn} onClick={flattenAll} title="Close every open position on every account of this group, the Leader's included">
               Flatten all
             </button>
             {menu}
@@ -379,9 +399,14 @@ export function Cockpit() {
             <CircleX className="size-3.5 shrink-0" /> Cancel Orders
           </button>
         </div>
-        <button type="button" disabled={!contract} className={cn(dangerBtn, "h-12 w-full text-base")} onClick={flattenAll}>
-          <TriangleAlert className="size-4" /> Flatten All{contract ? ` ${contract}` : ""}
+        <button type="button" className={cn(dangerBtn, "h-12 w-full text-base")} onClick={flattenAll}>
+          <TriangleAlert className="size-4" /> Flatten All
         </button>
+        {contract && tabs.length > 1 && (
+          <button type="button" className={cn(linkBtn, "h-11 w-full border-[var(--loss)]/50 text-[var(--loss)]")} onClick={flattenContract}>
+            Flatten {contract} only
+          </button>
+        )}
 
         <dl className="grid grid-cols-3 gap-2">
           {[
@@ -590,12 +615,60 @@ export function Cockpit() {
       <ConfirmDialog
         open={dialog === "flatten"}
         onClose={() => setDialog(null)}
+        title="Flatten all positions?"
+        action={allClosable > 0 ? `Flatten ${allClosable} ${allClosable === 1 ? "Position" : "Positions"}` : "Nothing to flatten"}
+        danger
+        pending={pending}
+        disabled={allClosable === 0}
+        onConfirm={() => run(() => flattenCopyPositions(group.id, null), async (res) => (flattened("")(res), setDialog(null), await after()))}
+      >
+        <p>
+          {allClosable === allOpen ? (
+            <>
+              This will close all <span className="font-semibold text-foreground">{allOpen}</span> open {allOpen === 1 ? "position" : "positions"} on every account of “{group.name}”, the Leader&apos;s included, in every symbol, at market.
+            </>
+          ) : (
+            <>
+              This will close <span className="font-semibold text-foreground">{allClosable}</span> of the {allOpen} open positions on the accounts of “{group.name}”, at market.
+            </>
+          )}
+        </p>
+        <ul className="divide-y rounded-lg border text-foreground">
+          {everything.map((r) => (
+            <li key={r.accountId} className="flex items-baseline justify-between gap-3 px-2.5 py-1.5">
+              <span className="min-w-0 truncate font-medium">
+                {r.leader && <Crown className="me-1 inline size-3.5 text-amber-500" aria-label="Leader" />}
+                {r.account?.name ?? "Deleted account"}
+              </span>
+              <span className="shrink-0 text-end text-muted-foreground tabular-nums">
+                <span className="font-semibold text-foreground">{r.positions.length}</span> · {symbolCounts(r.positions)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p>Pending orders are not cancelled, and the group keeps copying new trades.</p>
+        {allBlocked.length > 0 && (
+          <div className="rounded-lg border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-2.5 text-foreground">
+            <p className="font-medium">Can&apos;t be closed from here:</p>
+            <ul className="mt-1 list-disc space-y-0.5 ps-5">
+              {allBlocked.map((r) => (
+                <li key={r.accountId}>
+                  {r.account?.name ?? "An account"}: <span className="text-muted-foreground">{cantClose(r.positions, r.account)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={dialog === "flattenContract"}
+        onClose={() => setDialog(null)}
         title={`Flatten all ${contract ?? ""} positions?`}
         action={closable > 0 ? `Flatten ${closable} ${closable === 1 ? "Position" : "Positions"}` : "Nothing to flatten"}
         danger
         pending={pending}
         disabled={closable === 0}
-        onConfirm={() => contract && run(() => flattenCopySymbol(group.id, contract), async (res) => (flattened(contract)(res), setDialog(null), await after()))}
+        onConfirm={() => contract && run(() => flattenCopyPositions(group.id, contract), async (res) => (flattened(contract)(res), setDialog(null), await after()))}
       >
         <p>
           {closable === running ? (
@@ -629,7 +702,7 @@ export function Cockpit() {
         action="Flatten"
         danger
         pending={pending}
-        onConfirm={() => one && contract && run(() => flattenCopySymbol(group.id, contract, one.accountId), async (res) => (flattened(one.symbol)(res), setFlattenOne(null), await after()))}
+        onConfirm={() => one && contract && run(() => flattenCopyPositions(group.id, contract, one.accountId), async (res) => (flattened(one.symbol)(res), setFlattenOne(null), await after()))}
       >
         {one && (
           <>

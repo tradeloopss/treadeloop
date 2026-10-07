@@ -6,9 +6,13 @@
 // whose trading session is already open when an order arrives. So the lane
 // has terminals of its own (MT5_COPY_BRIDGES), and gives one to each account
 // the app marks for copying (metatrader_connections.copyRole):
-//   leader    read-only session, watched without a pause (bridge /watch
-//             answers within a few milliseconds of a change)
-//   follower  master-password session kept open, read every few seconds
+//   leader    watched without a pause (bridge /watch answers within a few
+//             milliseconds of a change)
+//   follower  read every few seconds
+// An account with a trading password stored is held on a session that can
+// trade, whatever its role: a follower to take its copies, a leader so that a
+// Flatten of its own positions goes out here and at once. Without one it is
+// held read-only, on the investor password.
 // There are only so many terminals. An account that doesn't get one keeps
 // working through the sync worker, as before, only slower; the app can see
 // which is which (copySlot, copySeenAt) and routes orders accordingly.
@@ -107,6 +111,10 @@ type Slot = {
   balance: number | null
   ping: number | null
   tradeAllowed: boolean
+  // tickets a close is on its way for from here (sent by the lane itself, or queued by the app), and
+  // tickets this account has been seen to close: neither is sent a close again
+  closing: Set<string>
+  gone: Set<string>
   // orders sent from here that no reading shows yet
   inflight: { ref: string; symbol: string; side: "long" | "short"; volume: number; price: number | null; at: number }[]
   // what the lane opened on the account, and when: counted on top of a plan written before it
@@ -124,7 +132,7 @@ const slots: Slot[] = env("MT5_COPY_BRIDGES")
   .filter(Boolean)
   .map((entry) => {
     const [slot, port] = entry.split(":")
-    return { slot, port: Number(port), broker: null, connection: null, known: new Map(), missing: new Map(), held: new Map(), first: true, seenSignature: "", bridgeSignature: "", publishedSignature: "", writtenAt: 0, readAt: 0, pauseUntil: 0, failures: 0, equity: null, balance: null, ping: null, tradeAllowed: false, inflight: [], openedHere: [], primed: "", publishing: Promise.resolve(), reported: Promise.resolve() }
+    return { slot, port: Number(port), broker: null, connection: null, known: new Map(), missing: new Map(), held: new Map(), first: true, seenSignature: "", bridgeSignature: "", publishedSignature: "", writtenAt: 0, readAt: 0, pauseUntil: 0, failures: 0, equity: null, balance: null, ping: null, tradeAllowed: false, closing: new Set(), gone: new Set(), inflight: [], openedHere: [], primed: "", publishing: Promise.resolve(), reported: Promise.resolve() }
   })
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -194,7 +202,9 @@ async function tick() {
 }
 
 // --- who gets a terminal ---
-const trades = (c: Connection) => (c.copyRole === "follower" || c.copyRole === "both") && c.tradingPasswordEnc != null
+// trading passwords a broker refused for an account that only leads: that account is watched read-only instead
+const refused = new Set<string>()
+const trades = (c: Connection) => c.tradingPasswordEnc != null && !refused.has(c.tradingPasswordEnc)
 const leads = (c: Connection) => c.copyRole !== "follower"
 const secrets = new Map<string, string>()
 function secret(c: Connection): string {
@@ -219,6 +229,8 @@ function clear(s: Slot) {
   s.publishedSignature = ""
   s.inflight = []
   s.openedHere = []
+  s.closing.clear()
+  s.gone.clear()
   s.primed = ""
   s.failures = 0
   s.readAt = 0
@@ -419,6 +431,16 @@ async function read(s: Slot, path: "/positions" | "/watch") {
     const kind = err instanceof BridgeError ? err.kind : "internal"
     s.failures++
     s.tradeAllowed = false
+    if (kind === "auth" && c.copyRole === "leader" && trades(c)) {
+      // A leader whose trading password the broker refuses must still be
+      // watched, or nothing it does is copied: back to its read-only session.
+      // (A password that is changed later is a new one, and is tried again.)
+      refused.add(c.tradingPasswordEnc!)
+      clear(s)
+      s.pauseUntil = Date.now() + 2_000
+      console.warn(`[lane] ${s.slot}: ${c.login} the trading password was refused: watching it read-only. Orders for it go through the sync worker.`)
+      return
+    }
     // a wrong password or an unknown server won't fix itself in a second
     s.pauseUntil = Date.now() + (kind === "auth" || kind === "unsupported" ? 60_000 : 2_000)
     console.warn(`[lane] ${s.slot}: ${c.login} read failed [${kind}]: ${err instanceof Error ? err.message : err}`)
@@ -453,6 +475,8 @@ function absorb(s: Slot, c: Connection, res: Reading) {
     if (confirmed.has(ticket) || (!res.fresh && now - since >= MISSING_MS)) {
       s.missing.delete(ticket)
       closed.push(old)
+      if (s.gone.size > 500) s.gone.clear()
+      s.gone.add(ticket)
     } else {
       s.missing.set(ticket, since)
       listed.set(ticket, old)
@@ -524,7 +548,7 @@ const followerSlot = (leader: Connection, accountId: number) => {
 // The followers' orders the lane sent for a leader's position, by group and
 // leader ticket, from the moment each leaves: what a close closes before the
 // app has heard of the entry. `ticket` is the follower's, once the broker has answered.
-type Entered = { accountId: number; ref: string; ticket: string | null; symbol: string; side: "long" | "short"; volume: number; done: Promise<unknown> }
+type Entered = { accountId: number; ref: string; ticket: string | null; filledAt: number | null; symbol: string; side: "long" | "short"; volume: number; done: Promise<unknown> }
 const enteredFor = new Map<string, Entered[]>()
 
 function copyOpen(leader: Slot, c: Connection, p: Seen, detectedAt: number) {
@@ -596,9 +620,13 @@ function copyClose(leader: Slot, c: Connection, p: Seen, detectedAt: number) {
       const ref = closeRef(g.id, p.identifier, l.accountId)
       if (names.has(ref)) continue
       const fs = followerSlot(c, l.accountId)
-      // as the follower's terminal lists it; or, opened here a moment ago and not read yet, as it was sent
-      const held = fs?.known.get(l.ticket) ?? here.find((o) => o.accountId === l.accountId && o.ticket === l.ticket)
-      // (an order the broker refused left nothing to close, and is no longer in the list)
+      // already closed, or a close for it is on its way (a Flatten's, say): not a second one
+      if (fs && (fs.gone.has(l.ticket) || fs.closing.has(l.ticket))) continue
+      // As the follower's terminal lists it. Or, opened here a moment ago and the
+      // account not read since, as it was sent: once the account has been read,
+      // its own list is the truth, and a position that isn't on it is not there
+      // to close (closed by hand, by its stop, by a Flatten).
+      const held = fs?.known.get(l.ticket) ?? (fs ? here.find((o) => o.accountId === l.accountId && o.ticket === l.ticket && o.filledAt != null && fs.readAt <= o.filledAt) : undefined)
       if (!fs || !held) continue
       send(leader, fs, { ref, userId: plan.userId, accountId: l.accountId, kind: "close", symbol: held.symbol, side: held.side, volume: held.volume, stopLoss: null, takeProfit: null, ticket: l.ticket, guard: { allowed: true, reasons: [], severity: "ok" }, report: { groupId: g.id, leaderRef: p.identifier, leaderSymbol: p.symbol, leaderQuantity: p.volume, magic: null, ticket: l.ticket, price: null, decision: null, detectedAt, tradeloopMs: 0, brokerMs: null } })
     }
@@ -621,6 +649,7 @@ function send(leader: Slot, fs: Slot, o: Order) {
   unsettled.set(o.ref, attempt)
   journal({ t: "try", ref: o.ref, attempt })
 
+  if (o.kind === "close" && o.ticket) fs.closing.add(o.ticket)
   const startedAt = Date.now()
   const began = performance.now()
   const order = callBridge<Sent>(fs, "/order", { login: c.login, password: secret(c), server: c.server, kind: o.kind, symbol: o.symbol, side: o.side, volume: o.volume, stopLoss: o.stopLoss, takeProfit: o.takeProfit, positionRef: o.ticket, orderType: o.kind === "place" ? "market" : null, magic, fast: true, wait: 0.5 }, 25_000).then(
@@ -636,7 +665,7 @@ function send(leader: Slot, fs: Slot, o: Order) {
 
   // an entry is known for its leader's position from now, so a close that comes before the broker's answer waits for it
   const key = `${o.report.groupId}:${o.report.leaderRef}`
-  const entered: Entered | null = o.kind === "place" ? { accountId: o.accountId, ref: o.ref, ticket: null, symbol: o.symbol, side: o.side, volume: o.volume, done: Promise.resolve() } : null
+  const entered: Entered | null = o.kind === "place" ? { accountId: o.accountId, ref: o.ref, ticket: null, filledAt: null, symbol: o.symbol, side: o.side, volume: o.volume, done: Promise.resolve() } : null
   if (entered) enteredFor.set(key, [...(enteredFor.get(key) ?? []), entered])
   const forget = () => {
     if (!entered) return
@@ -660,7 +689,10 @@ function send(leader: Slot, fs: Slot, o: Order) {
       const lane = { ticket: o.kind === "place" ? (result.accepted ? result.order : null) : o.ticket, price: result.price || null, brokerMs: result.sendMs, tradeloopMs: Math.max(0, Math.round((startedAt - o.report.detectedAt + took - result.sendMs) * 10) / 10) }
       const ref = result.deal && result.deal !== "0" ? result.deal : result.order
       if (where) await db.update(orderCommands).set(result.accepted ? { status: "filled", resultMessage: "Order executed.", brokerRef: ref, brokerResult: result, lane: merged(lane), leaseUntil: null, updatedAt: new Date() } : { status: "rejected", resultMessage: `Broker rejected the order (retcode ${result.retcode}: ${result.comment || "no reason given"}).`, brokerRef: ref, brokerResult: result, lane: merged(lane), leaseUntil: null, updatedAt: new Date() }).where(where)
-      if (entered && result.accepted) entered.ticket = result.order
+      if (entered && result.accepted) {
+        entered.ticket = result.order
+        entered.filledAt = Date.now()
+      }
       // refused: it adds nothing to what the account holds
       if (!result.accepted) {
         fs.openedHere = fs.openedHere.filter((x) => x.ref !== o.ref)
@@ -697,6 +729,7 @@ function send(leader: Slot, fs: Slot, o: Order) {
   void finished.then(async () => {
     await read(fs, "/positions")
     fs.inflight = fs.inflight.filter((x) => x.ref !== o.ref)
+    if (o.ticket) fs.closing.delete(o.ticket)
     void tick()
   })
 }
@@ -726,6 +759,20 @@ async function execute(s: Slot, cmd: Command) {
   const c = s.connection
   // the account lost its terminal between the order being taken and its turn: the sync worker sends it
   if (!c || c.accountId !== cmd.accountId || !trades(c)) return finish(cmd.id, { broker: "mt5" })
+  const ticket = cmd.positionRef
+  if (ticket) {
+    // a close for this very position is on its way from here (the Leader closed it at the same moment): its answer first
+    for (let waited = 0; s.closing.has(ticket) && waited < 3_000; waited += 20) await sleep(20)
+    // The account has been seen to close it: there is nothing left to send. (Asking
+    // the terminal would only make it look for the ticket for six seconds.)
+    if (s.gone.has(ticket)) {
+      if (cmd.kind === "close") await finish(cmd.id, { status: "filled", resultMessage: "The position was already closed." })
+      else await finish(cmd.id, { status: "failed", resultMessage: "The position is closed.", attempts: cmd.attempts + 1 })
+      console.log(`[lane] ${s.slot}: order ${cmd.id} (${cmd.kind} ${c.login}): position ${ticket} was already closed`)
+      return
+    }
+    if (cmd.kind === "close") s.closing.add(ticket)
+  }
   const startedAt = Date.now()
   try {
     const result = await callBridge<Sent>(s, "/order", { login: c.login, password: secret(c), server: c.server, kind: cmd.kind, positionRef: cmd.positionRef, orderRef: cmd.orderRef, symbol: cmd.symbol, side: cmd.side, volume: num(cmd.volume), price: num(cmd.price), stopLoss: num(cmd.stopLoss), takeProfit: num(cmd.takeProfit), orderType: cmd.orderType, fast: true }, 25_000)
@@ -738,6 +785,9 @@ async function execute(s: Slot, cmd: Command) {
     const giveUp = attempts >= 3
     await finish(cmd.id, { status: giveUp ? "failed" : "pending", resultMessage: err instanceof Error ? err.message : String(err), attempts })
     console.warn(`[lane] ${s.slot}: order ${cmd.id} attempt ${attempts} failed${giveUp ? " (giving up)" : ""}: ${err instanceof Error ? err.message : err}`)
+  } finally {
+    // its turn is over; the reading that follows says whether the position is gone
+    if (ticket && cmd.kind === "close") setTimeout(() => s.closing.delete(ticket), 2_000)
   }
 }
 

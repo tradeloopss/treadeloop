@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { specFor } from "@/lib/copy/contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, type FollowerConfig } from "@/lib/copy/engine"
 import { marketStatus } from "@/lib/copy/market"
-import { cockpitContracts, copyStatus, groupCopies, netPosition, orderBucket, orderSide, price, sizingSummary, symbolScope, type AccountView, type GroupView, type OrderView, type PositionView } from "@/lib/copy/view"
+import { cockpitContracts, copyStatus, groupCopies, groupScope, netPosition, orderBucket, orderSide, price, sizingSummary, symbolCounts, symbolScope, type AccountView, type GroupView, type OrderView, type PositionView } from "@/lib/copy/view"
 
 // The Cockpit shows one contract at a time, and Flatten closes exactly what it
 // shows. These hold the pieces to that: which positions a contract covers on
@@ -27,6 +27,22 @@ test("a contract's scope is the Leader's positions in it and each follower's in 
   // the other tab: not the same positions, and no account outside the group ever
   const micro = symbolScope(group(), accounts, positions, "MNQZ6")
   assert.deepEqual(micro.map((r) => r.positions.map((p) => `${p.symbol}x${p.quantity}`)), [[], ["MNQZ6x9"], ["MNQZ6x4"]])
+})
+
+test("Flatten All's scope is everything the group's accounts hold, the Leader's included, in every symbol", () => {
+  const positions = [pos(1, "XAUUSD.m", 0.1), pos(1, "US100.std", 1), pos(1, "US100.std", 1), pos(2, "XAUUSDm", 0.1), pos(2, "BTCUSDm", 1), pos(3, "MNQZ6", 4, { simulated: true, groupId: 7 }), pos(3, "MNQZ6", 9, { simulated: true, groupId: 8 }), pos(99, "NQZ6", 5)]
+  const scope = groupScope(group(), positions)
+  // every position of the Leader and of each follower, whatever the symbol; a simulated one only if it is this group's;
+  // never an account that isn't in the group
+  assert.deepEqual(scope.map((r) => [r.accountId, r.leader, r.positions.map((p) => `${p.symbol}x${p.quantity}`)]), [
+    [1, true, ["XAUUSD.mx0.1", "US100.stdx1", "US100.stdx1"]],
+    [2, false, ["XAUUSDmx0.1", "BTCUSDmx1"]],
+    [3, false, ["MNQZ6x4"]],
+  ])
+  assert.equal(symbolCounts(scope[0].positions), "XAUUSD.m, US100.std ×2")
+  // one contract's scope is a part of it, never more
+  const gold = symbolScope(group({ contracts: [specFor("XAUUSD")] }), [account(1), account(2, { symbols: ["XAUUSDm"] }), account(3)], positions, "XAUUSD")
+  assert.deepEqual(gold.map((r) => r.positions.length), [1, 1, 0])
 })
 
 test("a broker's own spelling of the instrument is the same contract; a simulated position belongs to its own group only", () => {

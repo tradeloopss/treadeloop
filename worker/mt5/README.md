@@ -160,6 +160,15 @@ working through the worker, slower.
   terminal, a trade the limits turn down, retries, Flatten All — is decided by
   the app's engine as before; the lane tells it the moment something changed
   and sends what it queues (`order_commands.broker = 'mt5c'`).
+- **Who can trade here**: an account with a trading password stored is held on
+  a session that can trade, whatever its role: a follower for its copies, a
+  leader so that a Flatten of its own positions goes out on its own terminal.
+  Without one it is held read-only. A leader whose trading password the broker
+  refuses is watched read-only all the same.
+- **One close per ticket**: a ticket with a close on its way, or one the
+  account has been seen to close, is never sent another (a Flatten and the
+  Leader's own close arrive together). What the lane remembers opening is
+  trusted only until the follower's account has been read.
 
 A terminal only helps as far as the broker is near: the round trip from this
 server to Exness's access point is about 120ms, so an Exness follower can't be

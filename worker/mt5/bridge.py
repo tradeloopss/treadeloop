@@ -38,6 +38,10 @@ IPC_ERRORS = {-10001, -10002, -10003, -10004, -10005}
 # The fill mode each symbol takes, learned once per session: it saves a call to
 # the terminal on every order after the first (cleared whenever it logs in).
 FILLING = {}
+# Accounts a broker won't let trade even on the master password (disabled on
+# the server, an evaluation that has ended), and when that was last found: such
+# an account is logged in once, not again on every call for the next minutes.
+NO_TRADE = {}
 # MT5 fields that are 64-bit ids — sent as strings so JavaScript can't round them.
 ID_FIELDS = {"ticket", "order", "position_id", "position_by_id", "identifier", "magic", "external_id"}
 
@@ -337,7 +341,11 @@ def ensure_trading_login(account, password, server):
     # password: on an investor session it is False, and an order sent then is
     # refused by the broker with retcode 10017 "Trade disabled".
     info = mt5.account_info()
-    if term is not None and term.connected and current_login()[0] == account and term.trade_allowed and info is not None and info.trade_allowed:
+    here = term is not None and term.connected and info is not None and info.login == account
+    if here and term.trade_allowed and info.trade_allowed:
+        NO_TRADE.pop(account, None)
+        return
+    if here and not info.trade_allowed and time.time() - NO_TRADE.get(account, 0) < 300:
         return
     if term is None:
         start_terminal(account, password, server)
@@ -348,6 +356,9 @@ def ensure_trading_login(account, password, server):
     while time.time() < deadline:
         term = mt5.terminal_info()
         if term and term.connected and current_login()[0] == account:
+            info = mt5.account_info()
+            if info is not None and not info.trade_allowed:
+                NO_TRADE[account] = time.time()
             return
         time.sleep(0.25)
     raise BridgeError(504, "timeout", "Logged in, but the account never finished connecting")

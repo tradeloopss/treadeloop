@@ -147,21 +147,35 @@ export const ago = (iso: string | null, now = Date.now()) => {
   return `${Math.floor(s / 86_400)} d ago`
 }
 
-// ------------------------------------------------------------------ one symbol, across a group
+// ------------------------------------------------------------------ what a group holds
 //
-// The Cockpit looks at one contract at a time, and its Flatten buttons act on
-// exactly that. So what "the group's MNQZ5 positions" means is decided in one
-// place, here, and the page and the server both ask it: what the trader sees
-// counted is what gets closed, and nothing else.
+// Flatten closes positions, so what it covers is decided in one place, here,
+// and the page and the server both ask it: what the trader sees counted is
+// what gets closed, and nothing else. Two scopes:
+//   groupScope   everything the group's accounts hold, in any symbol, the
+//                Leader's included — what Flatten All closes
+//   symbolScope  what they hold of one contract — what the Cockpit's table
+//                shows, and what a row's Flatten (or "this contract only") closes
 
-export type ScopeRow = {
-  accountId: number
-  leader: boolean
-  follower: FollowerView | null
+export type AccountScope = { accountId: number; leader: boolean; follower: FollowerView | null; positions: PositionView[] }
+export type ScopeRow = AccountScope & {
   // the contract as this account's own broker names it (a follower may be mapped: NQ -> MNQ, XAUUSD.m -> XAUUSDm)
   symbol: string
   via: "mapping" | "auto" | "same"
-  positions: PositionView[]
+}
+
+// a live position is the account's, whoever opened it; a simulated one exists only inside its group
+const heldBy = (group: GroupView, positions: PositionView[], accountId: number) => positions.filter((p) => p.accountId === accountId && (p.simulated ? p.groupId === group.id : true))
+
+export function groupScope(group: GroupView, positions: PositionView[]): AccountScope[] {
+  return [{ accountId: group.leaderAccountId, leader: true, follower: null, positions: heldBy(group, positions, group.leaderAccountId) }, ...group.followers.map((f) => ({ accountId: f.accountId, leader: false, follower: f, positions: heldBy(group, positions, f.accountId) }))]
+}
+
+// "XAUUSD.m x3, US100.std x3": what a set of positions is made of
+export function symbolCounts(positions: PositionView[]): string {
+  const counts = new Map<string, number>()
+  for (const p of positions) counts.set(p.symbol, (counts.get(p.symbol) ?? 0) + 1)
+  return [...counts].map(([symbol, n]) => (n > 1 ? `${symbol} ×${n}` : symbol)).join(", ")
 }
 
 export function symbolScope(group: GroupView, accounts: AccountView[], positions: PositionView[], contract: string): ScopeRow[] {
@@ -174,8 +188,7 @@ export function symbolScope(group: GroupView, accounts: AccountView[], positions
       follower,
       symbol: own.symbol,
       via: own.via,
-      // a live position is the account's, whoever opened it; a simulated one exists only inside its group
-      positions: positions.filter((p) => p.accountId === accountId && sameInstrument(p.symbol, own.symbol) && (p.simulated ? p.groupId === group.id : true)),
+      positions: heldBy(group, positions, accountId).filter((p) => sameInstrument(p.symbol, own.symbol)),
     }
   }
   return [row(group.leaderAccountId, null), ...group.followers.map((f) => row(f.accountId, f))]
