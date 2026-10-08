@@ -151,6 +151,7 @@ export const pnlCards = pgTable(
     userId: text("userId").notNull(),
     token: text("token").notNull(),
     layout: text("layout").notNull().default("desktop"), // desktop | mobile | pnl-only
+    design: text("design").notNull().default("card"), // card | certificate (the dashboard's P&L certificate)
     visibility: jsonb("visibility").$type<PnlCardVisibility>().notNull(),
     privacy: text("privacy").notNull().default("private"), // private | public
     scope: jsonb("scope").$type<Record<string, unknown>>().notNull(),

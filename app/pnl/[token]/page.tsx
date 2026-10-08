@@ -4,7 +4,7 @@ import { headers } from "next/headers"
 import { Lock, SearchX } from "lucide-react"
 import { auth } from "@/lib/auth"
 import { APP_URL, siteHref } from "@/lib/urls"
-import { sharePath } from "@/lib/pnl-cards/model"
+import { DESIGN_WORDS, sharePath } from "@/lib/pnl-cards/model"
 import { readSharedCard } from "@/lib/pnl-cards/server"
 import { BrandMark } from "@/components/brand-mark"
 import { SharedPnlCard } from "@/components/pnl-cards/shared"
@@ -72,11 +72,11 @@ export default async function SharedPnlCardPage({ params }: { params: Promise<{ 
   const base = APP_URL || `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host") ?? ""}`
   return (
     <Shell>
-      <p className="mb-4 text-center text-xs font-medium tracking-wide text-muted-foreground uppercase">Shared PNL card</p>
+      <p className="mb-4 text-center text-xs font-medium tracking-wide text-muted-foreground uppercase">{DESIGN_WORDS[found.card.design].shared}</p>
       <div className="w-full">
         <SharedPnlCard card={found.card} url={`${base}${sharePath(found.card.token)}`} />
       </div>
-      {found.own && <p className="mt-5 max-w-md text-center text-xs text-muted-foreground">This is your card, as anyone you share it with sees it. What is switched off in the editor is not on it.</p>}
+      {found.own && <p className="mt-5 max-w-md text-center text-xs text-muted-foreground">This is your {DESIGN_WORDS[found.card.design].noun}, as anyone you share it with sees it. What is switched off in the editor is not on it.</p>}
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Made with{" "}
         <Link href={siteHref("/")} className="font-medium text-primary hover:underline">

@@ -1,62 +1,17 @@
 "use server"
 
-import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { trades, tradingAccounts, dailyPnlShares, user } from "@/lib/db/schema"
-import { and, eq, isNull } from "drizzle-orm"
-import { headers } from "next/headers"
-import { randomBytes } from "node:crypto"
+import { eq } from "drizzle-orm"
 import { computeAccountPnlInRange } from "@/lib/daily-account-pnl"
 import { resolvePnlPeriod, type PnlPeriod } from "@/lib/pnl-period"
 import { isPro } from "@/lib/subscription"
 import { getLocale } from "@/lib/i18n/server"
 import { intlLocale } from "@/lib/i18n"
 
-async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) throw new Error("Unauthorized")
-  return session.user.id
-}
-
-// Turns on (or rotates) the public link for a trading day — either one
-// specific account, or every account combined when accountId is null. One
-// row per (user, account, date); re-sharing the same day just refreshes the
-// token instead of piling up rows.
-export async function shareDailyPnl(accountId: number | null, date: string, period: PnlPeriod = "daily"): Promise<string> {
-  const userId = await getUserId()
-  if (accountId != null) {
-    const [account] = await db
-      .select({ id: tradingAccounts.id })
-      .from(tradingAccounts)
-      .where(and(eq(tradingAccounts.id, accountId), eq(tradingAccounts.userId, userId)))
-    if (!account) throw new Error("Account not found")
-  }
-
-  // Store the period's first day, so a weekly link stays pinned to that week
-  // however long after it's opened.
-  const { start } = resolvePnlPeriod(period, date)
-
-  const token = randomBytes(12).toString("hex")
-  const accountMatch = accountId != null ? eq(dailyPnlShares.accountId, accountId) : isNull(dailyPnlShares.accountId)
-  const [existing] = await db
-    .select({ id: dailyPnlShares.id })
-    .from(dailyPnlShares)
-    .where(
-      and(
-        eq(dailyPnlShares.userId, userId),
-        accountMatch,
-        eq(dailyPnlShares.date, start),
-        eq(dailyPnlShares.period, period)
-      )
-    )
-
-  if (existing) {
-    await db.update(dailyPnlShares).set({ token }).where(eq(dailyPnlShares.id, existing.id))
-  } else {
-    await db.insert(dailyPnlShares).values({ userId, accountId, date: start, period, token })
-  }
-  return token
-}
+// The links of the P&L certificates shared before certificates became PNL Cards
+// (lib/pnl-cards): none is made here any more, and the ones already out there
+// are still read below.
 
 export interface BrokerBreakdown {
   broker: string

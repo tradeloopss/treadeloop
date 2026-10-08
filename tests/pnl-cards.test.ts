@@ -2,15 +2,19 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   DEFAULT_VISIBILITY,
+  PERIOD_PNL,
   VISIBILITY_FIELDS,
   accountLabel,
   cardFileName,
   cardStats,
   cardSubtitle,
+  certificateRows,
+  cleanDesign,
   cleanLayout,
   cleanPeriod,
   cleanPrivacy,
   cleanVisibility,
+  defaultVisibility,
   effectiveVisibility,
   layoutSupports,
   publicCard,
@@ -18,6 +22,7 @@ import {
   resolveCardPeriod,
   xShareUrl,
   type PnlCardData,
+  type PnlCardLayout,
   type PnlCardVisibility,
   type VisibilityKey,
 } from "@/lib/pnl-cards/model"
@@ -111,7 +116,51 @@ test("what anyone else is given is the card already taken apart: nothing hidden 
   for (const hidden of ["103420", "50000", "•••4821", "4230", "Alex Carter", "alex.png", "68.4", "1284", "-420", "Oct 5"]) assert.equal(sent.includes(hidden), false, hidden)
   assert.deepEqual([shared.data.profit, shared.visibility.qrCode, shared.visibility.balance], [8420.5, true, false])
   // only the card: no id of the card, the trader or an account
-  assert.deepEqual(Object.keys(shared).sort(), ["data", "layout", "token", "visibility"])
+  assert.deepEqual(Object.keys(shared).sort(), ["data", "design", "layout", "token", "visibility"])
+  // and a card that never said which broker an account is with does not start to by being shared
+  assert.deepEqual(publicCard({ token: "tok", layout: "desktop", visibility: ALL_ON, data: card }).data.accounts[0], { label: "MT5 •••4821", balance: 50000, pnl: 4230 })
+})
+
+test("a certificate is the same card in its own look: its own defaults, and its brokers go where the account names go", () => {
+  assert.deepEqual([cleanDesign("certificate"), cleanDesign("card"), cleanDesign("poster"), cleanDesign(undefined)], ["certificate", "card", "card", "card"])
+  // what the certificate has always shown: the P&L, who made it (photo and all), the period, where it came from. Not the balance.
+  const d = defaultVisibility("certificate")
+  assert.deepEqual([d.profit, d.balance, d.traderName, d.traderPhoto, d.tradingPeriod, d.totalAccounts, d.accountNames, d.accountPnl, d.qrCode, d.date, d.winRate, d.bestTrade], [true, false, true, true, true, true, true, true, true, true, false, false])
+  assert.deepEqual(defaultVisibility("card"), DEFAULT_VISIBILITY)
+  // each card its own switches: changing one card's does not change the next one's
+  defaultVisibility("certificate").balance = true
+  assert.equal(defaultVisibility("certificate").balance, false)
+
+  const cert: PnlCardData = { ...card, accounts: [{ label: "MT5 •••4821", balance: 50000, pnl: 4230, broker: "Exness" }, { label: "Rithmic •••5485", balance: 18000, pnl: 1280, broker: "Apex Trader Funding" }] }
+  const text = (v: PnlCardVisibility, layout: PnlCardLayout = "mobile") => JSON.stringify(redactCard(cert, v, layout))
+  for (const broker of ["Exness", "Apex Trader Funding"]) {
+    assert.equal(text(ALL_ON).includes(broker), true, `${broker} is on the certificate`)
+    assert.equal(text(without("accountNames")).includes(broker), false, `names off: ${broker} is not`)
+    assert.equal(text(ALL_ON, "pnl-only").includes(broker), false, `PNL only: ${broker} is not`)
+    assert.equal(JSON.stringify(publicCard({ token: "tok", design: "certificate", layout: "desktop", visibility: without("accountNames"), data: cert })).includes(broker), false)
+  }
+  assert.deepEqual([publicCard({ token: "tok", design: "certificate", layout: "mobile", visibility: ALL_ON, data: cert }).design, publicCard({ token: "tok", layout: "mobile", visibility: ALL_ON, data: cert }).design], ["certificate", "card"])
+  assert.deepEqual([PERIOD_PNL.today, PERIOD_PNL.week.label, PERIOD_PNL.month.kind, PERIOD_PNL.all.label], [{ kind: "Daily", label: "Daily P&L" }, "Weekly P&L", "Monthly", "All-time P&L"])
+  assert.equal(cardFileName("2026-10-08T14:00:00.000Z", "certificate"), "tradeloop-pnl-certificate-2026-10-08.png")
+})
+
+test("a certificate says where the result came from: broker by broker, the one account, or counted off when names are hidden", () => {
+  const a = (label: string | null, pnl: number | null, broker?: string | null) => ({ label, balance: null, pnl, ...(broker !== undefined ? { broker } : {}) })
+  // several accounts: one row a broker, the accounts of each added up, the best first; no broker is "Other"
+  assert.deepEqual(certificateRows([a("MT5 •••0001", 100.1, "Exness"), a("MT5 •••0002", -40, "FTMO"), a("MT5 •••0003", 200.2, " Exness "), a("Manual", 5, null)]), [
+    { name: "Exness", broker: "Exness", pnl: 300.3 },
+    { name: "Other", broker: null, pnl: 5 },
+    { name: "FTMO", broker: "FTMO", pnl: -40 },
+  ])
+  // one account: that account, by its masked name, with its broker's mark
+  assert.deepEqual(certificateRows([a("MT5 •••4821", 4230, "Exness")]), [{ name: "MT5 •••4821", broker: "Exness", pnl: 4230 }])
+  assert.deepEqual(certificateRows([a("Swing account", -12, null)]), [{ name: "Swing account", broker: null, pnl: -12 }])
+  // names switched off (the label and the broker both gone): nothing names them
+  const hidden = redactCard({ ...card, accounts: [a("MT5 •••0001", 100, "Exness"), a("MT5 •••0002", -40, "FTMO")] }, without("accountNames"), "mobile").accounts
+  assert.deepEqual(certificateRows(hidden), [{ name: "Account 1", broker: null, pnl: 100 }, { name: "Account 2", broker: null, pnl: -40 }])
+  // the P&L of each switched off: who, without how much
+  assert.deepEqual(certificateRows(redactCard({ ...card, accounts: [a("MT5 •••0001", 100, "Exness"), a("MT5 •••0002", -40, "Exness")] }, without("accountPnl"), "mobile").accounts), [{ name: "Exness", broker: "Exness", pnl: null }])
+  assert.deepEqual(certificateRows([]), [])
 })
 
 test("an account is named by its platform and its last four digits, never its number", () => {

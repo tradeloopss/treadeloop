@@ -25,6 +25,17 @@ export const LAYOUT_INFO: Record<PnlCardLayout, { label: string; description: st
   "pnl-only": { label: "PNL only", description: "Wide minimal card focused on your total profit." },
 }
 
+// Two looks, one card. "card" is the PNL Card made from Copy Trading; "certificate"
+// is the dashboard's P&L certificate, in the gold design it has always had. The
+// layouts, the switches, the link and the rule about what is switched off are the same.
+export const PNL_DESIGNS = ["card", "certificate"] as const
+export type PnlCardDesign = (typeof PNL_DESIGNS)[number]
+export const cleanDesign = (raw: unknown): PnlCardDesign => (raw === "certificate" ? "certificate" : "card")
+export const DESIGN_WORDS: Record<PnlCardDesign, { eyebrow: string; noun: string; title: string; share: string; shared: string; file: string }> = {
+  card: { eyebrow: "PNL Cards", noun: "card", title: "Card", share: "Share PNL Card", shared: "Shared PNL card", file: "card" },
+  certificate: { eyebrow: "P&L Certificate", noun: "certificate", title: "Certificate", share: "Share P&L Certificate", shared: "Shared P&L certificate", file: "certificate" },
+}
+
 export type PnlCardVisibility = {
   profit: boolean
   balance: boolean
@@ -64,6 +75,11 @@ export const DEFAULT_VISIBILITY: PnlCardVisibility = {
   worstTrade: false,
 }
 
+// A new certificate looks as the certificate always has: who made it, with their photo, the period,
+// the P&L, and where it came from. Balance and the trade figures are there to be switched on.
+const CERTIFICATE_VISIBILITY: PnlCardVisibility = { ...DEFAULT_VISIBILITY, balance: false, traderPhoto: true, tradingPeriod: true }
+export const defaultVisibility = (design: PnlCardDesign): PnlCardVisibility => ({ ...(design === "certificate" ? CERTIFICATE_VISIBILITY : DEFAULT_VISIBILITY) })
+
 // In the order the editor lists them, two to a row.
 export const VISIBILITY_FIELDS: { key: VisibilityKey; label: string }[] = [
   { key: "profit", label: "Profit" },
@@ -94,7 +110,32 @@ export const PERIODS = ["today", "week", "month", "all"] as const
 export type PnlPeriodKey = (typeof PERIODS)[number]
 export const PERIOD_LABELS: Record<PnlPeriodKey, string> = { today: "Today", week: "This week", month: "This month", all: "All time" }
 
-export type PnlCardAccount = { label: string | null; balance: number | null; pnl: number | null }
+// `broker`: the account's broker, for the certificate, which says where a result came from broker by
+// broker. Not kept on a card that does not show it.
+export type PnlCardAccount = { label: string | null; balance: number | null; pnl: number | null; broker?: string | null }
+// What a period's P&L is called on a certificate.
+export const PERIOD_PNL: Record<PnlPeriodKey, { kind: string; label: string }> = {
+  today: { kind: "Daily", label: "Daily P&L" },
+  week: { kind: "Weekly", label: "Weekly P&L" },
+  month: { kind: "Monthly", label: "Monthly P&L" },
+  all: { kind: "All time", label: "All-time P&L" },
+}
+// Where a certificate's result came from, as it lists it. Across several accounts it is said broker by
+// broker, as the certificate always has; for one account, that account. With names switched off there
+// is nothing to tell the accounts apart by, and they are counted off instead.
+export type CertificateRow = { name: string; broker: string | null; pnl: number | null }
+export function certificateRows(accounts: PnlCardAccount[]): CertificateRow[] {
+  if (!accounts.some((a) => a.label != null || a.broker)) return accounts.map((a, i) => ({ name: `Account ${i + 1}`, broker: null, pnl: a.pnl }))
+  if (accounts.length === 1) return accounts.map((a) => ({ name: a.label ?? a.broker ?? "Account", broker: a.broker ?? null, pnl: a.pnl }))
+  const brokers = new Map<string, CertificateRow>()
+  for (const a of accounts) {
+    const broker = a.broker?.trim() || null
+    const row = brokers.get(broker ?? "") ?? { name: broker ?? "Other", broker, pnl: null }
+    if (a.pnl != null) row.pnl = Math.round(((row.pnl ?? 0) + a.pnl) * 100) / 100
+    brokers.set(broker ?? "", row)
+  }
+  return [...brokers.values()].sort((x, y) => (y.pnl ?? 0) - (x.pnl ?? 0))
+}
 // Everything on a card. A field that is null is not on it.
 export type PnlCardData = {
   scopeLabel: string
@@ -140,7 +181,7 @@ export function redactCard(data: PnlCardData, visibility: PnlCardVisibility, lay
     curve: v.profit ? data.curve : null,
     balance: v.balance ? data.balance : null,
     accountCount: v.totalAccounts ? data.accountCount : null,
-    accounts: table && layout !== "pnl-only" ? data.accounts.map((a) => ({ label: v.accountNames ? a.label : null, balance: v.balance ? a.balance : null, pnl: v.accountPnl ? a.pnl : null })) : [],
+    accounts: table && layout !== "pnl-only" ? data.accounts.map((a) => ({ label: v.accountNames ? a.label : null, balance: v.balance ? a.balance : null, pnl: v.accountPnl ? a.pnl : null, ...(a.broker !== undefined ? { broker: v.accountNames ? a.broker : null } : {}) })) : [],
     trader: { name: v.traderName ? data.trader.name : null, image: v.traderPhoto ? data.trader.image : null, pro: v.traderName && data.trader.pro },
     period: v.tradingPeriod ? data.period : null,
     stats: {
@@ -227,18 +268,18 @@ export function xShareUrl(card: { data: PnlCardData; visibility: PnlCardVisibili
   const text = shown.profit != null ? `My TradeLoop trading results:\n${signedMoney(shown.profit, shown.currency)} PNL` : "My TradeLoop trading results"
   return `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`
 }
-export const cardFileName = (iso: string | null) => `tradeloop-pnl-card-${(iso ?? new Date().toISOString()).slice(0, 10)}.png`
+export const cardFileName = (iso: string | null, design: PnlCardDesign = "card") => `tradeloop-pnl-${DESIGN_WORDS[design].file}-${(iso ?? new Date().toISOString()).slice(0, 10)}.png`
 
 // ------------------------------------------------------------------ what the pages are given
 
 // The owner's card, with everything on it: what they edit.
-export type PnlCardView = { id: number; token: string; layout: PnlCardLayout; visibility: PnlCardVisibility; privacy: PnlCardPrivacy; data: PnlCardData; createdAt: string; updatedAt: string }
+export type PnlCardView = { id: number; token: string; design: PnlCardDesign; layout: PnlCardLayout; visibility: PnlCardVisibility; privacy: PnlCardPrivacy; data: PnlCardData; createdAt: string; updatedAt: string }
 // A card in the owner's list.
 export type PnlCardSummary = { id: number; token: string; layout: PnlCardLayout; privacy: PnlCardPrivacy; scopeLabel: string; createdAt: string }
 // A card as anyone else is given it: already redacted, and with nothing that says whose it is beyond what is on it.
-export type PublicPnlCard = { token: string; layout: PnlCardLayout; visibility: PnlCardVisibility; data: PnlCardData }
-export function publicCard(card: { token: string; layout: PnlCardLayout; visibility: PnlCardVisibility; data: PnlCardData }): PublicPnlCard {
-  return { token: card.token, layout: card.layout, visibility: effectiveVisibility(card.visibility, card.layout), data: redactCard(card.data, card.visibility, card.layout) }
+export type PublicPnlCard = { token: string; design: PnlCardDesign; layout: PnlCardLayout; visibility: PnlCardVisibility; data: PnlCardData }
+export function publicCard(card: { token: string; design?: PnlCardDesign; layout: PnlCardLayout; visibility: PnlCardVisibility; data: PnlCardData }): PublicPnlCard {
+  return { token: card.token, design: card.design ?? "card", layout: card.layout, visibility: effectiveVisibility(card.visibility, card.layout), data: redactCard(card.data, card.visibility, card.layout) }
 }
 
 // Which accounts a card is of. The server works the accounts out from it: none of this is trusted as it comes.

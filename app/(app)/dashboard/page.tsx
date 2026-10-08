@@ -6,13 +6,10 @@ import { getJournalEntries } from "@/app/actions/journal"
 import { getPlaybooks } from "@/app/actions/playbooks"
 import { getRecentSyncEvents } from "@/app/actions/sync-events"
 import { AutoSyncBanner } from "@/components/auto-sync-banner"
-import { isPro, getUserPlan } from "@/lib/subscription"
+import { getUserPlan } from "@/lib/subscription"
 import { analyze, formatCurrency, tradingSession, type TradeStat } from "@/lib/calc"
 import { computeDayPnl, tradeDate } from "@/lib/day-pnl"
-import { computeDailyAccountPnl, computeAccountPnlInRange } from "@/lib/daily-account-pnl"
 import { resolveTimeZone, localDay } from "@/lib/timezone"
-import { resolvePnlPeriod } from "@/lib/pnl-period"
-import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
 import { DashboardHeaderActions } from "@/components/dashboard-header-actions"
 import { ConnectFirstAccountDialog } from "@/components/onboarding/connect-first-account-dialog"
 import { CurrentWeekCalendar } from "@/components/current-week-calendar"
@@ -49,12 +46,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const h = await headers()
   const tz = resolveTimeZone(h)
   const session = await auth.api.getSession({ headers: h })
-  const [rows, accounts, activeAccountIds, journalEntries, pro, syncEvents, templates, template, plan, dropTeaser] = await Promise.all([
+  const [rows, accounts, activeAccountIds, journalEntries, syncEvents, templates, template, plan, dropTeaser] = await Promise.all([
     getTrades(),
     getAccounts(),
     getActiveAccountIds(),
     getJournalEntries(),
-    session?.user ? isPro(session.user.id) : Promise.resolve(false),
     getRecentSyncEvents(),
     getTemplates(),
     getActiveTemplate(),
@@ -62,67 +58,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     session?.user ? getDropTeaser(session.user.id) : Promise.resolve(null),
   ])
   const dayPnlByDay = computeDayPnl(rows, journalEntries, tz)
-
-  const today = localDay(new Date(), tz)
-  const dailyByAccount = computeDailyAccountPnl(rows, today, tz)
-  const dailyAccountRows = accounts.map((acc) => {
-    const day = dailyByAccount.get(acc.id)
-    return {
-      id: acc.id,
-      name: acc.name,
-      currency: acc.currency,
-      startingBalance: Number(acc.startingBalance),
-      pnl: day?.pnl ?? 0,
-      trades: day?.trades ?? 0,
-      wins: day?.wins ?? 0,
-      losses: day?.losses ?? 0,
-    }
-  })
-
-  const allAccountsBreakdown: BrokerBreakdown[] = (() => {
-    const map = new Map<string, BrokerBreakdown>()
-    for (const acc of accounts) {
-      const day = dailyByAccount.get(acc.id)
-      const key = acc.broker?.trim() || "Other"
-      const existing = map.get(key) ?? { broker: key, pnl: 0, accounts: 0 }
-      existing.pnl += day?.pnl ?? 0
-      existing.accounts += 1
-      map.set(key, existing)
-    }
-    return [...map.values()].sort((x, y) => y.pnl - x.pnl)
-  })()
-  const allAccountsPnl = dailyAccountRows.reduce((sum, r) => sum + r.pnl, 0)
-
-  // Same shapes over the current Monday–Sunday week, so the certificate's
-  // "Weekly" option has real numbers rather than reusing today's.
-  const week = resolvePnlPeriod("weekly", today)
-  const weeklyByAccount = computeAccountPnlInRange(rows, week.start, week.end, tz)
-  const weeklyAccountRows = accounts.map((acc) => {
-    const period = weeklyByAccount.get(acc.id)
-    return {
-      id: acc.id,
-      name: acc.name,
-      currency: acc.currency,
-      startingBalance: Number(acc.startingBalance),
-      pnl: period?.pnl ?? 0,
-      trades: period?.trades ?? 0,
-      wins: period?.wins ?? 0,
-      losses: period?.losses ?? 0,
-    }
-  })
-  const weeklyBreakdown: BrokerBreakdown[] = (() => {
-    const map = new Map<string, BrokerBreakdown>()
-    for (const acc of accounts) {
-      const period = weeklyByAccount.get(acc.id)
-      const key = acc.broker?.trim() || "Other"
-      const existing = map.get(key) ?? { broker: key, pnl: 0, accounts: 0 }
-      existing.pnl += period?.pnl ?? 0
-      existing.accounts += 1
-      map.set(key, existing)
-    }
-    return [...map.values()].sort((x, y) => y.pnl - x.pnl)
-  })()
-  const weeklyPnl = weeklyAccountRows.reduce((sum, r) => sum + r.pnl, 0)
 
   const reportTrades: ReportTrade[] = rows.map((t) => ({
     symbol: t.symbol,
@@ -396,26 +331,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               activeAccountIds,
             }}
             template={{ templates, active: template }}
-            certificate={{
-              accounts: dailyAccountRows,
-              weeklyAccounts: weeklyAccountRows,
-              allAccounts: {
-                pnl: allAccountsPnl,
-                breakdown: allAccountsBreakdown,
-                currency: accounts[0]?.currency ?? "USD",
-                accountCount: accounts.length,
-              },
-              allAccountsWeekly: {
-                pnl: weeklyPnl,
-                breakdown: weeklyBreakdown,
-                currency: accounts[0]?.currency ?? "USD",
-                accountCount: accounts.length,
-              },
-              date: today,
-              traderName: session?.user.name ?? t("Trader"),
-              traderImage: session?.user.image,
-              isPro: pro,
-            }}
+            certificate={{ accounts: accounts.map((a) => ({ id: a.id, name: a.name })) }}
           />
         }
       />

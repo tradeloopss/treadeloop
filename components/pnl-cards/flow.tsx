@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { FitToWidth } from "@/components/fit-to-width"
 import {
+  DESIGN_WORDS,
   LAYOUT_INFO,
   PERIODS,
   PERIOD_LABELS,
@@ -20,6 +21,7 @@ import {
   layoutSupports,
   sharePath,
   xShareUrl,
+  type PnlCardDesign,
   type PnlCardLayout,
   type PnlCardPrivacy,
   type PnlCardScope,
@@ -29,7 +31,7 @@ import {
   type PnlPeriodKey,
   type VisibilityKey,
 } from "@/lib/pnl-cards/model"
-import { CARD_WIDTH, PnlCard } from "./card"
+import { PnlCard, cardWidth } from "./card"
 
 // PNL Cards, start to finish: pick a layout, the card is made (a snapshot of
 // the figures as they stand), then share it or shape the image. Opened by
@@ -46,19 +48,23 @@ const eyebrow = "text-[11px] font-semibold tracking-[0.12em] text-muted-foregrou
 const LAYOUT_ICON: Record<PnlCardLayout, typeof Monitor> = { desktop: Monitor, mobile: Smartphone, "pnl-only": RectangleHorizontal }
 const shareUrlOf = (token: string) => `${typeof window === "undefined" ? "" : window.location.origin}${sharePath(token)}`
 
-export function PnlCardFlow({ scope, onClose }: { scope: PnlCardScope; onClose: () => void }) {
+// `design`: which look the card has, the PNL Card or the dashboard's P&L certificate. `accounts`: when
+// the page that opens this has several accounts to choose from, the trader picks which the card is of
+// (all of them, or one); otherwise it is of `scope`.
+export function PnlCardFlow({ scope, design = "card", accounts, onClose }: { scope: PnlCardScope; design?: PnlCardDesign; accounts?: { id: number; name: string }[]; onClose: () => void }) {
   const [card, setCard] = useState<PnlCardView | null>(null)
   if (card) return <ShareDialog card={card} onClose={onClose} onBack={() => setCard(null)} />
-  return <LayoutDialog scope={scope} onClose={onClose} onCard={setCard} />
+  return <LayoutDialog scope={scope} design={design} accounts={accounts} onClose={onClose} onCard={setCard} />
 }
 
 // ------------------------------------------------------------------ 1. pick a card layout
 
 // What each layout is, drawn small: a shape to choose by, not a card with figures on it.
-function LayoutThumb({ layout }: { layout: PnlCardLayout }) {
-  const bar = "rounded-full bg-white/80"
+function LayoutThumb({ layout, design }: { layout: PnlCardLayout; design: PnlCardDesign }) {
+  const gold = design === "certificate"
+  const bar = cn("rounded-full", gold ? "bg-amber-400" : "bg-white/80")
   const dim = "rounded-full bg-white/30"
-  const base = "relative overflow-hidden rounded-lg bg-gradient-to-br from-[#131038] to-[#3327a8] shadow-md"
+  const base = cn("relative overflow-hidden rounded-lg shadow-md", gold ? "bg-gradient-to-br from-[#1c150b] to-[#070604] ring-1 ring-amber-400/40" : "bg-gradient-to-br from-[#131038] to-[#3327a8]")
   if (layout === "mobile")
     return (
       <div className={cn(base, "h-24 w-14 p-2")} aria-hidden>
@@ -97,65 +103,70 @@ function LayoutThumb({ layout }: { layout: PnlCardLayout }) {
   )
 }
 
-function LayoutDialog({ scope, onClose, onCard }: { scope: PnlCardScope; onClose: () => void; onCard: (card: PnlCardView) => void }) {
-  const [layout, setLayout] = useState<PnlCardLayout>("desktop")
+function LayoutDialog({ scope, design, accounts, onClose, onCard }: { scope: PnlCardScope; design: PnlCardDesign; accounts?: { id: number; name: string }[]; onClose: () => void; onCard: (card: PnlCardView) => void }) {
+  const words = DESIGN_WORDS[design]
+  // which accounts the card is of, where there is a choice: "all", or one account's id
+  const [of, setOf] = useState<string>("all")
+  const [layout, setLayout] = useState<PnlCardLayout>(design === "certificate" ? "mobile" : "desktop")
   const [period, setPeriod] = useState<PnlPeriodKey>("today")
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState<PnlCardSummary[] | null>(null)
   const [working, setWorking] = useState<number | null>(null)
   useEffect(() => {
     let stale = false
-    listPnlCards()
+    listPnlCards(design)
       .then((res) => !stale && setSaved(res.ok ? res.cards : []))
       .catch(() => !stale && setSaved([]))
     return () => {
       stale = true
     }
-  }, [])
+  }, [design])
 
   const create = async () => {
     if (busy) return
     setBusy(true)
-    const res = await createPnlCard({ scope, period, layout }).catch(() => null)
+    const chosen: PnlCardScope = accounts?.length && of !== "all" ? { kind: "accounts", accountIds: [Number(of)] } : scope
+    const res = await createPnlCard({ scope: chosen, period, layout, design }).catch(() => null)
     setBusy(false)
-    if (!res?.ok) return void toast.error(res?.error ?? "Unable to create PNL card. Please try again.")
-    toast.success("PNL card created")
+    if (!res?.ok) return void toast.error(res?.error ?? `Unable to create the ${words.noun}. Please try again.`)
+    toast.success(design === "certificate" ? "Certificate created" : "PNL card created")
     onCard(res.card)
   }
   const open = async (id: number) => {
     setWorking(id)
     const res = await openPnlCard(id).catch(() => null)
     setWorking(null)
-    if (!res?.ok) return void toast.error(res?.error ?? "Unable to open the card. Please try again.")
+    if (!res?.ok) return void toast.error(res?.error ?? `Unable to open the ${words.noun}. Please try again.`)
     onCard(res.card)
   }
   const remove = async (id: number) => {
     setWorking(id)
     const res = await deletePnlCard(id).catch(() => null)
     setWorking(null)
-    if (!res?.ok) return void toast.error(res?.error ?? "Unable to delete the card. Please try again.")
+    if (!res?.ok) return void toast.error(res?.error ?? `Unable to delete the ${words.noun}. Please try again.`)
     setSaved((list) => (list ?? []).filter((c) => c.id !== id))
-    toast.success("Card deleted. Its link no longer works.")
+    toast.success(`${words.title} deleted. Its link no longer works.`)
   }
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[94svh] gap-0 overflow-y-auto p-0 sm:max-w-2xl" showCloseButton={false}>
+      {/* one column that may be narrower than what is in it: a long saved name is cut short, it does not widen the dialog past a phone's screen */}
+      <DialogContent className="max-h-[94svh] grid-cols-[minmax(0,1fr)] gap-0 overflow-y-auto p-0 sm:max-w-2xl" showCloseButton={false}>
         <header className="relative overflow-hidden rounded-t-xl bg-gradient-to-br from-primary/25 via-primary/10 to-transparent px-5 pt-5 pb-5 sm:px-6">
           <button type="button" aria-label="Close" onClick={onClose} className="absolute end-3 top-3 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
             <XIcon className="size-4" aria-hidden />
           </button>
           <p className={cn(eyebrow, "flex items-center gap-2 text-primary")}>
-            <LayoutGrid className="size-3.5" aria-hidden /> PNL Cards
+            <LayoutGrid className="size-3.5" aria-hidden /> {words.eyebrow}
           </p>
-          <DialogTitle className="mt-1.5 text-xl font-bold tracking-tight">Pick a card layout</DialogTitle>
+          <DialogTitle className="mt-1.5 text-xl font-bold tracking-tight">Pick a {words.noun} layout</DialogTitle>
           <DialogDescription className="mt-1 max-w-md text-sm">Choose the format for this snapshot. You can create another one in a different layout any time.</DialogDescription>
         </header>
 
         <div className="space-y-5 px-5 py-5 sm:px-6">
           <div>
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-sm font-semibold">Card layouts</p>
+              <p className="text-sm font-semibold">{design === "certificate" ? "Certificate layouts" : "Card layouts"}</p>
               <p className="text-xs text-muted-foreground">Saved · shareable link</p>
             </div>
             <div role="radiogroup" aria-label="Card layout" className="mt-2.5 grid gap-3 sm:grid-cols-3">
@@ -174,7 +185,7 @@ function LayoutDialog({ scope, onClose, onCard }: { scope: PnlCardScope; onClose
                     )}
                   >
                     <span className="flex h-28 items-center justify-center rounded-lg bg-muted/50">
-                      <LayoutThumb layout={key} />
+                      <LayoutThumb layout={key} design={design} />
                     </span>
                     <span className="mt-3 flex items-center justify-between gap-2">
                       <span className="text-sm font-semibold">{LAYOUT_INFO[key].label}</span>
@@ -188,6 +199,23 @@ function LayoutDialog({ scope, onClose, onCard }: { scope: PnlCardScope; onClose
               })}
             </div>
           </div>
+
+          {accounts && accounts.length > 1 && (
+            <label className="block">
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="text-sm font-semibold">Accounts</span>
+                <span className="text-xs text-muted-foreground">Which the {words.noun} is of</span>
+              </span>
+              <select value={of} onChange={(e) => setOf(e.target.value)} className="mt-2.5 h-10 w-full rounded-lg border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                <option value="all">All accounts</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <div>
             <div className="flex items-baseline justify-between gap-3">
@@ -205,7 +233,7 @@ function LayoutDialog({ scope, onClose, onCard }: { scope: PnlCardScope; onClose
 
           {saved && saved.length > 0 && (
             <div>
-              <p className="text-sm font-semibold">Your cards</p>
+              <p className="text-sm font-semibold">{design === "certificate" ? "Your certificates" : "Your cards"}</p>
               <ul className="mt-2 divide-y rounded-xl border">
                 {saved.map((c) => {
                   const Icon = LAYOUT_ICON[c.layout]
@@ -223,7 +251,7 @@ function LayoutDialog({ scope, onClose, onCard }: { scope: PnlCardScope; onClose
                       <button type="button" disabled={working != null} className={cn(btn, "h-8 px-2.5 text-xs")} onClick={() => open(c.id)}>
                         {working === c.id ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : "Open"}
                       </button>
-                      <button type="button" disabled={working != null} aria-label="Delete this card" className={cn(btn, "h-8 w-8 px-0 text-[var(--loss)]")} onClick={() => remove(c.id)}>
+                      <button type="button" disabled={working != null} aria-label={`Delete this ${words.noun}`} className={cn(btn, "h-8 w-8 px-0 text-[var(--loss)]")} onClick={() => remove(c.id)}>
                         <Trash2 className="size-3.5" aria-hidden />
                       </button>
                     </li>
@@ -240,7 +268,7 @@ function LayoutDialog({ scope, onClose, onCard }: { scope: PnlCardScope; onClose
           </button>
           <button type="button" disabled={busy} className={cn(btnPrimary, "h-10")} onClick={create}>
             {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
-            {busy ? "Creating…" : "Create card"}
+            {busy ? "Creating…" : `Create ${words.noun}`}
           </button>
         </footer>
       </DialogContent>
@@ -265,6 +293,8 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
   const [downloading, setDownloading] = useState(false)
   const [big, setBig] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
+  const words = DESIGN_WORDS[card.design]
+  const width = cardWidth(card.design, card.layout)
   const url = shareUrlOf(card.token)
   const isPrivate = card.privacy === "private"
 
@@ -281,7 +311,7 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
     const res = await updatePnlCard(initial.id, patch).catch(() => null)
     if (!res?.ok) {
       setSaving("error")
-      toast.error(res?.error ?? "Unable to save the card. Please try again.")
+      toast.error(res?.error ?? `Unable to save the ${words.noun}. Please try again.`)
       return false
     }
     setSaving("saved")
@@ -302,17 +332,17 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url)
-      toast.success("Link copied", { description: isPrivate ? "Only you can open it while the card is private." : undefined })
+      toast.success("Link copied", { description: isPrivate ? `Only you can open it while the ${words.noun} is private.` : undefined })
     } catch {
       toast.error("Couldn't copy. Select the link and copy it by hand.")
     }
   }
   const shareOnX = async () => {
-    if (isPrivate) return void toast.error("This card is private.", { description: "Make it public before sharing." })
+    if (isPrivate) return void toast.error(`This ${words.noun} is private.`, { description: "Make it public before sharing." })
     // what is shared is what is saved: the link opens the card as the server has it
     if (!(await flush())) return
     window.open(xShareUrl(card, url), "_blank", "noopener,noreferrer")
-    toast.success("Card shared")
+    toast.success(`${words.title} shared`)
   }
   const download = async () => {
     if (!cardRef.current || downloading) return
@@ -321,25 +351,25 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
       // the card at its own size, three times over: sharp on a phone and on X
       const data = await toPng(cardRef.current, { pixelRatio: 3, cacheBust: true })
       const link = document.createElement("a")
-      link.download = cardFileName(card.data.exportedAt)
+      link.download = cardFileName(card.data.exportedAt, card.design)
       link.href = data
       link.click()
-      toast.success("Card downloaded")
+      toast.success(`${words.title} downloaded`)
     } catch {
-      toast.error("We couldn't generate your card image.", { description: "Please try again." })
+      toast.error(`We couldn't generate your ${words.noun} image.`, { description: "Please try again." })
     } finally {
       setDownloading(false)
     }
   }
 
-  const preview = <PnlCard data={card.data} layout={card.layout} visibility={card.visibility} shareUrl={url} />
+  const preview = <PnlCard design={card.design} data={card.data} layout={card.layout} visibility={card.visibility} shareUrl={url} />
   return (
     <>
       <Dialog open onOpenChange={(next) => !next && onClose()}>
         <DialogContent className="flex h-[100svh] max-h-[100svh] w-full max-w-full flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[94svh] sm:max-w-[min(68rem,calc(100%-2rem))] sm:rounded-xl" showCloseButton={false}>
           <header className="flex items-start gap-3 border-b px-4 py-3.5 sm:px-6">
             <div className="min-w-0 flex-1">
-              <DialogTitle className="text-lg font-bold tracking-tight">Share PNL Card</DialogTitle>
+              <DialogTitle className="text-lg font-bold tracking-tight">{words.share}</DialogTitle>
               <DialogDescription className="mt-0.5 truncate text-sm">{cardSubtitle(card.data)}</DialogDescription>
             </div>
             <span role="status" className="mt-1 hidden text-xs text-muted-foreground sm:block">
@@ -386,7 +416,7 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
             <div className="order-2 min-w-0 px-4 pt-4 sm:px-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:border-s lg:py-5">
               <p className={cn(eyebrow, "text-center")}>Preview</p>
               <div className="mt-2 rounded-2xl border bg-[radial-gradient(circle_at_1px_1px,var(--border)_1px,transparent_0)] p-4 [background-size:14px_14px] sm:p-6">
-                <FitToWidth width={CARD_WIDTH[card.layout]} className={card.layout === "mobile" ? "mx-auto max-w-[22rem]" : undefined}>
+                <FitToWidth width={width} className={card.layout === "mobile" ? "mx-auto max-w-[22rem]" : undefined}>
                   <div ref={cardRef}>{preview}</div>
                 </FitToWidth>
               </div>
@@ -409,30 +439,30 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
                     <div className="min-w-0">
                       <p className="flex items-center gap-1.5 text-sm font-semibold">
                         {isPrivate ? <Lock className="size-3.5 text-muted-foreground" aria-hidden /> : <Link2 className="size-3.5 text-primary" aria-hidden />}
-                        {isPrivate ? "Private card" : "Shared card"}
+                        {isPrivate ? `Private ${words.noun}` : `Shared ${words.noun}`}
                       </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{isPrivate ? "Only you can open the card. Switch on to share." : "Anyone with the link can open the card. Switch off to make it private again."}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{isPrivate ? `Only you can open the ${words.noun}. Switch on to share.` : `Anyone with the link can open the ${words.noun}. Switch off to make it private again.`}</p>
                     </div>
-                    <Switch checked={!isPrivate} label="Share this card with anyone who has the link" onChange={(on) => void change({ privacy: on ? "public" : "private" }, true).then((ok) => ok && toast.success(on ? "Card shared: anyone with the link can open it." : "Card is private again."))} />
+                    <Switch checked={!isPrivate} label={`Share this ${words.noun} with anyone who has the link`} onChange={(on) => void change({ privacy: on ? "public" : "private" }, true).then((ok) => ok && toast.success(on ? `${words.title} shared: anyone with the link can open it.` : `${words.title} is private again.`))} />
                   </div>
-                  <p className="text-xs text-muted-foreground">The figures are closed trades from your journal, as they stood when the card was made. Make a new card for newer figures.</p>
+                  <p className="text-xs text-muted-foreground">The figures are closed trades from your journal, as they stood when the {words.noun} was made. Make a new {words.noun} for newer figures.</p>
                 </div>
               ) : (
                 <div role="tabpanel" id="pnl-panel-image" aria-labelledby="pnl-tab-image">
                   <p className={eyebrow}>On the image</p>
-                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">Choose what information appears on the downloaded PNL card. Turning something off only hides it from the image. The card and trading data remain unchanged.</p>
+                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">Choose what information appears on the downloaded {card.design === "certificate" ? "certificate" : "PNL card"}. Turning something off only hides it from the image. The {words.noun} and trading data remain unchanged.</p>
                   <div className="mt-3 grid grid-cols-1 gap-x-4 rounded-xl border p-2 sm:grid-cols-2">
                     {VISIBILITY_FIELDS.map(({ key, label }) => {
                       const supported = layoutSupports(card.layout, key)
                       return (
-                        <label key={key} title={supported ? undefined : "Not on the PNL only card"} className={cn("flex h-10 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors", supported ? "cursor-pointer hover:bg-muted/60" : "cursor-not-allowed opacity-45")}>
+                        <label key={key} title={supported ? undefined : "Not on the PNL only layout"} className={cn("flex h-10 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors", supported ? "cursor-pointer hover:bg-muted/60" : "cursor-not-allowed opacity-45")}>
                           <Checkbox checked={supported && card.visibility[key]} disabled={!supported} onCheckedChange={() => supported && void toggle(key)} className="data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground" />
                           <span className="min-w-0 truncate font-medium">{label}</span>
                         </label>
                       )
                     })}
                   </div>
-                  {card.layout === "pnl-only" && <p className="mt-2 text-xs text-muted-foreground">The PNL only card has no room for accounts or trade figures: those are for the Desktop and Mobile cards.</p>}
+                  {card.layout === "pnl-only" && <p className="mt-2 text-xs text-muted-foreground">The PNL only layout has no room for accounts or trade figures: those are for the Desktop and Mobile layouts.</p>}
                 </div>
               )}
             </div>
@@ -440,10 +470,10 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
 
           <footer className="flex flex-wrap items-center gap-2 border-t bg-background px-4 py-3 sm:justify-end sm:px-6">
             <button type="button" className={cn(btn, "me-auto hidden sm:inline-flex")} onClick={onBack}>
-              New card
+              New {words.noun}
             </button>
             <button type="button" className={cn(btn, "flex-1 sm:flex-none")} onClick={() => setBig(true)}>
-              <Eye className="size-3.5" aria-hidden /> Preview card
+              <Eye className="size-3.5" aria-hidden /> Preview {words.noun}
             </button>
             <button type="button" className={cn(btn, "flex-1 sm:flex-none")} onClick={shareOnX}>
               <span aria-hidden className="text-[13px] font-bold">
@@ -453,7 +483,7 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
             </button>
             <button type="button" disabled={downloading} className={cn(btnPrimary, "w-full sm:w-auto")} onClick={download}>
               {downloading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Download className="size-4" aria-hidden />}
-              {downloading ? "Generating…" : "Download card"}
+              {downloading ? "Generating…" : `Download ${words.noun}`}
             </button>
           </footer>
         </DialogContent>
@@ -463,8 +493,8 @@ function ShareDialog({ card: initial, onClose, onBack }: { card: PnlCardView; on
       <Dialog open={big} onOpenChange={setBig}>
         <DialogContent className="max-h-[96svh] gap-3 overflow-y-auto sm:max-w-[min(56rem,calc(100%-2rem))]">
           <DialogTitle className="text-base font-semibold">Preview</DialogTitle>
-          <DialogDescription className="sr-only">The PNL card at full size</DialogDescription>
-          <FitToWidth width={CARD_WIDTH[card.layout]} className={card.layout === "mobile" ? "mx-auto max-w-[26rem]" : undefined}>
+          <DialogDescription className="sr-only">The {words.noun} at full size</DialogDescription>
+          <FitToWidth width={width} className={card.layout === "mobile" ? "mx-auto max-w-[26rem]" : undefined}>
             {preview}
           </FitToWidth>
           <div className="flex justify-end gap-2">

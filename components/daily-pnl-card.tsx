@@ -1,21 +1,19 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
 import { QRCodeSVG } from "qrcode.react"
-import { toPng } from "html-to-image"
-import { shareDailyPnl, type BrokerBreakdown } from "@/app/actions/daily-pnl-share"
+import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
 import type { PnlPeriod } from "@/lib/pnl-period"
 import { formatCurrency } from "@/lib/calc"
 import { chipColor, initials } from "@/lib/ui-chips"
 import { brokerLogo } from "@/lib/broker-logos"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { FitToWidth } from "@/components/fit-to-width"
-import { Copy, Download, Printer, Share2, TrendingUp, BadgeCheck, Loader2 } from "lucide-react"
+import { TrendingUp, BadgeCheck } from "lucide-react"
 import { ChevronGlow } from "@/components/chevron-glow"
-import { toast } from "sonner"
 import { useIntlLocale, useT } from "@/components/locale-provider"
+
+// A P&L certificate as it was shared before certificates became PNL Cards
+// (components/pnl-cards/certificate.tsx draws them now, in this same design).
+// Kept for the links already out there: /p/<token> still opens them.
 
 // The gold the certificates share — same family as the payout card.
 const GOLD = "#f0b429"
@@ -178,143 +176,5 @@ export function DailyPnlCard({
         )}
       </div>
     </div>
-  )
-}
-
-export function DailyPnlShareDialog({
-  accountId,
-  data,
-  traderName,
-  traderImage,
-  isPro,
-  open,
-  onOpenChange,
-}: {
-  accountId: number | null
-  data: DailyPnlCardData
-  traderName: string
-  traderImage?: string | null
-  isPro?: boolean
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const [token, setToken] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [downloading, setDownloading] = useState(false)
-  const [generatedAt] = useState(() => new Date())
-  const cardRef = useRef<HTMLDivElement>(null)
-  const t = useT()
-
-  useEffect(() => {
-    if (!open || token) return
-    setLoading(true)
-    shareDailyPnl(accountId, data.date, data.period)
-      .then(setToken)
-      .catch(() => toast.error(t("Could not create a share link")))
-      .finally(() => setLoading(false))
-    // Only fetch once per time the dialog opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-
-  const shareUrl = token && typeof window !== "undefined" ? `${window.location.origin}/p/${token}` : null
-  const label = data.scope === "all" ? t("all accounts") : (data.accountName ?? t("this account"))
-
-  function onCopyLink() {
-    if (!shareUrl) return
-    navigator.clipboard.writeText(shareUrl).then(
-      () => toast.success(t("Link copied")),
-      () => toast.error(t("Could not copy link")),
-    )
-  }
-
-  async function onDownload() {
-    if (!cardRef.current) return
-    setDownloading(true)
-    try {
-      const dataUrl = await toPng(cardRef.current, { pixelRatio: 2 })
-      const link = document.createElement("a")
-      link.download = `${label}-${data.period}-${data.date}-pnl.png`
-      link.href = dataUrl
-      link.click()
-    } catch {
-      toast.error(t("Could not generate image"))
-    } finally {
-      setDownloading(false)
-    }
-  }
-
-  function onPrint() {
-    window.print()
-  }
-
-  async function onShare() {
-    if (!shareUrl) return
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${data.period === "weekly" ? t("Weekly P&L") : t("Daily P&L")} — ${label}`,
-          url: shareUrl,
-        })
-      } catch {
-        // user cancelled — nothing to do
-      }
-    } else {
-      onCopyLink()
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{data.period === "weekly" ? t("Share this week’s P&L") : t("Share today’s P&L")}</DialogTitle>
-          <DialogDescription>
-            {t("Anyone with the link (or who scans the QR code) can view this card — no account needed.")}
-          </DialogDescription>
-        </DialogHeader>
-
-        <FitToWidth width={400} className="py-2">
-          <div ref={cardRef}>
-            <DailyPnlCard
-              data={data}
-              traderName={traderName}
-              traderImage={traderImage}
-              isPro={isPro}
-              shareUrl={shareUrl}
-              generatedAt={generatedAt}
-            />
-          </div>
-        </FitToWidth>
-
-        {loading && (
-          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> {t("Generating link…")}
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-2">
-          <Button type="button" variant="outline" onClick={onCopyLink} disabled={!shareUrl}>
-            <Copy className="size-4" /> {t("Copy link")}
-          </Button>
-          <Button type="button" variant="outline" onClick={onShare} disabled={!shareUrl}>
-            <Share2 className="size-4" /> {t("Share")}
-          </Button>
-          <Button type="button" variant="outline" onClick={onDownload} disabled={downloading}>
-            <Download className="size-4" /> {downloading ? t("Saving…") : t("Download PNG")}
-          </Button>
-          <Button type="button" variant="outline" onClick={onPrint}>
-            <Printer className="size-4" /> {t("Print")}
-          </Button>
-        </div>
-      </DialogContent>
-
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #daily-pnl-card, #daily-pnl-card * { visibility: visible; }
-          #daily-pnl-card { position: fixed; inset: 0; margin: auto; }
-        }
-      `}</style>
-    </Dialog>
   )
 }

@@ -5,16 +5,18 @@ import { copyGroupFollowers, copyGroups, metatraderConnections, pnlCards, provid
 import { isPro } from "@/lib/subscription"
 import { localDay } from "@/lib/timezone"
 import {
-  DEFAULT_VISIBILITY,
   accountLabel,
   cardStats,
+  cleanDesign,
   cleanLayout,
   cleanPeriod,
   cleanPrivacy,
   cleanVisibility,
+  defaultVisibility,
   publicCard,
   resolveCardPeriod,
   type PnlCardData,
+  type PnlCardDesign,
   type PnlCardLayout,
   type PnlCardScope,
   type PnlCardSummary,
@@ -45,13 +47,13 @@ const newToken = () => randomBytes(24).toString("base64url")
 const round = (n: number) => Math.round(n * 100) / 100
 const num = (v: string | number | null | undefined) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v))
 
-type Owned = { id: number; name: string; currency: string; startingBalance: string; currentBalance: string | null }
+type Owned = { id: number; name: string; broker: string | null; currency: string; startingBalance: string; currentBalance: string | null }
 
 // The accounts a card is of, and what the set is called. Only the asker's own, whatever was asked for.
 async function scopeAccounts(userId: string, scope: PnlCardScope): Promise<{ label: string; accounts: Owned[] }> {
   const own = (ids?: number[]) =>
     db
-      .select({ id: tradingAccounts.id, name: tradingAccounts.name, currency: tradingAccounts.currency, startingBalance: tradingAccounts.startingBalance, currentBalance: tradingAccounts.currentBalance })
+      .select({ id: tradingAccounts.id, name: tradingAccounts.name, broker: tradingAccounts.broker, currency: tradingAccounts.currency, startingBalance: tradingAccounts.startingBalance, currentBalance: tradingAccounts.currentBalance })
       .from(tradingAccounts)
       .where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false), ids ? inArray(tradingAccounts.id, ids) : undefined))
       .orderBy(tradingAccounts.id)
@@ -75,8 +77,9 @@ async function scopeAccounts(userId: string, scope: PnlCardScope): Promise<{ lab
   throw new Error("Choose which accounts the card is of.")
 }
 
-// Everything a card of these accounts would say, for this period, as of now.
-export async function buildCardData(userId: string, scope: PnlCardScope, periodKey: PnlPeriodKey, timeZone: string): Promise<PnlCardData> {
+// Everything a card of these accounts would say, for this period, as of now. A certificate says which
+// broker each result came from, as it always has; a card does not, and its figures carry no broker.
+export async function buildCardData(userId: string, scope: PnlCardScope, periodKey: PnlPeriodKey, timeZone: string, design: PnlCardDesign = "card"): Promise<PnlCardData> {
   const { label, accounts } = await scopeAccounts(userId, scope)
   if (!accounts.length) throw new Error("There is no account of your own here to make a card of.")
   const ids = accounts.map((a) => a.id)
@@ -113,6 +116,7 @@ export async function buildCardData(userId: string, scope: PnlCardScope, periodK
       label: accountLabel({ platform: m ? m.platform : r ? "rithmic" : p ? p.provider : null, login: m?.login ?? r?.login ?? null, name: a.name }),
       balance: num(m?.balance) ?? num(p?.balance) ?? num(a.currentBalance) ?? num(a.startingBalance),
       pnl: round(inPeriod.filter((t) => t.accountId === a.id).reduce((s, t) => s + t.pnl, 0)),
+      ...(design === "certificate" ? { broker: a.broker?.trim() || null } : {}),
     }
   })
   const balances = rows.map((r) => r.balance).filter((b): b is number => b != null)
@@ -132,7 +136,7 @@ export async function buildCardData(userId: string, scope: PnlCardScope, periodK
 }
 
 type Row = typeof pnlCards.$inferSelect
-const view = (c: Row): PnlCardView => ({ id: c.id, token: c.token, layout: cleanLayout(c.layout), visibility: cleanVisibility(c.visibility), privacy: cleanPrivacy(c.privacy), data: c.data, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })
+const view = (c: Row): PnlCardView => ({ id: c.id, token: c.token, design: cleanDesign(c.design), layout: cleanLayout(c.layout), visibility: cleanVisibility(c.visibility), privacy: cleanPrivacy(c.privacy), data: c.data, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })
 
 async function ownCard(userId: string, id: number): Promise<Row> {
   const [c] = Number.isInteger(id) ? await db.select().from(pnlCards).where(and(eq(pnlCards.id, id), eq(pnlCards.userId, userId))).limit(1) : []
@@ -141,14 +145,15 @@ async function ownCard(userId: string, id: number): Promise<Row> {
 }
 
 // Makes a card: the figures as they stand, in the layout chosen, private until its owner shares it.
-export async function createCard(userId: string, input: { scope: PnlCardScope; period?: unknown; layout?: unknown }, timeZone: string): Promise<PnlCardView> {
+export async function createCard(userId: string, input: { scope: PnlCardScope; period?: unknown; layout?: unknown; design?: unknown }, timeZone: string): Promise<PnlCardView> {
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(pnlCards).where(eq(pnlCards.userId, userId))
   if (n >= MAX_CARDS) throw new Error(`You have ${MAX_CARDS} saved cards. Delete some to make another.`)
   const period = cleanPeriod(input.period)
-  const data = await buildCardData(userId, input.scope, period, timeZone)
+  const design = cleanDesign(input.design)
+  const data = await buildCardData(userId, input.scope, period, timeZone, design)
   const [row] = await db
     .insert(pnlCards)
-    .values({ userId, token: newToken(), layout: cleanLayout(input.layout), visibility: { ...DEFAULT_VISIBILITY }, privacy: "private", scope: { ...input.scope, period }, data })
+    .values({ userId, token: newToken(), design, layout: cleanLayout(input.layout), visibility: defaultVisibility(design), privacy: "private", scope: { ...input.scope, period }, data })
     .returning()
   return view(row)
 }
@@ -179,8 +184,9 @@ export async function getCard(userId: string, id: number): Promise<PnlCardView> 
   return view(await ownCard(userId, id))
 }
 
-export async function listCards(userId: string, limit = 8): Promise<PnlCardSummary[]> {
-  const rows = await db.select({ id: pnlCards.id, token: pnlCards.token, layout: pnlCards.layout, privacy: pnlCards.privacy, data: pnlCards.data, createdAt: pnlCards.createdAt }).from(pnlCards).where(eq(pnlCards.userId, userId)).orderBy(desc(pnlCards.createdAt)).limit(Math.min(50, Math.max(1, limit)))
+// The trader's cards of one look, newest first: the certificates where certificates are made, the cards where cards are.
+export async function listCards(userId: string, design: PnlCardDesign = "card", limit = 8): Promise<PnlCardSummary[]> {
+  const rows = await db.select({ id: pnlCards.id, token: pnlCards.token, layout: pnlCards.layout, privacy: pnlCards.privacy, data: pnlCards.data, createdAt: pnlCards.createdAt }).from(pnlCards).where(and(eq(pnlCards.userId, userId), eq(pnlCards.design, cleanDesign(design)))).orderBy(desc(pnlCards.createdAt), desc(pnlCards.id)).limit(Math.min(50, Math.max(1, limit)))
   return rows.map((c) => ({ id: c.id, token: c.token, layout: cleanLayout(c.layout), privacy: cleanPrivacy(c.privacy), scopeLabel: c.data.scopeLabel, createdAt: c.createdAt.toISOString() }))
 }
 
@@ -194,5 +200,5 @@ export async function readSharedCard(token: string, viewerId: string | null): Pr
   const own = viewerId != null && c.userId === viewerId
   if (cleanPrivacy(c.privacy) !== "public" && !own) return { state: "private" }
   // the owner sees what everyone would: the page is the card as it is shared, not the editor
-  return { state: "ok", own, card: publicCard({ token: c.token, layout: cleanLayout(c.layout) as PnlCardLayout, visibility: cleanVisibility(c.visibility), data: c.data }) }
+  return { state: "ok", own, card: publicCard({ token: c.token, design: cleanDesign(c.design), layout: cleanLayout(c.layout) as PnlCardLayout, visibility: cleanVisibility(c.visibility), data: c.data }) }
 }

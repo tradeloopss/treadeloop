@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/calc"
 import { initials } from "@/lib/ui-chips"
 import { BrandMark } from "@/components/brand-mark"
-import { exportDate, redactCard, signedMoney, effectiveVisibility, type PnlCardData, type PnlCardLayout, type PnlCardVisibility } from "@/lib/pnl-cards/model"
+import { exportDate, redactCard, signedMoney, effectiveVisibility, type PnlCardData, type PnlCardDesign, type PnlCardLayout, type PnlCardVisibility } from "@/lib/pnl-cards/model"
+import { CERTIFICATE_WIDTH, CertificateCard } from "./certificate"
 
 // The PNL card itself: one renderer for the editor's preview, the larger
 // preview, the downloaded image and the public page. It is given the card and
@@ -16,6 +17,8 @@ import { exportDate, redactCard, signedMoney, effectiveVisibility, type PnlCardD
 // the same whatever theme the person looking at it is in.
 
 export const CARD_WIDTH: Record<PnlCardLayout, number> = { desktop: 800, mobile: 420, "pnl-only": 800 }
+// how wide a card is drawn, in the look it has: what the preview scales from and the image is made at
+export const cardWidth = (design: PnlCardDesign, layout: PnlCardLayout): number => (design === "certificate" ? CERTIFICATE_WIDTH : CARD_WIDTH)[layout]
 
 const INK = "#ffffff"
 const DIM = "rgba(255,255,255,0.58)"
@@ -192,8 +195,10 @@ function Qr({ url, size }: { url: string; size: number }) {
   )
 }
 
-export function PnlCard({ data: full, layout, visibility, shareUrl }: { data: PnlCardData; layout: PnlCardLayout; visibility: PnlCardVisibility; shareUrl: string | null }) {
+export function PnlCard({ data: full, layout, visibility, shareUrl, design = "card" }: { data: PnlCardData; layout: PnlCardLayout; visibility: PnlCardVisibility; shareUrl: string | null; design?: PnlCardDesign }) {
   const v = effectiveVisibility(visibility, layout)
+  // the certificate is the same card in its own design: given the same thing, with the same taken out of it
+  if (design === "certificate") return <CertificateCard data={redactCard(full, visibility, layout)} layout={layout} v={v} shareUrl={shareUrl} />
   const data = withFallbackPhoto(redactCard(full, visibility, layout), v.traderPhoto)
   const qr = v.qrCode && shareUrl ? shareUrl : null
   const stats = tiles(data)

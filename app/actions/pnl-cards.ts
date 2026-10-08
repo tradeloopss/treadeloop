@@ -4,7 +4,7 @@ import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { resolveTimeZone } from "@/lib/timezone"
 import { createCard, deleteCard, getCard, listCards, updateCard } from "@/lib/pnl-cards/server"
-import type { PnlCardScope, PnlCardSummary, PnlCardView } from "@/lib/pnl-cards/model"
+import { cleanDesign, type PnlCardScope, type PnlCardSummary, type PnlCardView } from "@/lib/pnl-cards/model"
 
 // PNL Cards: what the editor asks the server to do (lib/pnl-cards/server.ts).
 // The trader is the one the session resolved, every card is checked to be
@@ -26,10 +26,10 @@ async function me() {
   return { userId: session.user.id, timeZone: resolveTimeZone(h) }
 }
 
-export async function createPnlCard(input: { scope: PnlCardScope; period?: string; layout?: string }): Promise<CardResult<{ card: PnlCardView }>> {
+export async function createPnlCard(input: { scope: PnlCardScope; period?: string; layout?: string; design?: string }): Promise<CardResult<{ card: PnlCardView }>> {
   try {
     const { userId, timeZone } = await me()
-    return { ok: true, card: await createCard(userId, { scope: input?.scope, period: input?.period, layout: input?.layout }, timeZone) }
+    return { ok: true, card: await createCard(userId, { scope: input?.scope, period: input?.period, layout: input?.layout, design: input?.design }, timeZone) }
   } catch (err) {
     return fail(err, "Unable to create PNL card. Please try again.")
   }
@@ -63,10 +63,10 @@ export async function openPnlCard(id: number): Promise<CardResult<{ card: PnlCar
   }
 }
 
-export async function listPnlCards(): Promise<CardResult<{ cards: PnlCardSummary[] }>> {
+export async function listPnlCards(design?: string): Promise<CardResult<{ cards: PnlCardSummary[] }>> {
   try {
     const { userId } = await me()
-    return { ok: true, cards: await listCards(userId) }
+    return { ok: true, cards: await listCards(userId, cleanDesign(design)) }
   } catch (err) {
     return fail(err, "Unable to load your cards.")
   }
