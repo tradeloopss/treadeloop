@@ -7,12 +7,12 @@ import { toast } from "sonner"
 import { ArrowDownRight, ArrowUpRight, Award, Ban, ChevronDown, ChevronRight, CircleX, Crown, HeartPulse, MoreHorizontal, Plus, Power, RefreshCw, Repeat2, Settings2, ShieldAlert, Trash2, TriangleAlert, X, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { cancelCopyOrders, deleteCopyGroup, disableAllFollowers, flattenCopyPositions, loadCopyPnlCard, removeCopyContract, saveCopyRules, setCopyFollowerEnabled, setCopyGroupActive } from "@/app/actions/copy-trading"
+import { cancelCopyOrders, deleteCopyGroup, disableAllFollowers, flattenCopyPositions, removeCopyContract, saveCopyRules, setCopyFollowerEnabled, setCopyGroupActive } from "@/app/actions/copy-trading"
 import { formatQuantity, specFor } from "@/lib/copy/contracts"
 import { riskStatus, syncSummary, type CopyRules, type FollowerConfig } from "@/lib/copy/engine"
 import { ago, cockpitContracts, copyStats, groupCopies, groupScope, money, netPosition, price, symbolCounts, symbolScope, type AccountView, type PositionView, type ScopeRow } from "@/lib/copy/view"
 import { Sheet, useAction } from "@/components/insights/client"
-import { PnlCertificateFlow, type PnlCertificateData } from "@/components/pnl-certificate-button"
+import { PnlCardFlow } from "@/components/pnl-cards/flow"
 import { NotEnough, Pill, linkBtn, linkBtnPrimary, type PillTone } from "@/components/insights/ui"
 import { AccountDrawer, ChangeLeaderDialog, ContractDialog, GroupWizard, RulesEditor } from "./dialogs"
 import { ActivityFeed, AlertList, OrderHistory } from "./history"
@@ -65,8 +65,8 @@ export function Cockpit() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [manage, setManage] = useState<number | null>(null)
   const [flattenOne, setFlattenOne] = useState<number | null>(null)
-  // The P&L card: the dashboard's certificate, for this group's accounts. Its figures are read when it is asked for.
-  const [card, setCard] = useState<PnlCertificateData | null>(null)
+  // PNL Cards (components/pnl-cards): a card of this group's accounts, made and shared from here
+  const [pnlCard, setPnlCard] = useState(false)
   // Flatten Account: the account's positions in every symbol, not only the contract in front of the trader
   const [wholeAccount, setWholeAccount] = useState(false)
   const [openRow, setOpenRow] = useState<number | null>(null)
@@ -148,12 +148,6 @@ export function Cockpit() {
     else if (!res.skipped.length) toast.message(`No open ${of}positions to flatten.`)
     for (const s of res.skipped) toast.warning(`${s.name} was not closed`, { description: s.reason })
   }
-  const pnlCard = () =>
-    group &&
-    run(
-      () => loadCopyPnlCard(group.id),
-      (res) => (res.card.accounts.length ? setCard(res.card) : void toast.message("No account of your own in this group to make a P&L card for.")),
-    )
   const flattenAll = () => {
     if (allOpen === 0) return void toast.message("No open positions to flatten.")
     setDialog("flatten")
@@ -248,8 +242,8 @@ export function Cockpit() {
             <button type="button" className={dangerBtn} onClick={flattenAll} title="Close every open position on every account of this group, the Leader's included">
               Flatten all
             </button>
-            <button type="button" disabled={pending} className={linkBtn} onClick={pnlCard} title="A card of today's or this week's P&L for an account of this group, to share or save">
-              <Award className="size-3.5" /> P&amp;L card
+            <button type="button" className={linkBtn} onClick={() => setPnlCard(true)} title="A card of this group's results, to share or save as an image">
+              <Award className="size-3.5" /> PNL Card
             </button>
             {menu}
           </span>
@@ -420,8 +414,8 @@ export function Cockpit() {
         <button type="button" className={cn(dangerBtn, "h-12 w-full text-base")} onClick={flattenAll}>
           <TriangleAlert className="size-4" /> Flatten All
         </button>
-        <button type="button" disabled={pending} className={cn(linkBtn, "h-11 w-full")} onClick={pnlCard}>
-          <Award className="size-4" /> P&amp;L card
+        <button type="button" className={cn(linkBtn, "h-11 w-full")} onClick={() => setPnlCard(true)}>
+          <Award className="size-4" /> PNL Card
         </button>
         {contract && tabs.length > 1 && (
           <button type="button" className={cn(linkBtn, "h-11 w-full border-[var(--loss)]/50 text-[var(--loss)]")} onClick={flattenContract}>
@@ -634,8 +628,8 @@ export function Cockpit() {
         </p>
         <p>An order already working at a broker can&apos;t be withdrawn from here: cancel it in the Trade Manager or on the broker&apos;s platform.</p>
       </ConfirmDialog>
-      {/* the P&L card: which period, which account of this group, then the card with its link */}
-      {card && <PnlCertificateFlow {...card} allLabel="All my accounts" onClose={() => setCard(null)} />}
+      {/* PNL Cards: pick a layout, then share the card or shape its image */}
+      {pnlCard && group && <PnlCardFlow scope={{ kind: "copy_group", groupId: group.id }} onClose={() => setPnlCard(false)} />}
       <ConfirmDialog
         open={dialog === "flatten"}
         onClose={() => setDialog(null)}

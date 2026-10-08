@@ -4,6 +4,7 @@ import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { Mt5Position, RithmicPosition } from "@/lib/trade-manager"
 import type { GuardDecision } from "@/lib/order-execution/types"
 import type { LanePlan, LaneReport } from "@/lib/copy/plan"
+import type { PnlCardData, PnlCardVisibility } from "@/lib/pnl-cards/model"
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -138,6 +139,27 @@ export const dailyPnlShares = pgTable("daily_pnl_shares", {
   token: text("token").notNull().unique(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 })
+
+// PNL Cards (lib/pnl-cards): a trader's results as a card to share. `data` is
+// the card's figures as they stood when it was made; `visibility` is what is
+// switched on to be seen; `privacy` is whether anyone but the owner may open
+// the link (private until they share it). The link is the token alone.
+export const pnlCards = pgTable(
+  "pnl_cards",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    token: text("token").notNull(),
+    layout: text("layout").notNull().default("desktop"), // desktop | mobile | pnl-only
+    visibility: jsonb("visibility").$type<PnlCardVisibility>().notNull(),
+    privacy: text("privacy").notNull().default("private"), // private | public
+    scope: jsonb("scope").$type<Record<string, unknown>>().notNull(),
+    data: jsonb("data").$type<PnlCardData>().notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("pnl_cards_token").on(t.token), index("pnl_cards_user").on(t.userId, t.createdAt)]
+)
 
 // Saved dashboard layouts. A trader can keep several templates (e.g. one for
 // risk review, one for daily P&L) and switch between them; exactly one row per

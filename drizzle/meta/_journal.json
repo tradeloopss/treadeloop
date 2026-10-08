@@ -351,6 +351,13 @@
       "when": 1791470000000,
       "tag": "0049_copy_friends",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791480000000,
+      "tag": "0050_pnl_cards",
+      "breakpoints": true
     }
   ]
 }
