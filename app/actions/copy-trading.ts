@@ -13,6 +13,8 @@ import type { CopyState, GroupLimits } from "@/lib/copy/view"
 import { createShare, leaveShare, pauseMember, removeMember, renameShare, revokeShare, rotateShareLink, setResultsShared, setShareLimit, setShareOpen } from "@/lib/copy/shares"
 import type { FriendsOverview } from "@/lib/copy/friends"
 import { friendsOverview } from "@/lib/copy/friends-server"
+import { copyPnlCard } from "@/lib/copy/pnl-card"
+import type { PnlCertificateData } from "@/components/pnl-certificate-button"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
 // the one the session resolved; the feature's release stage is checked on
@@ -137,6 +139,15 @@ export const pauseCopyShareFriend = async (shareId: number, friendId: string, pa
   })
 // The friend's own switch: whether the owner of a strategy may see what their copies of it came to.
 export const setCopyResultsShared = async (shareId: number, on: boolean) => act(({ userId }) => setResultsShared(userId, Number(shareId), on === true))
+// The P&L card asked for from the Cockpit (lib/copy/pnl-card.ts): the figures for the group's own accounts.
+export async function loadCopyPnlCard(groupId: number): Promise<Result<{ card: PnlCertificateData }>> {
+  try {
+    const me = await who()
+    return { ok: true, card: await copyPnlCard(me.userId, Number(groupId), me.timeZone) }
+  } catch (err) {
+    return fail(err)
+  }
+}
 // The Friends page (lib/copy/friends.ts), read for whoever the session is.
 export async function loadCopyFriends(): Promise<Result<{ overview: FriendsOverview }>> {
   try {

@@ -40,18 +40,9 @@ export interface AllAccountsSummary {
   accountCount: number
 }
 
-const ALL = "__all__"
-
-export function PnlCertificateButton({
-  accounts,
-  weeklyAccounts,
-  allAccounts,
-  allAccountsWeekly,
-  date,
-  traderName,
-  traderImage,
-  isPro,
-}: {
+// Everything a P&L card is made from: the accounts it can be for (today's
+// figures and this week's), every account combined, and whose it is.
+export interface PnlCertificateData {
   accounts: DailyAccountRow[]
   weeklyAccounts: DailyAccountRow[]
   allAccounts: AllAccountsSummary
@@ -60,30 +51,55 @@ export function PnlCertificateButton({
   traderName: string
   traderImage?: string | null
   isPro?: boolean
-}) {
+}
+
+const ALL = "__all__"
+
+export function PnlCertificateButton(props: PnlCertificateData) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button variant="outline" onClick={() => props.accounts.length > 0 && setOpen(true)} disabled={props.accounts.length === 0}>
+        <Award className="size-4" /> {t("P&L Certificate")}
+      </Button>
+      {open && <PnlCertificateFlow {...props} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+// The card itself, in its steps: which period, which account, then the card
+// with its link. Mounted when it is asked for, by the dashboard's button above
+// or by any other place that has the figures (Copy Trading's Cockpit); closing
+// any step ends it. `allLabel` names "every account combined" where the
+// accounts on offer are not all of the trader's.
+export function PnlCertificateFlow({
+  accounts,
+  weeklyAccounts,
+  allAccounts,
+  allAccountsWeekly,
+  date,
+  traderName,
+  traderImage,
+  isPro,
+  allLabel,
+  onClose,
+}: PnlCertificateData & { allLabel?: string; onClose: () => void }) {
   const t = useT()
   const dateLocale = useIntlLocale()
-  const [periodOpen, setPeriodOpen] = useState(false)
-  const [period, setPeriod] = useState<PnlPeriod | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [selected, setSelected] = useState<string | null>(accounts.length === 1 ? String(accounts[0].id) : null)
-  const [shareOpen, setShareOpen] = useState(false)
-
   // Step 1 is always the period; step 2 (the account picker) is skipped when
   // there's only one account to choose from.
-  function onClick() {
-    if (accounts.length === 0) return
-    setPeriodOpen(true)
-  }
+  const [step, setStep] = useState<"period" | "account" | "share">("period")
+  const [period, setPeriod] = useState<PnlPeriod | null>(null)
+  const [selected, setSelected] = useState<string | null>(accounts.length === 1 ? String(accounts[0].id) : null)
 
   function choosePeriod(next: PnlPeriod) {
     setPeriod(next)
-    setPeriodOpen(false)
     if (accounts.length === 1) {
       setSelected(String(accounts[0].id))
-      setShareOpen(true)
+      setStep("share")
     } else {
-      setPickerOpen(true)
+      setStep("account")
     }
   }
 
@@ -126,11 +142,7 @@ export function PnlCertificateButton({
 
   return (
     <>
-      <Button variant="outline" onClick={onClick} disabled={accounts.length === 0}>
-        <Award className="size-4" /> {t("P&L Certificate")}
-      </Button>
-
-      <Dialog open={periodOpen} onOpenChange={setPeriodOpen}>
+      <Dialog open={step === "period"} onOpenChange={(next) => !next && onClose()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("Which period?")}</DialogTitle>
@@ -159,7 +171,7 @@ export function PnlCertificateButton({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+      <Dialog open={step === "account"} onOpenChange={(next) => !next && onClose()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("Which account?")}</DialogTitle>
@@ -172,13 +184,12 @@ export function PnlCertificateButton({
             onValueChange={(v) => {
               if (!v) return
               setSelected(v)
-              setPickerOpen(false)
-              setShareOpen(true)
+              setStep("share")
             }}
           >
             <SelectTrigger className="w-full"><SelectValue placeholder={t("Choose an account…")} /></SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL}>{t("All accounts")}</SelectItem>
+              <SelectItem value={ALL}>{allLabel ?? t("All accounts")}</SelectItem>
               {rows.map((acc) => (
                 <SelectItem key={acc.id} value={String(acc.id)}>{acc.name}</SelectItem>
               ))}
@@ -194,8 +205,8 @@ export function PnlCertificateButton({
           traderName={traderName}
           traderImage={traderImage}
           isPro={isPro}
-          open={shareOpen}
-          onOpenChange={setShareOpen}
+          open={step === "share"}
+          onOpenChange={(next) => !next && onClose()}
         />
       )}
     </>
