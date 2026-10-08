@@ -206,6 +206,48 @@ scp worker/mt5/mt5-copy-bridge.sh root@sync:/usr/local/bin/mt5-copy-bridge   # c
 ssh root@sync 'systemctl restart mt5-copy-bridge@c1 mt5-copy-bridge@c2 tradeloop-copy-lane'
 ```
 
+### One terminal for every copying account
+
+An account without a terminal of its own takes its orders on the two shared
+ones, which are on another account (often another broker) most of the time:
+seconds of logging in before each order, and a first login on a terminal that
+has never seen the account can take half a minute. On 8 Oct 2026 two new
+followers copied in 2.4 and 3.5 seconds and one order timed out. So there is
+a lane terminal for every account that copies (five then: `c1 c3 c4 c6 c7`),
+and the shared ones are for syncing.
+
+Adding one (nothing running is touched; the lane itself restarts, a few seconds):
+
+```sh
+cd /srv/mt5/wine/drive_c/mt5
+rsync -a --exclude Bases --exclude logs --exclude Config/accounts.dat c1/ c8/ && mkdir -p c8/Bases c8/logs && chown -R mt5:mt5 c8
+systemctl enable --now mt5-copy-bridge@c8            # port 9110+8; ONE AT A TIME, and wait for it
+# then add c8:9118 to MT5_COPY_BRIDGES in /etc/systemd/system/tradeloop-copy-lane.service.d/slots.conf
+systemctl daemon-reload && systemctl restart tradeloop-copy-lane
+```
+
+What it cost to learn:
+
+- **Wine's server runs out of open files before it runs out of memory.** It
+  had 1003 of its 1024 with four MT5 and two MT4 terminals; three more starting
+  at once took it over, and then nothing new could start
+  (`failed to load ntdll.dll error c000011f`) and a running bridge was lost.
+  The limit is 32768 now (`mt5-wineserver.service.d/nofile.conf`), and can be
+  raised on the running process: `prlimit --pid <wineserver> --nofile=32768:524288`.
+- **A slot whose start failed half-way keeps a dead desktop.** Every start after
+  that dies at once with `X Error ... BadWindow ... X_CreateWindow` and the
+  same resource id each time: Wine still has the desktop `tl-<slot>` on record
+  with a window that is gone. Nothing on the slot is left to kill. Use another
+  slot name (move the folder: `mv c5 c6`), which gets a desktop of its own.
+  That is why there is no c2 and no c5.
+- **A terminal's very first start is slow**, and the bridge can't answer
+  `/alive` while MetaTrader is starting. The launcher's watchdog gives a silent
+  bridge 150 seconds now; it used to give 15, and restarted every new slot in
+  the middle of its first start, for ever.
+- Each lane terminal is about 300 MB and a few percent of a processor. The two
+  shared ones cost far more processor than that, restarting whenever the next
+  account is at another broker.
+
 ## Deploy
 
 Build from a checkout with working `node_modules`:

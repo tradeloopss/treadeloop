@@ -22,9 +22,15 @@ while ss -ltn | grep -q ":$port "; do
   # A bridge whose terminal has stopped answering holds its one call for ever,
   # and still listens. /alive answers without the terminal and says how long
   # the call in hand has had it: nothing honest takes two and a half minutes.
+  #
+  # No answer at all is given as long: while a terminal is being started the
+  # MetaTrader call holds the whole bridge, /alive included, and a terminal's
+  # very first start (a new slot, nothing downloaded yet) takes a minute or
+  # more on a busy server. Fifteen seconds of silence used to count as stuck,
+  # so a new slot was restarted in the middle of every first start, for ever.
   busy=$(curl -s -m 4 -H "X-Bridge-Token: $token" "http://127.0.0.1:$port/alive" | sed -n 's/.*"busyFor": *\([0-9]*\).*/\1/p')
-  if [ -z "$busy" ]; then stuck=$((stuck + 1)); elif [ "$busy" -ge 150 ]; then stuck=3; else stuck=0; fi
-  if [ "$stuck" -ge 3 ]; then echo "bridge $slot is stuck (busy for ${busy:-?}s): restarting"; exit 1; fi
+  if [ -z "$busy" ]; then stuck=$((stuck + 1)); elif [ "$busy" -ge 150 ]; then stuck=30; else stuck=0; fi
+  if [ "$stuck" -ge 30 ]; then echo "bridge $slot is stuck (busy for ${busy:-?}s): restarting"; exit 1; fi
 done
 echo "bridge $slot is no longer listening on $port"
 exit 1

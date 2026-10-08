@@ -44,10 +44,10 @@ const TICK_MS = 2_000
 const ORDER_TICK_MS = 500
 // How long a terminal stays pinned (warm) to an account after an order, so the
 // user's follow-up close/modify actions are instant instead of re-logging in.
-const ORDER_PIN_MS = 90_000
-// Orders get a tighter bridge timeout than syncs so a stuck terminal fails
-// within the user's expected window instead of hanging up to a minute.
-const ORDER_BRIDGE_TIMEOUT_MS = 25_000
+// (Half a minute, not a minute and a half: with every copying account that has
+// no terminal of its own taking orders on these two, both stayed reserved and
+// nothing at all was synced for minutes.)
+const ORDER_PIN_MS = 30_000
 // An order refused before anything left for the broker (the login, the server
 // list, the terminal's Algo Trading switch) is tried again this soon, not after
 // the two minutes a lease lasts: a copy that late is a different trade.
@@ -58,7 +58,16 @@ const ORDER_RETRY_MS = 5_000
 // (Closes and changes to a position are still sent however late: those are
 // wanted late rather than never.)
 const ORDER_MAX_AGE_MS = 90_000
-const ORDER_NOT_SENT = new Set(["auth", "server", "autotrading"])
+const ORDER_NOT_SENT = new Set(["auth", "server", "autotrading", "terminal", "timeout"])
+// How long the bridge is waited for. A terminal that has never been on an
+// account takes half a minute and more to log in to it the first time, and 25
+// seconds used to be all it got: the worker gave up, called the order failed,
+// and the bridge went on working on it. So an order is waited for until it can
+// no longer be sent (ORDER_MAX_AGE_MS, which the bridge is told as a deadline
+// and holds to), and a little longer for an answer already on its way.
+const ORDER_WAIT_MS = 60_000
+const ORDER_ANSWER_MS = 8_000
+const ORDER_READ_MS = 20_000
 const WORKER_ID = `${os.hostname()}:${process.pid}`
 
 // ---------------------------------------------------------------------------
@@ -330,10 +339,16 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       bridge.login = null
     }
     const num = (v: string | null) => (v != null ? Number(v) : null)
+    // a market order has a last moment it may be sent at; anything else is wanted however late
+    const market = cmd.kind === "place" && (cmd.orderType == null || cmd.orderType === "market")
+    const deadline = market ? cmd.createdAt.getTime() + ORDER_MAX_AGE_MS : null
+    const wait = deadline != null ? Math.max(5_000, deadline - Date.now()) + ORDER_ANSWER_MS : ORDER_WAIT_MS
     const body = {
       login: connection.login,
       password: decrypt(connection.tradingPasswordEnc),
       server: connection.server,
+      // seconds, as the bridge's own clock counts them: past it, the order is not sent
+      deadline: deadline != null ? deadline / 1000 : undefined,
       kind: cmd.kind,
       positionRef: cmd.positionRef,
       orderRef: cmd.orderRef,
@@ -351,7 +366,7 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
     let result: OrderBridgeResult | null = null
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        result = await callBridge<OrderBridgeResult>(bridge, "/order", body, ORDER_BRIDGE_TIMEOUT_MS)
+        result = await callBridge<OrderBridgeResult>(bridge, "/order", body, wait)
         break
       } catch (err) {
         if (err instanceof BridgeError && err.kind === "autotrading" && attempt < 2) {
@@ -371,6 +386,10 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
     if (result.accepted && connection.tradingCheck !== "ok") await recordTradingCheck(connection, "ok")
     else if (!result.accepted && result.retcode === 10017) await recordTradingCheck(connection, "read_only")
     if (result.accepted) {
+      // The account as the order left it, read here and now on the terminal
+      // that sent it: a copy shows on its follower the moment it fills, not at
+      // the account's next sync (which this terminal's reservation puts off).
+      await readAfterOrder(bridge, connection).catch((err) => console.warn(`[mt5] order ${cmd.id}: the account was not read after it: ${err instanceof Error ? err.message : err}`))
       await finishCommand(cmd.id, "filled", "Order executed.", brokerRef, result)
       // Refresh the account's positions/deals promptly so the app reflects it.
       await db.update(metatraderConnections).set({ nextSyncAt: new Date() }).where(eq(metatraderConnections.id, connection.id))
@@ -380,10 +399,28 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
     console.log(`[mt5] order ${cmd.id} (${cmd.kind} ${connection.login}): ${result.accepted ? "filled" : `rejected — ${result.comment}`}`)
   } catch (err) {
     const kind = err instanceof BridgeError ? err.kind : "internal"
+    const opening = cmd.kind === "place"
+    // An order to open something is sent again only when it is certain the
+    // first try never left: the login, the server list, the terminal's own
+    // switch. When the bridge did not answer, or answered something else, the
+    // order may be at the broker, and a second one would open the trade twice.
+    // That is said as it is, and left to the trader. (A close or a change is
+    // safe to repeat: a position that is gone is simply not found.)
+    const unknown = opening && !ORDER_NOT_SENT.has(kind) && kind !== "late" && kind !== "request" && !/unknown symbol|no price for/i.test(err instanceof Error ? err.message : "")
     // an order logs in with the trading password: say which password the broker refused
-    const msg = kind === "auth" ? "The broker rejected the trading password saved for this account." : err instanceof Error ? err.message : String(err)
+    const msg =
+      kind === "auth"
+        ? "The broker rejected the trading password saved for this account."
+        : kind === "late"
+          ? "Not sent: the sync server's terminal took too long to be ready, and a market order that late would be a different trade."
+          : unknown && kind === "bridge"
+            ? "The sync server's terminal did not answer in time, so it is not known whether this order reached the broker. Check the account before retrying: the position may already be open."
+            : err instanceof Error
+              ? err.message
+              : String(err)
     const attempts = cmd.attempts + 1
-    const giveUp = attempts >= 3
+    // a position that is not there will not be there the next time either
+    const giveUp = attempts >= 3 || unknown || kind === "late" || kind === "position"
     await db
       .update(orderCommands)
       .set({ status: giveUp ? "failed" : "pending", resultMessage: msg, attempts, leaseUntil: !giveUp && ORDER_NOT_SENT.has(kind) ? new Date(Date.now() + ORDER_RETRY_MS) : null, updatedAt: new Date() })
@@ -493,6 +530,40 @@ async function processTradingChecks() {
   void checkTradingPassword(bridge, connection, broker).finally(() => {
     bridge.busy = false
   })
+}
+
+// What MetaTrader reports of open positions, as the app keeps it (openPositionsData).
+const positionsOf = (list: Record<string, any>[]) =>
+  list.map((p) => ({
+    symbol: String(p.symbol ?? ""),
+    side: Number(p.type) === 1 ? "short" : "long", // MT5: 0 buy, 1 sell
+    volume: Number(p.volume ?? 0),
+    openPrice: Number(p.price_open ?? p.priceOpen ?? 0),
+    currentPrice: p.price_current != null ? Number(p.price_current) : p.priceCurrent != null ? Number(p.priceCurrent) : null,
+    stopLoss: p.sl ? Number(p.sl) : null,
+    takeProfit: p.tp ? Number(p.tp) : null,
+    profit: p.profit != null ? Number(p.profit) + Number(p.swap ?? 0) : null,
+    identifier: String(p.identifier ?? p.ticket ?? ""),
+  }))
+
+// Reads an account's open positions on the terminal that has just traded on it
+// (the session is the one the order opened: nothing is logged in again), and
+// keeps them. An account the copy lane holds is the lane's to report: left alone.
+async function readAfterOrder(bridge: Bridge, connection: Connection) {
+  if (connection.tradingPasswordEnc == null) return
+  const res = await callBridge<{ positions: Record<string, any>[]; balance: number; equity: number }>(bridge, "/positions", { login: Number(connection.login), password: decrypt(connection.tradingPasswordEnc), server: connection.server, trading: true }, ORDER_READ_MS)
+  const laneHas = sql`(${metatraderConnections.copySlot} is not null and ${metatraderConnections.copySeenAt} > now() - make_interval(secs => ${LANE_FRESH_SECONDS}))`
+  const data = positionsOf(res.positions)
+  await db
+    .update(metatraderConnections)
+    .set({
+      balance: String(res.balance),
+      equity: String(res.equity),
+      openPositions: sql`case when ${laneHas} then ${metatraderConnections.openPositions} else ${data.length} end`,
+      openPositionsData: sql`case when ${laneHas} then ${metatraderConnections.openPositionsData} else ${JSON.stringify(data)}::jsonb end`,
+      lastSyncedAt: sql`case when ${laneHas} then ${metatraderConnections.lastSyncedAt} else now() end`,
+    })
+    .where(eq(metatraderConnections.id, connection.id))
 }
 
 // Claim the single oldest pending order for one account — used to drain a
@@ -716,17 +787,7 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
     // after it has sent the followers' orders for it, and the app's engine
     // must not learn of that position from anywhere else first.
     const laneHas = sql`(${metatraderConnections.copySlot} is not null and ${metatraderConnections.copySeenAt} > now() - make_interval(secs => ${LANE_FRESH_SECONDS}))`
-    const positionsData = res.positions.map((p) => ({
-      symbol: String(p.symbol ?? ""),
-      side: Number(p.type) === 1 ? "short" : "long", // MT5: 0 buy, 1 sell
-      volume: Number(p.volume ?? 0),
-      openPrice: Number(p.price_open ?? p.priceOpen ?? 0),
-      currentPrice: p.price_current != null ? Number(p.price_current) : p.priceCurrent != null ? Number(p.priceCurrent) : null,
-      stopLoss: p.sl ? Number(p.sl) : null,
-      takeProfit: p.tp ? Number(p.tp) : null,
-      profit: p.profit != null ? Number(p.profit) + Number(p.swap ?? 0) : null,
-      identifier: String(p.identifier ?? p.ticket ?? ""),
-    }))
+    const positionsData = positionsOf(res.positions)
     await db
       .update(metatraderConnections)
       .set({

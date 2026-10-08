@@ -721,6 +721,18 @@ def run_order(kind, req):
     raise BridgeError(400, "request", f"unknown order kind {kind}")
 
 
+def too_late(req):
+    """A market order has a last moment it may be sent at (`deadline`, in
+    seconds of this clock). Its caller waits for the answer until then and no
+    longer: an order sent after it would open a position nobody is expecting,
+    with nothing left to close it."""
+    limit = req.get("deadline")
+    return limit is not None and time.time() > float(limit)
+
+
+LATE = "Not sent: the terminal took too long to be ready, and the order's time had passed"
+
+
 def order(req):
     began = time.perf_counter()
     try:
@@ -731,6 +743,9 @@ def order(req):
     except (KeyError, TypeError, ValueError):
         raise BridgeError(400, "request", "login, password, server and kind are required")
 
+    if kind == "place" and too_late(req):
+        raise BridgeError(408, "late", LATE)
+
     def checked():
         ensure_trading_login(account, password, server)
         # A headless terminal starts with the "Algo Trading" button off (and a
@@ -738,6 +753,9 @@ def order(req):
         # it in-process, right here, after the login and before the order, so
         # nothing re-logs in between and resets it.
         ensure_algo_trading(account)
+        # logging in can take most of a minute on a terminal that is new to the account: looked at again, last thing
+        if kind == "place" and too_late(req):
+            raise BridgeError(408, "late", LATE)
         return run_order(kind, req)
 
     # `fast`: the copy lane keeps this terminal on this account and has just

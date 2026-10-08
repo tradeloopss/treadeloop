@@ -38,7 +38,7 @@ const ACTIONS: Record<FailureCategory, string> = {
 // The first that matches wins: the more specific a cause, the earlier it is asked.
 const PATTERNS: [FailureCategory, RegExp][] = [
   ["compliance", /does(n't| not) permit|not permitted|places no orders on|can't be connected to tradeloop|can't be in a copy group/i],
-  ["timeout", /timed? ?out|did(n't| not) answer|stopped before the broker answered|no answer/i],
+  ["timeout", /timed? ?out|did(n't| not) answer|did not answer in time|stopped before the broker answered|no answer/i],
   ["trading_password", /rejected the trading password/i],
   ["authentication", /rejected the login|invalid account|authori[sz]ation failed|wrong password|invalid password|not authori[sz]ed/i],
   ["account_disabled", /trade (is )?disabled|trading (is |has been )?disabled|account (is )?disabled|autotrading disabled|read.?only|investor password|can't receive orders/i],
