@@ -259,6 +259,12 @@ export const metatraderConnections = pgTable("metatrader_connections", {
   // modify and close orders (the investor password above cannot trade). Null
   // keeps the account read-only. See lib/order-execution.
   tradingPasswordEnc: text("tradingPasswordEnc"),
+  // What the broker said of that password, and when: pending | checking | ok |
+  // read_only | rejected (lib/order-execution/trading-check.ts). The sync
+  // server asks when the password is saved, and an order's own outcome writes
+  // it too. Null: no trading password, or one never checked.
+  tradingCheck: text("tradingCheck"),
+  tradingCheckAt: timestamp("tradingCheckAt"),
   login: text("login").notNull(),
   server: text("server").notNull(),
   platform: text("platform").notNull(), // mt4 | mt5

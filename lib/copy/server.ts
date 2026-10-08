@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
 import { encrypt } from "@/lib/crypto"
+import { TRADING_CHECK_NOTES, tradingCheckOf, tradingUsable } from "@/lib/order-execution/trading-check"
 import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
@@ -112,7 +113,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const [accountRows, mt, rith, prov, prefs, groupRows, followerRows, contractRows, ruleRows, limitRows, mappingRows, managed, orderRows, eventRows, closed, mode, live, prop, traded, background, beat] = await Promise.all([
     db.select().from(tradingAccounts).where(and(eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false))),
     db
-      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, server: metatraderConnections.server, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt, copyPingMs: metatraderConnections.copyPingMs })
+      .select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, login: metatraderConnections.login, server: metatraderConnections.server, status: metatraderConnections.status, message: metatraderConnections.statusMessage, balance: metatraderConnections.balance, equity: metatraderConnections.equity, open: metatraderConnections.openPositions, lastSyncedAt: metatraderConnections.lastSyncedAt, hasTrading: sql<boolean>`${metatraderConnections.tradingPasswordEnc} is not null`, tradingCheck: metatraderConnections.tradingCheck, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt, copyPingMs: metatraderConnections.copyPingMs })
       .from(metatraderConnections)
       .where(eq(metatraderConnections.userId, userId)),
     db.select({ accountId: rithmicConnections.accountId, login: rithmicConnections.login, lastSyncedAt: rithmicConnections.lastSyncedAt, lastSyncStatus: rithmicConnections.lastSyncStatus }).from(rithmicConnections).where(eq(rithmicConnections.userId, userId)),
@@ -204,7 +205,9 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     // what the account's provider allows (lib/compliance): no order is sent where it doesn't
     const set = m ? detectProvider(sets, m.server) : null
     const execution = validateExecution(set)
-    const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading && execution.allowed
+    // what the broker said of the saved trading password, when it was asked: no order is sent with one it turned down
+    const ordersCheck = m?.hasTrading ? tradingCheckOf(m.tradingCheck) : null
+    const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading && execution.allowed && tradingUsable(ordersCheck)
     const canAllowOrders = !!m && m.platform === "mt5" && execution.allowed && validateConnection(set, { credential: "trading", acknowledged: true }).allowed
     return {
       id: a.id,
@@ -231,7 +234,9 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       // TradeLoop can't tell an investor password from a master one: only whether a password to trade with is kept
       authentication: m ? (m.hasTrading ? "Login password + trading password" : "Login password only (orders not allowed)") : r ? "Rithmic login" : p ? "Paired session" : null,
       canAllowOrders,
-      executionNote: canExecute ? "Orders can be placed on this account." : !execution.allowed ? execution.message : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : canAllowOrders ? "Orders aren't allowed on this account yet. Allow them on the Connection page: Manage, then Allow orders." : "TradeLoop can't place orders on this account.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
+      ordersAllowed: !!m?.hasTrading,
+      ordersCheck,
+      executionNote: canExecute ? "Orders can be placed on this account." : !execution.allowed ? execution.message : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : canAllowOrders && m.hasTrading && (ordersCheck === "rejected" || ordersCheck === "read_only") ? TRADING_CHECK_NOTES[ordersCheck] : canAllowOrders ? "Orders aren't allowed on this account yet. Allow them on the Connection page: Manage, then Allow orders." : "TradeLoop can't place orders on this account.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
       dayPnl: (closedToday.get(a.id) ?? 0) + (openPnl ?? 0),
       openPnl,
       openNotional: mine.reduce((s, x) => {
@@ -288,6 +293,8 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
         sharing: { ok: true },
         canExecute: false,
         canAllowOrders: false,
+        ordersAllowed: false,
+        ordersCheck: null,
         executionNote: "A friend's account: TradeLoop reads its trades for you, and never places an order on it.",
         dayPnl: 0,
         openPnl: null,
@@ -744,14 +751,15 @@ export async function enableOrders(userId: string, accountId: number, password: 
     await recordBlock(userId, permitted, { accountId, action: "allow_orders" })
     throw new ComplianceError(permitted)
   }
-  await db.update(metatraderConnections).set({ tradingPasswordEnc: typed != null ? encrypt(typed) : sql`${metatraderConnections.passwordEnc}` }).where(eq(metatraderConnections.id, mt.id))
-  await note(userId, { accountId, level: "success", code: "orders_allowed", title: `Orders allowed — ${mt.name}`, body: typed != null ? "TradeLoop places orders on it with the trading password you entered." : "TradeLoop places orders on it with the password it was connected with.", action: "The first order shows whether the broker lets this password trade. If it answers “Trade disabled”, it is the investor password: enter the master password instead." })
+  // saved, and marked to be put to the broker: the sync server logs in with it once and writes what the broker said
+  await db.update(metatraderConnections).set({ tradingPasswordEnc: typed != null ? encrypt(typed) : sql`${metatraderConnections.passwordEnc}`, tradingCheck: "pending", tradingCheckAt: null }).where(eq(metatraderConnections.id, mt.id))
+  await note(userId, { accountId, level: "success", code: "orders_allowed", title: `Orders allowed — ${mt.name}`, body: typed != null ? "TradeLoop places orders on it with the trading password you entered." : "TradeLoop places orders on it with the password it was connected with.", action: "The password is being checked with the broker: the account shows whether it can trade." })
 }
 
 // And off again: the trading password is forgotten, and the account goes back to being read only.
 export async function disableOrders(userId: string, accountId: number): Promise<void> {
   await ownAccounts(userId, [accountId])
-  const [mt] = await db.update(metatraderConnections).set({ tradingPasswordEnc: null }).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId), isNotNull(metatraderConnections.tradingPasswordEnc))).returning({ id: metatraderConnections.id })
+  const [mt] = await db.update(metatraderConnections).set({ tradingPasswordEnc: null, tradingCheck: null, tradingCheckAt: null }).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId), isNotNull(metatraderConnections.tradingPasswordEnc))).returning({ id: metatraderConnections.id })
   if (!mt) return
   const [a] = await db.select({ name: tradingAccounts.name }).from(tradingAccounts).where(eq(tradingAccounts.id, accountId))
   await note(userId, { accountId, level: "info", code: "orders_stopped", title: `Orders turned off — ${a?.name ?? "account"}`, body: "TradeLoop no longer keeps a trading password for this account, and places no orders on it." })

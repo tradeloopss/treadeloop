@@ -80,7 +80,8 @@ export async function setTradingPassword(accountId: number, password: string) {
     await recordBlock(userId, permitted, { accountId, action: "set_trading_password" })
     throw new Error(permitted.message)
   }
-  await db.update(metatraderConnections).set({ tradingPasswordEnc: encrypt(password.trim()) }).where(eq(metatraderConnections.id, mt.id))
+  // marked to be put to the broker (lib/order-execution/trading-check.ts)
+  await db.update(metatraderConnections).set({ tradingPasswordEnc: encrypt(password.trim()), tradingCheck: "pending", tradingCheckAt: null }).where(eq(metatraderConnections.id, mt.id))
   revalidatePath("/trade-manager")
 }
 
@@ -88,7 +89,7 @@ export async function disableExecution(accountId: number) {
   const userId = await getUserId()
   await db
     .update(metatraderConnections)
-    .set({ tradingPasswordEnc: null })
+    .set({ tradingPasswordEnc: null, tradingCheck: null, tradingCheckAt: null })
     .where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId)))
   revalidatePath("/trade-manager")
 }

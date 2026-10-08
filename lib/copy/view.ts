@@ -1,6 +1,7 @@
 import { resolveFollowerSymbol, sameInstrument, type ContractSpec } from "./contracts"
 import type { CopyRules, FollowerConfig, Health, PropSyncState, Side, Step } from "./engine"
 import type { ProviderProfile } from "@/lib/compliance/engine"
+import type { TradingCheck } from "@/lib/order-execution/trading-check"
 import type { ShareView } from "./shares"
 
 // What the Copy Trading pages are drawn from: everything the server knows
@@ -49,6 +50,10 @@ export type AccountView = {
   // whether orders can be switched on (or off) for it from Copy Trading: a MetaTrader 5
   // account at a provider that lets TradeLoop keep a trading password for it
   canAllowOrders: boolean
+  // a password to trade with is saved for it, and what its broker said of that password
+  // when asked (lib/order-execution/trading-check.ts); null: not asked, or nothing saved
+  ordersAllowed: boolean
+  ordersCheck: TradingCheck | null
   dayPnl: number
   openPnl: number | null
   openNotional: number

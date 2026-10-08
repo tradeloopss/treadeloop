@@ -461,7 +461,15 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
                 {role !== "leader" && account.canAllowOrders && (
                   <div className={cn("mt-4 rounded-xl border p-3 text-start text-sm", !account.canExecute && "border-[var(--warning)]/50 bg-[var(--warning)]/10")}>
                     {account.canExecute ? (
-                      <p className="font-medium">Orders are allowed on this account.</p>
+                      <p className="font-medium">{account.ordersCheck === "ok" ? "Orders are allowed on this account: the broker confirmed the password can trade." : account.ordersCheck === "pending" ? "Orders are allowed on this account. The password is being checked with the broker…" : "Orders are allowed on this account."}</p>
+                    ) : account.ordersAllowed ? (
+                      <>
+                        <p className="font-medium">{account.ordersCheck === "rejected" ? "The broker rejected the trading password" : "The saved password can't trade"}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">No orders are sent with it. Enter the account&apos;s master (trading) password.</p>
+                        <button type="button" className={cn(linkBtnPrimary, "mt-2")} onClick={() => allowOrders(account.id)}>
+                          Fix password
+                        </button>
+                      </>
                     ) : (
                       <>
                         <p className="font-medium">One more step for a follower: allow orders</p>

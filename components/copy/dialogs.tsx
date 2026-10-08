@@ -533,6 +533,22 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
 export { ConnectAccountDialog } from "./connect-account"
 
 // One account in detail: its connection, its balance, what it is used for.
+// Where an account stands on taking orders, as its broker has answered so far (lib/order-execution/trading-check.ts).
+const ordersHeadline = (a: AccountView) =>
+  !a.ordersAllowed ? "Orders aren't allowed yet" : a.ordersCheck === "rejected" ? "The broker rejected the saved trading password" : a.ordersCheck === "read_only" ? "The saved password can't trade" : a.ordersCheck === "ok" ? "Orders are allowed: confirmed with the broker" : a.ordersCheck === "pending" ? "Orders are allowed: checking the password…" : "Orders are allowed"
+const ordersDetail = (a: AccountView) =>
+  !a.ordersAllowed
+    ? "To copy trades into this account, TradeLoop has to be allowed to place orders on it."
+    : a.ordersCheck === "rejected"
+      ? "No orders are sent with it. Enter the account's master password again."
+      : a.ordersCheck === "read_only"
+        ? "It logs in, but the broker won't let it trade: it is the investor password, or trading is switched off for the account. No orders are sent with it."
+        : a.ordersCheck === "ok"
+          ? "The broker let this password log in and trade."
+          : a.ordersCheck === "pending"
+            ? "Our sync server is logging in with it once, to see that the broker lets it trade."
+            : "The password hasn't been checked with the broker: the first order shows whether it can trade."
+
 export function AccountDrawer({ accountId, onClose }: { accountId: number | null; onClose: () => void }) {
   const { state, account, allowOrders, refresh } = useCopy()
   const router = useRouter()
@@ -590,18 +606,18 @@ export function AccountDrawer({ accountId, onClose }: { accountId: number | null
                 ["Day P&L", money(a.dayPnl, true)],
                 ["Latency", a.latencyMs != null ? `${a.latencyMs}ms` : "Not reported by this connection"],
                 ["Last heartbeat", ago(a.heartbeatAt)],
-                ["Orders", a.canExecute ? "Can receive orders" : a.canAllowOrders ? "Not allowed yet" : a.executionNote],
+                ["Orders", a.canExecute ? "Can receive orders" : a.ordersAllowed && a.ordersCheck === "rejected" ? "Password rejected by the broker" : a.ordersAllowed && a.ordersCheck === "read_only" ? "Saved password can't trade" : a.canAllowOrders ? "Not allowed yet" : a.executionNote],
                 a.propSync.tracked && ["PropSync", a.propSync.blocked ? (a.propSync.reason ?? "Blocked") : a.propSync.dailyLossRemaining != null ? `${money(a.propSync.dailyLossRemaining)} of daily loss remaining` : "Within its rules"],
               ]}
             />
             {a.canAllowOrders && (
               <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3", !a.canExecute && "border-[var(--warning)]/50 bg-[var(--warning)]/10")}>
                 <div className="min-w-0 flex-1 text-sm">
-                  <p className="font-medium">{a.canExecute ? "Orders are allowed" : "Orders aren't allowed yet"}</p>
-                  <p className="text-xs text-muted-foreground">{a.canExecute ? "TradeLoop can place copied orders on this account." : "To copy trades into this account, TradeLoop has to be allowed to place orders on it."}</p>
+                  <p className="font-medium">{ordersHeadline(a)}</p>
+                  <p className="text-xs text-muted-foreground">{ordersDetail(a)}</p>
                 </div>
                 <button type="button" className={a.canExecute ? linkBtn : linkBtnPrimary} onClick={() => allowOrders(a.id)}>
-                  {a.canExecute ? "Change" : "Allow orders"}
+                  {a.canExecute ? "Change" : a.ordersAllowed ? "Fix password" : "Allow orders"}
                 </button>
               </div>
             )}

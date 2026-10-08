@@ -114,7 +114,7 @@ export function CopyProvider({ initial, children }: { initial: CopyState; childr
   return (
     <Ctx.Provider value={store}>
       {children}
-      <AllowOrdersDialog account={asking ?? null} onClose={() => setAllowing(null)} onDone={refresh} />
+      <AllowOrdersDialog key={allowing ?? 0} account={asking ?? null} onClose={() => setAllowing(null)} onDone={refresh} />
     </Ctx.Provider>
   )
 }

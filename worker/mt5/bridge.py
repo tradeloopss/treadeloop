@@ -359,6 +359,53 @@ def reset(req):
     return {"ok": True}
 
 
+def check(req):
+    """Puts a password to the broker and says what the session it opens may do.
+
+    Always a login of its own, whatever session the terminal was in: the answer
+    is the broker's. Asked when a trader allows orders on an account, so that a
+    password the broker rejects, or one that can only read, is told to them
+    then and not at the first trade that is not copied."""
+    try:
+        account = int(req["login"])
+        password = str(req["password"])
+        server = str(req["server"]).strip()
+    except (KeyError, TypeError, ValueError):
+        raise BridgeError(400, "request", "login, password and server are required")
+    FILLING.clear()
+    if mt5.terminal_info() is None:
+        start_terminal(account, password, server)
+    if not mt5.login(account, password=password, server=server, timeout=60_000):
+        raise refused(account)
+    deadline = time.time() + 20
+    while True:
+        term = mt5.terminal_info()
+        if term and term.connected and current_login()[0] == account:
+            break
+        if time.time() > deadline:
+            raise BridgeError(504, "timeout", "Logged in, but the account never finished connecting")
+        time.sleep(0.25)
+    # The account's own switch can come a moment after the login: looked at
+    # until it is on, for a few seconds, before "it can't trade" is believed.
+    allowed = False
+    for _ in range(10):
+        info = mt5.account_info()
+        if info is not None and info.login == account and info.trade_allowed:
+            allowed = True
+            break
+        time.sleep(0.3)
+    digest = _digest(account, server, password)
+    _remember(ACCEPTED, account, server, password)
+    if allowed:
+        _remember(TRADES, account, server, password)
+        NO_TRADE.pop(digest, None)
+    else:
+        if len(NO_TRADE) > 2000:
+            NO_TRADE.clear()
+        NO_TRADE[digest] = time.time()
+    return {"ok": True, "tradeAllowed": allowed}
+
+
 def health():
     term = mt5.terminal_info()
     have_login, have_server = current_login()
@@ -720,4 +767,4 @@ def on_bridge_error(err):
 
 
 if __name__ == "__main__":
-    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order, "/positions": positions, "/watch": watch}, on_bridge_error, urgent=("/order",))
+    serve(args.port, args.token_file, {"/health": health}, {"/sync": sync, "/reset": reset, "/order": order, "/positions": positions, "/watch": watch, "/check": check}, on_bridge_error, urgent=("/order",))

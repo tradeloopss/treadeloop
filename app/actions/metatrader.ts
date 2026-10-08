@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { encrypt } from "@/lib/crypto"
+import { followLogin } from "@/lib/order-execution/trading-check"
 import { metatraderLimitError } from "@/lib/plan-limits"
 import { helpHref } from "@/lib/urls"
 import { riskNotice, validateConnection } from "@/lib/compliance/engine"
@@ -126,7 +127,7 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   // Reconnecting the same login+server (a changed investor password, say)
   // updates that connection instead of adding a second one.
   const [existing] = await db
-    .select({ id: metatraderConnections.id })
+    .select({ id: metatraderConnections.id, passwordEnc: metatraderConnections.passwordEnc, tradingPasswordEnc: metatraderConnections.tradingPasswordEnc })
     .from(metatraderConnections)
     .where(
       and(
@@ -141,7 +142,8 @@ export async function connectMetaTrader(formData: FormData): Promise<{ ok: true;
   const request = { passwordEnc, status: "pending", statusMessage: null, errorCount: 0, nextSyncAt: now, leaseUntil: null }
   if (existing) {
     id = existing.id
-    await db.update(metatraderConnections).set(request).where(eq(metatraderConnections.id, id))
+    // "the password I connected with is the one to trade with" follows the new one, and is checked again
+    await db.update(metatraderConnections).set({ ...request, ...(followLogin(existing, passwordEnc) ?? {}) }).where(eq(metatraderConnections.id, id))
   } else {
     ;[{ id }] = await db
       .insert(metatraderConnections)

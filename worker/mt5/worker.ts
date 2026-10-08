@@ -140,6 +140,8 @@ interface Bridge {
   // instant and a background sync of a DIFFERENT account can't steal it and
   // force a slow re-login mid trade-management.
   orderPin?: { accountId: number; login: string; until: number }
+  // this bridge runs code from before /check existed (it is loaded when the bridge starts)
+  noCheck?: boolean
 }
 
 function parseBridges(platform: Platform, spec: string): Bridge[] {
@@ -302,6 +304,12 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       await finishCommand(cmd.id, "failed", "Order execution isn't enabled for this account (no trading password).")
       return
     }
+    // A password the broker has turned down is not put to it again with every order (the pages say so, and
+    // a broker that is asked the same wrong password over and over ends up refusing the address it comes from).
+    if (connection.tradingCheck === "rejected" || connection.tradingCheck === "read_only") {
+      await finishCommand(cmd.id, "failed", connection.tradingCheck === "rejected" ? "The broker rejected the trading password saved for this account." : "Trade disabled: the password saved for orders on this account logs in but can't trade (it is the investor password, or trading is switched off for the account).")
+      return
+    }
     if (cmd.kind === "place" && (cmd.orderType == null || cmd.orderType === "market") && Date.now() - cmd.createdAt.getTime() > ORDER_MAX_AGE_MS) {
       await finishCommand(cmd.id, "failed", `${cmd.resultMessage ? `${cmd.resultMessage} ` : ""}Not tried again: ${ORDER_MAX_AGE_MS / 1000} seconds had passed, and a market order that late would be a different trade.`)
       return
@@ -359,6 +367,9 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
     // it so a following /sync reuses the session (no re-login) and it stays warm.
     bridge.login = connection.login
     const brokerRef = result.deal && result.deal !== "0" ? result.deal : result.order
+    // what the broker did with a real order is the best answer there is to "can this password trade"
+    if (result.accepted && connection.tradingCheck !== "ok") await recordTradingCheck(connection, "ok")
+    else if (!result.accepted && result.retcode === 10017) await recordTradingCheck(connection, "read_only")
     if (result.accepted) {
       await finishCommand(cmd.id, "filled", "Order executed.", brokerRef, result)
       // Refresh the account's positions/deals promptly so the app reflects it.
@@ -377,8 +388,111 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       .update(orderCommands)
       .set({ status: giveUp ? "failed" : "pending", resultMessage: msg, attempts, leaseUntil: !giveUp && ORDER_NOT_SENT.has(kind) ? new Date(Date.now() + ORDER_RETRY_MS) : null, updatedAt: new Date() })
       .where(eq(orderCommands.id, cmd.id))
+    // refused at the login every time it was tried: no more orders are sent with this password until it is put right
+    if (giveUp && kind === "auth") await recordTradingCheck(connection, "rejected").catch(() => undefined)
     console.warn(`[mt5] order ${cmd.id} attempt ${attempts} failed${giveUp ? " (giving up)" : ""}: ${msg}`)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Trading passwords, checked when they are saved
+//
+// A password an account takes orders with used to be taken on trust: a wrong
+// one, or the investor password, was found out at the first trade that was not
+// copied. The app now marks a saved password "pending" (and the passwords
+// saved before were marked so once), and here it is put to the broker: one
+// login with it on a free shared terminal (bridge /check), and the answer is
+// written back for the pages to show (lib/order-execution/trading-check.ts).
+//
+// The answer is written only while the password is still the one that was
+// asked about. A "no" from the login is asked a second time before it is
+// believed: a terminal that has just been restarted says it for nothing now
+// and then. Anything that is not an answer (the terminal, a timeout, a bridge
+// still running older code) leaves it pending, and it is asked again later.
+const CHECK_RETRY_SECONDS = 20
+const CHECK_STALE_SECONDS = 180
+const CHECK_TRIES = 6
+const checkTries = new Map<number, number>()
+
+async function recordTradingCheck(connection: Connection, verdict: "ok" | "read_only" | "rejected" | "pending" | null) {
+  if (connection.tradingPasswordEnc == null) return
+  await db
+    .update(metatraderConnections)
+    .set({ tradingCheck: verdict, tradingCheckAt: new Date() })
+    .where(and(eq(metatraderConnections.id, connection.id), eq(metatraderConnections.tradingPasswordEnc, connection.tradingPasswordEnc)))
+}
+
+async function claimTradingCheck(): Promise<Connection | undefined> {
+  const claimed = await db.execute<{ id: number }>(sql`
+    update metatrader_connections set "tradingCheck" = 'checking', "tradingCheckAt" = now()
+    where id = (
+      select id from metatrader_connections
+      where platform = 'mt5' and "tradingPasswordEnc" is not null
+        and (("tradingCheck" = 'pending' and ("tradingCheckAt" is null or "tradingCheckAt" < now() - make_interval(secs => ${CHECK_RETRY_SECONDS})))
+          or ("tradingCheck" = 'checking' and "tradingCheckAt" < now() - make_interval(secs => ${CHECK_STALE_SECONDS})))
+      order by "tradingCheckAt" asc nulls first limit 1 for update skip locked
+    ) returning id`)
+  const id = claimed.rows[0]?.id
+  if (id == null) return undefined
+  const [row] = await db.select().from(metatraderConnections).where(eq(metatraderConnections.id, id))
+  return row
+}
+
+async function checkTradingPassword(bridge: Bridge, connection: Connection, broker: Broker) {
+  const ask = () => callBridge<{ tradeAllowed: boolean }>(bridge, "/check", { login: Number(connection.login), password: decrypt(connection.tradingPasswordEnc!), server: connection.server }, 150_000)
+  try {
+    if (bridge.broker !== broker.slug) {
+      await callBridge(bridge, "/reset", { serversDat: wineServersDat(broker.slug) }, 60_000)
+      bridge.broker = broker.slug
+      bridge.login = null
+    }
+    let verdict: "ok" | "read_only" | "rejected"
+    try {
+      verdict = (await ask()).tradeAllowed ? "ok" : "read_only"
+    } catch (err) {
+      if (!(err instanceof BridgeError) || err.kind !== "auth") throw err
+      try {
+        verdict = (await ask()).tradeAllowed ? "ok" : "read_only"
+      } catch (again) {
+        if (!(again instanceof BridgeError) || again.kind !== "auth") throw again
+        verdict = "rejected"
+      }
+    }
+    // the terminal is on this account now, in the session that password opens
+    bridge.login = connection.login
+    checkTries.delete(connection.id)
+    await recordTradingCheck(connection, verdict)
+    console.log(`[mt5] trading password of connection ${connection.id} (${connection.server}) on ${bridge.slot}: ${verdict}`)
+  } catch (err) {
+    const kind = err instanceof BridgeError ? err.kind : "internal"
+    if (kind === "not_found") bridge.noCheck = true
+    const tries = (checkTries.get(connection.id) ?? 0) + (kind === "not_found" ? 0 : 1)
+    checkTries.set(connection.id, tries)
+    // Not an answer. Asked again later; and after enough of that it is left
+    // unchecked, where the first order is the check, as it used to be.
+    const giveUp = tries >= CHECK_TRIES
+    if (giveUp) checkTries.delete(connection.id)
+    await recordTradingCheck(connection, giveUp ? null : "pending").catch(() => undefined)
+    console.warn(`[mt5] trading password of connection ${connection.id} on ${bridge.slot} not checked [${kind}]${giveUp ? " — giving up" : ""}: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+async function processTradingChecks() {
+  const now = Date.now()
+  const able = bridges.filter((b) => b.platform === "mt5" && b.alive && !b.busy && !b.noCheck && !(b.orderPin && b.orderPin.until > now))
+  if (able.length === 0) return
+  const connection = await claimTradingCheck()
+  if (!connection) return
+  const broker = brokerFor(connection.server)
+  if (!broker) {
+    await recordTradingCheck(connection, null)
+    return
+  }
+  const bridge = pickBridge(able, connection, broker)
+  bridge.busy = true
+  void checkTradingPassword(bridge, connection, broker).finally(() => {
+    bridge.busy = false
+  })
 }
 
 // Claim the single oldest pending order for one account — used to drain a
@@ -891,6 +1005,11 @@ async function main() {
       console.error("[mt5] order processing failed:", err instanceof Error ? err.message : err)
     }
     if (n % syncEvery === 0) {
+      try {
+        await processTradingChecks()
+      } catch (err) {
+        console.error("[mt5] trading password check failed:", err instanceof Error ? err.message : err)
+      }
       try {
         await tick()
       } catch (err) {
