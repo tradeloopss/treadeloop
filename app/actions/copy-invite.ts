@@ -9,11 +9,11 @@ import { joinShare } from "@/lib/copy/shares"
 // It asks for a signed-in trader and nothing more: the invitation is itself
 // what opens Copy Trading to them (lib/features/server.ts), so this can't sit
 // behind the feature as the other Copy Trading actions do.
-export async function acceptCopyInvite(token: string, attested: boolean): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+export async function acceptCopyInvite(token: string, attested: boolean, shareResults = false): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   try {
     const session = await auth.api.getSession({ headers: await headers() })
     if (!session?.user) throw new Error("Sign in to continue.")
-    const joined = await joinShare(session.user.id, String(token ?? ""), attested === true)
+    const joined = await joinShare(session.user.id, String(token ?? ""), attested === true, shareResults === true)
     // the menu now has Copy Trading in it
     revalidatePath("/", "layout")
     return { ok: true, name: joined.name }

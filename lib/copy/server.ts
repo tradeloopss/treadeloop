@@ -11,7 +11,7 @@ import { localDay } from "@/lib/timezone"
 import { detectProvider, providerProfile, validateConnection, validateDirection, validateExecution, validateRole, type Party, type Verdict } from "@/lib/compliance/engine"
 import { ComplianceError, parties, recordBlock, ruleSets } from "@/lib/compliance/server"
 import { accountKind, validateSharing } from "@/lib/compliance/kind"
-import { accountFacts, joinedShares, listShares } from "./shares"
+import { accountFacts, joinedShares, listShares, pausedShares } from "./shares"
 import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
@@ -400,7 +400,12 @@ async function sharingProblems(userId: string, leader: number, followers: number
   const lead = facts.get(leader)
   if (lead?.userId === userId) return []
   // not shared with this trader (any more): nothing is read from it
-  if (!lead || !(await joinedShares(userId)).some((s) => s.accountId === leader)) return [{ accountId: leader, provider: SHARED, reasonCode: "SHARE_ENDED", message: "This strategy is no longer shared with you." }]
+  if (!lead || !(await joinedShares(userId)).some((s) => s.accountId === leader)) {
+    // paused by its owner is not the same as gone: it can come back, and the trader is told which it is
+    const paused = (await pausedShares(userId)).find((s) => s.accountId === leader)
+    if (paused) return [{ accountId: leader, provider: SHARED, reasonCode: "SHARE_PAUSED", message: `${paused.owner} has paused your copying of “${paused.name}”. It can be switched back on when they resume it.` }]
+    return [{ accountId: leader, provider: SHARED, reasonCode: "SHARE_ENDED", message: "This strategy is no longer shared with you." }]
+  }
   const leaderKind = accountKind(lead)
   if (leaderKind.kind !== "broker") return [{ accountId: leader, provider: SHARED, reasonCode: "SHARED_LEADER_NOT_BROKER", message: `This strategy can't be copied any more. ${leaderKind.reason}` }]
   const problems: ComplianceProblem[] = []
@@ -416,14 +421,24 @@ async function sharingProblems(userId: string, leader: number, followers: number
 // When a strategy stops being shared with someone (removed by the owner, the
 // owner stops sharing, or they leave): their groups on it stop copying. What
 // they already hold is left as it is: only they close their own positions.
-export async function endSharedGroups(userIds: string[], accountId: number, why: string): Promise<number> {
+export async function endSharedGroups(userIds: string[], accountId: number, why: string, title = "Copying paused: the strategy is no longer shared"): Promise<number> {
   if (!userIds.length) return 0
   const groups = await db.update(copyGroups).set({ status: "paused", updatedAt: new Date() }).where(and(inArray(copyGroups.userId, userIds), eq(copyGroups.leaderAccountId, accountId), eq(copyGroups.status, "active"))).returning({ id: copyGroups.id, userId: copyGroups.userId })
   for (const g of groups) {
-    await note(g.userId, { groupId: g.id, level: "warning", code: "group_paused", title: "Copying paused: the strategy is no longer shared", body: `${why} Positions that are already open are left as they are.`, action: "Close them yourself in the Cockpit if you want to, or choose another Leader for the group." })
+    await note(g.userId, { groupId: g.id, level: "warning", code: "group_paused", title, body: `${why} Positions that are already open are left as they are.`, action: "Close them yourself in the Cockpit if you want to, or choose another Leader for the group." })
     await clearPlans(g.userId)
     await syncCopyRoles(g.userId)
   }
+  return groups.length
+}
+
+// The owner lets a friend they had paused carry on. Nothing starts by itself:
+// the friend's groups stay as they are, and the friend is told they can switch
+// them back on. (Copying that starts again on someone else's say-so, onto a
+// trader's own account, is not ours to do.)
+export async function tellSharedResumed(userId: string, accountId: number, name: string): Promise<number> {
+  const groups = await db.select({ id: copyGroups.id }).from(copyGroups).where(and(eq(copyGroups.userId, userId), eq(copyGroups.leaderAccountId, accountId)))
+  for (const g of groups) await note(userId, { groupId: g.id, level: "info", code: "share_resumed", title: `You can copy “${name}” again`, body: "Its owner has switched your copying back on.", action: "Switch the group on in the Cockpit when you are ready." })
   return groups.length
 }
 

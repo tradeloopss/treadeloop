@@ -79,7 +79,7 @@ test("what isn't released can't be opened by a user", () => {
   assert.equal(byId(admin, "agents").enabled, false)
   // Copy Trading follows its own release stage, and lists its four pages
   assert.deepEqual([byId(admin, "copy-trading").enabled, byId(admin, "copy-trading").badge], [true, "admin"])
-  assert.deepEqual(byId(admin, "copy-trading").children?.map((c) => c.label), ["Copy Dashboard", "Connection", "Cockpit", "Risk Management"])
+  assert.deepEqual(byId(admin, "copy-trading").children?.map((c) => c.label), ["Copy Dashboard", "Connection", "Cockpit", "Risk Management", "Friends"])
   assert.equal(sectionForPath("/copy-trading/risk-management"), "account-manager")
   assert.equal(itemForPath("/copy-trading/cockpit")?.item.id, "copy-trading")
 })

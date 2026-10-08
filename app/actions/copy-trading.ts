@@ -8,9 +8,11 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, disableOrders, enableOrders, flattenPositions, importContract, endSharedGroups, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, disableOrders, enableOrders, flattenPositions, importContract, endSharedGroups, tellSharedResumed, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
-import { createShare, leaveShare, removeMember, revokeShare, rotateShareLink, setShareOpen } from "@/lib/copy/shares"
+import { createShare, leaveShare, pauseMember, removeMember, renameShare, revokeShare, rotateShareLink, setResultsShared, setShareLimit, setShareOpen } from "@/lib/copy/shares"
+import type { FriendsOverview } from "@/lib/copy/friends"
+import { friendsOverview } from "@/lib/copy/friends-server"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
 // the one the session resolved; the feature's release stage is checked on
@@ -123,6 +125,27 @@ export const pauseAllCopying = async () => act(async ({ userId }) => ({ paused: 
 export const shareCopyAccount = async (accountId: number, name: string, attested: boolean) => act(async ({ userId }) => ({ share: await createShare(userId, { accountId: Number(accountId), name, attested: attested === true }) }))
 export const renewCopyShareLink = async (shareId: number) => act(async ({ userId }) => ({ token: await rotateShareLink(userId, Number(shareId)) }))
 export const setCopyShareOpen = async (shareId: number, open: boolean) => act(({ userId }) => setShareOpen(userId, Number(shareId), open === true))
+export const renameCopyShare = async (shareId: number, name: string) => act(({ userId }) => renameShare(userId, Number(shareId), name))
+export const setCopyShareLimit = async (shareId: number, max: number) => act(({ userId }) => setShareLimit(userId, Number(shareId), Number(max)))
+// Pausing one friend stops their copying at once and keeps their place; resuming it starts nothing by itself.
+export const pauseCopyShareFriend = async (shareId: number, friendId: string, paused: boolean) =>
+  act(async ({ userId }) => {
+    const friend = await pauseMember(userId, Number(shareId), String(friendId), paused === true)
+    if (paused === true) return { paused: await endSharedGroups([friend.userId], friend.accountId, `The owner of “${friend.name}” has paused your copying of it.`, "Copying paused by the strategy's owner") }
+    await tellSharedResumed(friend.userId, friend.accountId, friend.name)
+    return { paused: 0 }
+  })
+// The friend's own switch: whether the owner of a strategy may see what their copies of it came to.
+export const setCopyResultsShared = async (shareId: number, on: boolean) => act(({ userId }) => setResultsShared(userId, Number(shareId), on === true))
+// The Friends page (lib/copy/friends.ts), read for whoever the session is.
+export async function loadCopyFriends(): Promise<Result<{ overview: FriendsOverview }>> {
+  try {
+    const me = await who()
+    return { ok: true, overview: await friendsOverview(me.userId, me.timeZone) }
+  } catch (err) {
+    return fail(err)
+  }
+}
 export const removeCopyShareFriend = async (shareId: number, friendId: string) =>
   act(async ({ userId }) => {
     const gone = await removeMember(userId, Number(shareId), String(friendId))

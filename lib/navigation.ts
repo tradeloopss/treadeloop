@@ -108,6 +108,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { id: "copy-connection", label: "Connection", href: "/copy-trading/connection" },
           { id: "copy-cockpit", label: "Cockpit", href: "/copy-trading/cockpit" },
           { id: "copy-risk", label: "Risk Management", href: "/copy-trading/risk-management" },
+          { id: "copy-friends", label: "Friends", href: "/copy-trading/friends" },
         ],
       },
     ],

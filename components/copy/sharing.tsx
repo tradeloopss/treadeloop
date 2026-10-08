@@ -80,7 +80,12 @@ export function SharePanel({ account }: { account: AccountView }) {
                 <Copy className="size-3.5" aria-hidden /> Copy
               </button>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Anyone with this link can follow the strategy, and gets Copy Trading for it. Send it only to people you know.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Anyone with this link can follow the strategy, and gets Copy Trading for it. Send it only to people you know.{" "}
+              <Link href="/copy-trading/friends" className="font-medium text-primary hover:underline">
+                Manage friends and see their results
+              </Link>
+            </p>
           </div>
           <div>
             <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -96,7 +101,7 @@ export function SharePanel({ account }: { account: AccountView }) {
                       <span className="font-medium">{m.name}</span>
                       <span className="text-xs text-muted-foreground"> · joined {ago(m.joinedAt)}</span>
                     </span>
-                    <Pill tone={m.copying ? "good" : "none"}>{m.copying ? "Copying" : "Not copying"}</Pill>
+                    <Pill tone={m.paused ? "warn" : m.copying ? "good" : "none"}>{m.paused ? "Paused by you" : m.copying ? "Copying" : "Not copying"}</Pill>
                     <button type="button" aria-label={`Remove ${m.name}`} className={cn(linkBtn, "h-7 w-7 px-0")} onClick={() => setConfirm({ remove: m.userId, name: m.name })}>
                       <UserMinus className="size-3.5" aria-hidden />
                     </button>
@@ -276,6 +281,8 @@ export function JoinInvite({ token, invite }: { token: string; invite: InviteVie
   const router = useRouter()
   const { pending, run } = useAction()
   const [attested, setAttested] = useState(false)
+  // asked before it is so, and theirs to change afterwards on the Friends page
+  const [shareResults, setShareResults] = useState(true)
   if (!invite) {
     return (
       <div className="mx-auto max-w-lg rounded-2xl border bg-card p-6 text-center">
@@ -313,6 +320,8 @@ export function JoinInvite({ token, invite }: { token: string; invite: InviteVie
             Open Copy Trading
           </Link>
         </div>
+      ) : invite.state === "paused" ? (
+        <p className="mt-4 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">{invite.owner} has paused your copying of this strategy. It can be switched back on when they resume it: the link doesn&apos;t change that.</p>
       ) : closed ? (
         <p className="mt-4 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">{invite.state === "full" ? "This strategy already has as many friends as it allows." : "This strategy isn't taking new friends at the moment."} Ask {invite.owner} about it.</p>
       ) : (
@@ -321,7 +330,13 @@ export function JoinInvite({ token, invite }: { token: string; invite: InviteVie
             <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" checked={attested} onChange={(e) => setAttested(e.target.checked)} />
             <span>I will copy it only to my own accounts with a broker, never to a prop-firm account.</span>
           </label>
-          <button type="button" disabled={pending || !attested} className={cn(linkBtnPrimary, "h-10 px-4")} onClick={() => run(() => acceptCopyInvite(token, attested), async () => (toast.success(`“${invite.name}” was added. Create a Copy Group to start copying it.`), router.push("/copy-trading/connection")))}>
+          <label className="flex cursor-pointer items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" checked={shareResults} onChange={(e) => setShareResults(e.target.checked)} />
+            <span>
+              Let {invite.owner} see how my copies of it do: how many I hold and their profit or loss. <span className="text-muted-foreground">Never my balance, my account or my other trades. Optional, and I can change it later.</span>
+            </span>
+          </label>
+          <button type="button" disabled={pending || !attested} className={cn(linkBtnPrimary, "h-10 px-4")} onClick={() => run(() => acceptCopyInvite(token, attested, shareResults), async () => (toast.success(`“${invite.name}” was added. Create a Copy Group to start copying it.`), router.push("/copy-trading/connection")))}>
             {pending ? "Adding…" : "Follow this strategy"}
           </button>
         </div>

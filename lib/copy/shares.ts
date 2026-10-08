@@ -5,6 +5,7 @@ import { copyGroups, copyShareMembers, copyShares, metatraderConnections, propAc
 import { detectProvider } from "@/lib/compliance/engine"
 import { accountKind, type AccountFacts, type AccountKind } from "@/lib/compliance/kind"
 import { ruleSets } from "@/lib/compliance/server"
+import { MAX_FRIENDS } from "./friends"
 
 // Sharing a strategy with friends. A trader lets the people they invite copy
 // one of their Leader accounts onto accounts of their own: each friend builds
@@ -20,7 +21,7 @@ import { ruleSets } from "@/lib/compliance/server"
 //  - The owner sees who follows, and ends it for one friend or for all.
 //  - It is by invitation: there is no list of strategies to browse.
 
-export const MAX_FRIENDS = 10
+export { MAX_FRIENDS }
 export const MAX_JOINED = 10
 
 const cleanName = (raw: unknown) => String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, 60)
@@ -56,7 +57,9 @@ export async function kindsOf(accountIds: number[]): Promise<Map<number, Account
 
 // ------------------------------------------------------------------ the owner's side
 
-export type ShareMember = { userId: string; name: string; joinedAt: string; copying: boolean }
+// A friend keeps their place while the owner has paused them: counted, listed, and not copying.
+const MEMBER = ["active", "paused"]
+export type ShareMember = { userId: string; name: string; joinedAt: string; copying: boolean; paused: boolean }
 export type ShareView = { id: number; accountId: number; name: string; token: string; status: "active" | "paused"; maxFriends: number; members: ShareMember[]; createdAt: string }
 
 async function ownShare(ownerId: string, shareId: number) {
@@ -70,10 +73,10 @@ export async function listShares(ownerId: string): Promise<ShareView[]> {
   const shares = await db.select().from(copyShares).where(and(eq(copyShares.ownerId, ownerId), ne(copyShares.status, "revoked"))).orderBy(copyShares.createdAt)
   if (!shares.length) return []
   const members = await db
-    .select({ shareId: copyShareMembers.shareId, userId: copyShareMembers.userId, joinedAt: copyShareMembers.joinedAt, name: user.name })
+    .select({ shareId: copyShareMembers.shareId, userId: copyShareMembers.userId, status: copyShareMembers.status, joinedAt: copyShareMembers.joinedAt, name: user.name })
     .from(copyShareMembers)
     .leftJoin(user, eq(user.id, copyShareMembers.userId))
-    .where(and(inArray(copyShareMembers.shareId, shares.map((s) => s.id)), eq(copyShareMembers.status, "active")))
+    .where(and(inArray(copyShareMembers.shareId, shares.map((s) => s.id)), inArray(copyShareMembers.status, MEMBER)))
     .orderBy(copyShareMembers.joinedAt)
   const active = await db.select({ userId: copyGroups.userId, leaderAccountId: copyGroups.leaderAccountId }).from(copyGroups).where(and(inArray(copyGroups.leaderAccountId, shares.map((s) => s.accountId)), eq(copyGroups.status, "active")))
   return shares.map((s) => ({
@@ -83,7 +86,7 @@ export async function listShares(ownerId: string): Promise<ShareView[]> {
     token: s.token,
     status: s.status === "paused" ? "paused" : "active",
     maxFriends: s.maxFriends,
-    members: members.filter((m) => m.shareId === s.id).map((m) => ({ userId: m.userId, name: firstName(m.name), joinedAt: m.joinedAt.toISOString(), copying: active.some((g) => g.userId === m.userId && g.leaderAccountId === s.accountId) })),
+    members: members.filter((m) => m.shareId === s.id).map((m) => ({ userId: m.userId, name: firstName(m.name), joinedAt: m.joinedAt.toISOString(), paused: m.status === "paused", copying: m.status === "active" && active.some((g) => g.userId === m.userId && g.leaderAccountId === s.accountId) })),
     createdAt: s.createdAt.toISOString(),
   }))
 }
@@ -110,6 +113,31 @@ export async function renameShare(ownerId: string, shareId: number, raw: unknown
   const name = cleanName(raw)
   if (name.length < 2) throw new Error("Give the strategy a name your friends will recognise.")
   await db.update(copyShares).set({ name, updatedAt: new Date() }).where(eq(copyShares.id, shareId))
+}
+
+// How many friends may follow it, from one to the most there can be. Lowering it below how many
+// follow already removes nobody: it only keeps anyone new out until there is room.
+export async function setShareLimit(ownerId: string, shareId: number, raw: unknown): Promise<void> {
+  await ownShare(ownerId, shareId)
+  const max = Number(raw)
+  if (!Number.isInteger(max) || max < 1 || max > MAX_FRIENDS) throw new Error(`A strategy can have from 1 to ${MAX_FRIENDS} friends.`)
+  await db.update(copyShares).set({ maxFriends: max, updatedAt: new Date() }).where(eq(copyShares.id, shareId))
+}
+
+// Pauses one friend, or lets them carry on. Paused, they keep their place and
+// the strategy is not shared with them: every check of "is this shared with
+// me" reads active memberships only (joinedShares), so nothing is read from the
+// account for them and none of their groups on it can run. Returns the friend,
+// whose groups the caller then stops (pause) or who is told (resume).
+export async function pauseMember(ownerId: string, shareId: number, memberUserId: string, paused: boolean): Promise<{ userId: string; accountId: number; name: string }> {
+  const s = await ownShare(ownerId, shareId)
+  const [row] = await db
+    .update(copyShareMembers)
+    .set({ status: paused ? "paused" : "active", updatedAt: new Date() })
+    .where(and(eq(copyShareMembers.shareId, shareId), eq(copyShareMembers.userId, String(memberUserId)), eq(copyShareMembers.status, paused ? "active" : "paused")))
+    .returning({ id: copyShareMembers.id })
+  if (!row) throw new Error(paused ? "That friend isn't following this strategy." : "That friend isn't paused.")
+  return { userId: String(memberUserId), accountId: s.accountId, name: s.name }
 }
 
 // A new link: the old one stops working. Friends who already joined stay.
@@ -144,7 +172,7 @@ export async function revokeShare(ownerId: string, shareId: number): Promise<{ u
 
 // ------------------------------------------------------------------ the friend's side
 
-export type InviteView = { name: string; owner: string; platform: string; state: "open" | "joined" | "own" | "full" | "closed" }
+export type InviteView = { name: string; owner: string; platform: string; state: "open" | "joined" | "paused" | "own" | "full" | "closed" }
 
 // What an invitation shows before it is accepted: the strategy's name, who
 // shares it, and the platform. Nothing about the account itself.
@@ -157,36 +185,57 @@ export async function readInvite(userId: string, token: string): Promise<InviteV
     .limit(1)
   if (!s) return null
   const [mt] = await db.select({ platform: metatraderConnections.platform }).from(metatraderConnections).where(eq(metatraderConnections.accountId, s.accountId)).limit(1)
-  const members = await db.select({ userId: copyShareMembers.userId }).from(copyShareMembers).where(and(eq(copyShareMembers.shareId, s.id), eq(copyShareMembers.status, "active")))
-  const state: InviteView["state"] = s.ownerId === userId ? "own" : members.some((m) => m.userId === userId) ? "joined" : s.status !== "active" ? "closed" : members.length >= s.maxFriends ? "full" : "open"
+  const members = await db.select({ userId: copyShareMembers.userId, status: copyShareMembers.status }).from(copyShareMembers).where(and(eq(copyShareMembers.shareId, s.id), inArray(copyShareMembers.status, MEMBER)))
+  const mine = members.find((m) => m.userId === userId)
+  const state: InviteView["state"] = s.ownerId === userId ? "own" : mine ? (mine.status === "paused" ? "paused" : "joined") : s.status !== "active" ? "closed" : members.length >= s.maxFriends ? "full" : "open"
   return { name: s.name, owner: firstName(s.owner), platform: mt?.platform === "mt4" ? "MetaTrader 4" : "MetaTrader 5", state }
 }
 
 // Accepts an invitation. The friend says they will copy it to broker accounts
 // of their own only; the engine checks each account all the same.
-export async function joinShare(userId: string, token: string, attested: boolean): Promise<{ shareId: number; name: string }> {
+// `shareResults`: they let the owner see what their copies of it come to (lib/copy/friends.ts); theirs to change later.
+export async function joinShare(userId: string, token: string, attested: boolean, shareResults = false): Promise<{ shareId: number; name: string }> {
   const [s] = await db.select().from(copyShares).where(and(eq(copyShares.token, String(token ?? "").slice(0, 80)), ne(copyShares.status, "revoked"))).limit(1)
   if (!s) throw new Error("This invitation is no longer valid. Ask your friend for a new link.")
   if (s.ownerId === userId) throw new Error("This is your own strategy.")
   if (attested !== true) throw new Error("Confirm that you will copy it only to your own broker accounts.")
   const [mine] = await db.select().from(copyShareMembers).where(and(eq(copyShareMembers.shareId, s.id), eq(copyShareMembers.userId, userId))).limit(1)
   if (mine?.status === "active") return { shareId: s.id, name: s.name }
+  // paused by the owner: the link does not undo that
+  if (mine?.status === "paused") throw new Error("The owner of this strategy has paused your copying of it. Ask them to switch it back on.")
   if (s.status !== "active") throw new Error("This strategy isn't taking new friends at the moment.")
   // counted and added in one statement each way round: two friends accepting the last place don't both get it
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(copyShareMembers).where(and(eq(copyShareMembers.shareId, s.id), eq(copyShareMembers.status, "active")))
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(copyShareMembers).where(and(eq(copyShareMembers.shareId, s.id), inArray(copyShareMembers.status, MEMBER)))
   if (n >= s.maxFriends) throw new Error("This strategy already has as many friends as it allows.")
-  const [{ joined }] = await db.select({ joined: sql<number>`count(*)::int` }).from(copyShareMembers).where(and(eq(copyShareMembers.userId, userId), eq(copyShareMembers.status, "active")))
+  const [{ joined }] = await db.select({ joined: sql<number>`count(*)::int` }).from(copyShareMembers).where(and(eq(copyShareMembers.userId, userId), inArray(copyShareMembers.status, MEMBER)))
   if (joined >= MAX_JOINED) throw new Error(`You can follow up to ${MAX_JOINED} shared strategies.`)
-  if (mine) await db.update(copyShareMembers).set({ status: "active", joinedAt: new Date(), updatedAt: new Date() }).where(eq(copyShareMembers.id, mine.id))
-  else await db.insert(copyShareMembers).values({ shareId: s.id, userId }).onConflictDoNothing()
+  if (mine) await db.update(copyShareMembers).set({ status: "active", shareResults: shareResults === true, joinedAt: new Date(), updatedAt: new Date() }).where(eq(copyShareMembers.id, mine.id))
+  else await db.insert(copyShareMembers).values({ shareId: s.id, userId, shareResults: shareResults === true }).onConflictDoNothing()
   return { shareId: s.id, name: s.name }
 }
 
 // Stops following. Returns the account, whose groups of this friend's the caller then stops.
 export async function leaveShare(userId: string, shareId: number): Promise<{ accountId: number; name: string } | null> {
   const [s] = await db.select({ accountId: copyShares.accountId, name: copyShares.name }).from(copyShares).where(eq(copyShares.id, Number(shareId))).limit(1)
-  const [row] = await db.update(copyShareMembers).set({ status: "left", updatedAt: new Date() }).where(and(eq(copyShareMembers.shareId, Number(shareId)), eq(copyShareMembers.userId, userId), eq(copyShareMembers.status, "active"))).returning({ id: copyShareMembers.id })
+  const [row] = await db.update(copyShareMembers).set({ status: "left", updatedAt: new Date() }).where(and(eq(copyShareMembers.shareId, Number(shareId)), eq(copyShareMembers.userId, userId), inArray(copyShareMembers.status, MEMBER))).returning({ id: copyShareMembers.id })
   return s && row ? s : null
+}
+
+// Whether the owner of a strategy may see what this trader's copies of it came to. The trader's own switch.
+export async function setResultsShared(userId: string, shareId: number, on: boolean): Promise<void> {
+  const [row] = await db.update(copyShareMembers).set({ shareResults: on === true, updatedAt: new Date() }).where(and(eq(copyShareMembers.shareId, Number(shareId)), eq(copyShareMembers.userId, userId), inArray(copyShareMembers.status, MEMBER))).returning({ id: copyShareMembers.id })
+  if (!row) throw new Error("You don't follow that strategy.")
+}
+
+// The shared accounts this trader's copying of has been paused by its owner: to say so, where a group on one is refused.
+export async function pausedShares(userId: string): Promise<{ accountId: number; name: string; owner: string }[]> {
+  const rows = await db
+    .select({ accountId: copyShares.accountId, name: copyShares.name, owner: user.name })
+    .from(copyShareMembers)
+    .innerJoin(copyShares, eq(copyShares.id, copyShareMembers.shareId))
+    .leftJoin(user, eq(user.id, copyShares.ownerId))
+    .where(and(eq(copyShareMembers.userId, userId), eq(copyShareMembers.status, "paused"), ne(copyShares.status, "revoked")))
+  return rows.map((r) => ({ ...r, owner: firstName(r.owner) }))
 }
 
 // Copy Trading by invitation: someone a trader shares a strategy with may use
@@ -199,7 +248,7 @@ export async function invitedToCopyTrading(userId: string): Promise<boolean> {
       .select({ id: copyShareMembers.id })
       .from(copyShareMembers)
       .innerJoin(copyShares, eq(copyShares.id, copyShareMembers.shareId))
-      .where(and(eq(copyShareMembers.userId, userId), eq(copyShareMembers.status, "active"), ne(copyShares.status, "revoked")))
+      .where(and(eq(copyShareMembers.userId, userId), inArray(copyShareMembers.status, MEMBER), ne(copyShares.status, "revoked")))
       .limit(1)
     if (member) return true
     const [was] = await db.select({ id: copyShareMembers.id }).from(copyShareMembers).where(eq(copyShareMembers.userId, userId)).limit(1)

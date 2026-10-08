@@ -124,9 +124,10 @@ const TABS = [
   { href: "/copy-trading/connection", label: "Connection" },
   { href: "/copy-trading/cockpit", label: "Cockpit" },
   { href: "/copy-trading/risk-management", label: "Risk Management" },
+  { href: "/copy-trading/friends", label: "Friends" },
 ]
 
-// The four pages of Copy Trading. The group being looked at travels with the link.
+// The pages of Copy Trading. The group being looked at travels with the link.
 export function CopyTabs() {
   const pathname = usePathname()
   const params = useSearchParams()

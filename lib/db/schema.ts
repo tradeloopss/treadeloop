@@ -2406,7 +2406,9 @@ export const copyShareMembers = pgTable(
     id: serial("id").primaryKey(),
     shareId: integer("shareId").notNull(),
     userId: text("userId").notNull(),
-    status: text("status").notNull().default("active"), // active | removed (by the owner) | left
+    status: text("status").notNull().default("active"), // active | paused (by the owner: no copying, place kept) | removed (by the owner) | left
+    // the friend lets the strategy's owner see what their copies of it came to (lib/copy/friends.ts)
+    shareResults: boolean("shareResults").notNull().default(false),
     joinedAt: timestamp("joinedAt").notNull().defaultNow(),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),
   },
