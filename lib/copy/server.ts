@@ -2,11 +2,12 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
+import { encrypt } from "@/lib/crypto"
 import { readHeartbeat } from "@/lib/heartbeat"
 import type { AccountEvaluation } from "@/lib/propmax/engine"
 import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
-import { detectProvider, providerProfile, validateDirection, validateExecution, validateRole, type Party, type Verdict } from "@/lib/compliance/engine"
+import { detectProvider, providerProfile, validateConnection, validateDirection, validateExecution, validateRole, type Party, type Verdict } from "@/lib/compliance/engine"
 import { ComplianceError, parties, recordBlock, ruleSets } from "@/lib/compliance/server"
 import { accountKind, validateSharing } from "@/lib/compliance/kind"
 import { accountFacts, joinedShares, listShares } from "./shares"
@@ -14,7 +15,7 @@ import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./cont
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
 import { classifyFailure } from "./errors"
-import { groupScope, symbolScope, accountIn, type AccountScope, type AccountView, type ComplianceProblem, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
+import { groupScope, symbolScope, accountIn, isUnderway, type AccountScope, type AccountView, type ComplianceProblem, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
 // turns a change on the leader's account into orders for the followers.
@@ -204,6 +205,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
     const set = m ? detectProvider(sets, m.server) : null
     const execution = validateExecution(set)
     const canExecute = !!m && m.platform === "mt5" && !!m.hasTrading && execution.allowed
+    const canAllowOrders = !!m && m.platform === "mt5" && execution.allowed && validateConnection(set, { credential: "trading", acknowledged: true }).allowed
     return {
       id: a.id,
       name: a.name,
@@ -226,8 +228,10 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       canExecute,
       provider: set?.provider ?? null,
       connectedBy: m || r ? "TradeLoop cloud" : p ? (p.provider === "tradingview" ? "Browser extension" : title(p.provider)) : "Not connected",
-      authentication: m ? (m.hasTrading ? "Investor + trading password" : "Investor / read-only") : r ? "Rithmic login" : p ? "Paired session" : null,
-      executionNote: canExecute ? "Orders can be placed on this account." : !execution.allowed ? execution.message : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : "Add the account's master (trading) password in the Trade Manager to allow orders.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
+      // TradeLoop can't tell an investor password from a master one: only whether a password to trade with is kept
+      authentication: m ? (m.hasTrading ? "Login password + trading password" : "Login password only (orders not allowed)") : r ? "Rithmic login" : p ? "Paired session" : null,
+      canAllowOrders,
+      executionNote: canExecute ? "Orders can be placed on this account." : !execution.allowed ? execution.message : m ? (m.platform === "mt4" ? "MetaTrader 4 can't receive orders from TradeLoop yet." : canAllowOrders ? "Orders aren't allowed on this account yet. Allow them on the Connection page: Manage, then Allow orders." : "TradeLoop can't place orders on this account.") : r || p ? `${r ? "Rithmic" : title(p!.provider)} accounts can't receive orders from TradeLoop yet.` : "A manual account can't receive orders.",
       dayPnl: (closedToday.get(a.id) ?? 0) + (openPnl ?? 0),
       openPnl,
       openNotional: mine.reduce((s, x) => {
@@ -283,6 +287,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
         shared: { shareId: j.shareId, owner: j.owner },
         sharing: { ok: true },
         canExecute: false,
+        canAllowOrders: false,
         executionNote: "A friend's account: TradeLoop reads its trades for you, and never places an order on it.",
         dayPnl: 0,
         openPnl: null,
@@ -710,6 +715,48 @@ export async function setAccountRole(userId: string, accountId: number, role: st
   await db.insert(copyAccountPrefs).values({ accountId, userId, role: clean }).onConflictDoUpdate({ target: copyAccountPrefs.accountId, set: { role: clean, updatedAt: new Date() } })
 }
 
+// Orders on a follower, switched on from inside Copy Trading.
+//
+// A MetaTrader 5 account is read with the password it was connected with, and
+// takes orders only when a password to trade with is kept beside it. That is
+// the trader's own decision, account by account, and it is made here as well
+// as in the Trade Manager: `password` is the master password they typed, or
+// null for "the one I connected with". Someone who connected with the master
+// password has already given the one that trades, and being sent to another
+// page to type it again read as a refusal. In that case the stored ciphertext
+// is kept a second time; nothing is decrypted here.
+//
+// The provider's rules are asked first (lib/compliance): where they keep an
+// account read-only, no trading password is kept for it by either route.
+// Whether the password really can trade is the broker's to say. An investor
+// password logs in and has its first order refused ("Trade disabled"), and
+// the alert for that says so (lib/copy/errors.ts).
+export async function enableOrders(userId: string, accountId: number, password: string | null): Promise<void> {
+  await ownAccounts(userId, [accountId])
+  const typed = password?.trim() ?? null
+  if (typed != null && !typed) throw new Error("Enter the account's master (trading) password.")
+  if (typed != null && typed.length > 128) throw new Error("That password is too long.")
+  const [mt] = await db.select({ id: metatraderConnections.id, platform: metatraderConnections.platform, server: metatraderConnections.server, name: tradingAccounts.name }).from(metatraderConnections).innerJoin(tradingAccounts, eq(tradingAccounts.id, metatraderConnections.accountId)).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId)))
+  if (!mt) throw new Error("Only a MetaTrader 5 account can receive orders from TradeLoop.")
+  if (mt.platform !== "mt5") throw new Error("MetaTrader 4 can't receive orders from TradeLoop yet.")
+  const permitted = validateConnection(detectProvider(await ruleSets(), mt.server), { credential: "trading", acknowledged: true })
+  if (!permitted.allowed) {
+    await recordBlock(userId, permitted, { accountId, action: "allow_orders" })
+    throw new ComplianceError(permitted)
+  }
+  await db.update(metatraderConnections).set({ tradingPasswordEnc: typed != null ? encrypt(typed) : sql`${metatraderConnections.passwordEnc}` }).where(eq(metatraderConnections.id, mt.id))
+  await note(userId, { accountId, level: "success", code: "orders_allowed", title: `Orders allowed — ${mt.name}`, body: typed != null ? "TradeLoop places orders on it with the trading password you entered." : "TradeLoop places orders on it with the password it was connected with.", action: "The first order shows whether the broker lets this password trade. If it answers “Trade disabled”, it is the investor password: enter the master password instead." })
+}
+
+// And off again: the trading password is forgotten, and the account goes back to being read only.
+export async function disableOrders(userId: string, accountId: number): Promise<void> {
+  await ownAccounts(userId, [accountId])
+  const [mt] = await db.update(metatraderConnections).set({ tradingPasswordEnc: null }).where(and(eq(metatraderConnections.userId, userId), eq(metatraderConnections.accountId, accountId), isNotNull(metatraderConnections.tradingPasswordEnc))).returning({ id: metatraderConnections.id })
+  if (!mt) return
+  const [a] = await db.select({ name: tradingAccounts.name }).from(tradingAccounts).where(eq(tradingAccounts.id, accountId))
+  await note(userId, { accountId, level: "info", code: "orders_stopped", title: `Orders turned off — ${a?.name ?? "account"}`, body: "TradeLoop no longer keeps a trading password for this account, and places no orders on it." })
+}
+
 // Takes an account out of every group it follows (the Connection page's "Disconnect").
 export async function detachAccount(userId: string, accountId: number): Promise<void> {
   await ownAccounts(userId, [accountId])
@@ -849,8 +896,9 @@ async function place(ctx: Ctx, orderId: number, o: { leaderPositionId: number; a
   }
   await db.update(copyOrders).set({ status, reason, orderCommandId: commandId, executionPrice: ctx.mode === "simulation" ? str(o.entry) : null, updatedAt: new Date() }).where(eq(copyOrders.id, orderId))
   if (status !== "filled" && status !== "sent") {
-    const name = ctx.state.accounts.find((a) => a.id === o.accountId)?.name ?? "A follower"
-    await note(ctx.userId, { groupId: ctx.group.id, accountId: o.accountId, level: "error", code: `order_${status}`, title: `${status === "unsupported" ? "Order not sent" : `${classifyFailure(reason).label}: order ${status}`} — ${name}`, body: reason, action: status === "unsupported" ? "Use a MetaTrader 5 account with its master password added, or keep this group in simulation." : classifyFailure(reason).action })
+    const account = ctx.state.accounts.find((a) => a.id === o.accountId)
+    const name = account?.name ?? "A follower"
+    await note(ctx.userId, { groupId: ctx.group.id, accountId: o.accountId, level: "error", code: `order_${status}`, title: `${status === "unsupported" ? "Order not sent" : `${classifyFailure(reason).label}: order ${status}`} — ${name}`, body: reason, action: status === "unsupported" ? (account?.canAllowOrders ? "Allow orders on this account, then use Retry." : "Use a MetaTrader 5 account that orders are allowed on, or keep this group in simulation.") : classifyFailure(reason).action })
     return
   }
   // the follower's own position: added to when it already holds this trade
@@ -1192,13 +1240,17 @@ export async function retryOrder(userId: string, orderId: number, timeZone: stri
   if (!o) throw new Error("That order no longer exists.")
   if (o.action !== "open" && o.action !== "increase") throw new Error("Only an entry can be tried again.")
   if (!["blocked", "failed", "rejected", "unsupported"].includes(o.status)) throw new Error("That order doesn't need to be tried again.")
+  // One copy of a trade per account. An earlier retry that went out is the
+  // copy: Retry pressed again (the alert is still on the page) must not open it twice.
+  const attempts = await db.select({ status: copyOrders.status }).from(copyOrders).where(and(eq(copyOrders.userId, userId), eq(copyOrders.masterOrderId, o.masterOrderId), eq(copyOrders.followerAccountId, o.followerAccountId)))
+  if (attempts.some((a) => isUnderway(a.status))) throw new Error("This trade has already been sent to the account. Check its position before trying again.")
   const state = await loadCopyState(userId, timeZone)
   const group = state.groups.find((g) => g.id === o.groupId)
   if (!group || group.status !== "active") throw new Error("The group isn't copying. Activate it first.")
   const m = o.masterOrderId.match(/^m\d+-p(\d+)-v(\d+)$/)
   const [leader] = m ? await db.select().from(copyPositions).where(and(eq(copyPositions.id, Number(m[1])), eq(copyPositions.userId, userId), eq(copyPositions.status, "open"))) : []
   if (!leader) throw new Error("The Leader has closed this position, so there is nothing left to copy.")
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(copyOrders).where(and(eq(copyOrders.userId, userId), eq(copyOrders.masterOrderId, o.masterOrderId), eq(copyOrders.followerAccountId, o.followerAccountId)))
+  const n = attempts.length
   const live = state.positions.find((p) => !p.simulated && p.accountId === leader.accountId && p.symbol === leader.symbol && p.side === leader.side)
   const p: LivePosition = { key: leader.positionRef ?? "", symbol: leader.symbol, side: leader.side as Side, quantity: Number(leader.quantity), entry: num(leader.entryPrice), stopLoss: num(leader.stopLoss), takeProfit: num(leader.takeProfit), price: live?.current ?? null }
   const now = new Date()

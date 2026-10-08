@@ -8,7 +8,7 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenPositions, importContract, endSharedGroups, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, disableOrders, enableOrders, flattenPositions, importContract, endSharedGroups, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
 import { createShare, leaveShare, removeMember, revokeShare, rotateShareLink, setShareOpen } from "@/lib/copy/shares"
 
@@ -97,6 +97,18 @@ export const importCopyContract = async (groupId: number, symbol: string) => act
 export const removeCopyContract = async (groupId: number, symbol: string) => act(({ userId }) => removeContract(userId, Number(groupId), symbol))
 export const setCopyAccountRole = async (accountId: number, role: string) => act(({ userId }) => setAccountRole(userId, Number(accountId), role))
 export const detachCopyAccount = async (accountId: number) => act(({ userId }) => detachAccount(userId, Number(accountId)))
+// Orders on a follower: allowed with the password it was connected with, or with one typed here. Anything
+// that isn't plainly "the one I connected with" is read as a typed password, so nothing is allowed by accident.
+export const allowCopyOrders = async (accountId: number, how: { use: "login" } | { use: "typed"; password: string }) =>
+  act(async ({ userId }) => {
+    await enableOrders(userId, Number(accountId), how?.use === "login" ? null : String((how as { password?: unknown } | null)?.password ?? ""))
+    revalidatePath("/trade-manager")
+  })
+export const stopCopyOrders = async (accountId: number) =>
+  act(async ({ userId }) => {
+    await disableOrders(userId, Number(accountId))
+    revalidatePath("/trade-manager")
+  })
 export const readCopyAlerts = async () => act(({ userId }) => markEventsRead(userId))
 export const retryCopyOrder = async (orderId: number) => act(({ userId, timeZone }) => retryOrder(userId, Number(orderId), timeZone))
 

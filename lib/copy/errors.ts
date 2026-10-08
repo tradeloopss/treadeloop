@@ -28,7 +28,7 @@ const ACTIONS: Record<FailureCategory, string> = {
   market_closed: "The market for this symbol is closed. Nothing to do: the next trade is copied when it is open.",
   broker_rejection: "The broker refused the order. Check the account in the Trade Manager, then use Retry.",
   compliance: "The provider's rules don't allow this. Choose a different Follower, or see the provider's rules on the account.",
-  account_disabled: "Trading is switched off for this account at the broker, or the saved password can't trade. Check the trading password in the Trade Manager.",
+  account_disabled: "The broker won't let this login trade: the saved password is the investor (read-only) one, or trading is switched off for the account. Enter the master password under Allow orders, then use Retry.",
   timeout: "The broker didn't answer in time. Check the account before retrying: the position may already be open.",
   unknown: "Check the account in the Trade Manager.",
 }
@@ -46,6 +46,9 @@ const PATTERNS: [FailureCategory, RegExp][] = [
   ["connection", /\bipc\b|no connection|connection (lost|failed)|not connected|disconnected|terminal|bridge|its record is gone/i],
   ["broker_rejection", /reject|requote|price changed|invalid stops|invalid request|invalid price|too many requests|retcode|refused/i],
 ]
+
+// An alert its trader can put right on the spot: the order had no password that trades to go out with.
+export const wantsOrdersAllowed = (e: { code: string; body: string | null }): boolean => e.code === "order_unsupported" || (e.code.startsWith("order_") && classifyFailure(e.body).category === "account_disabled")
 
 export function classifyFailure(message: string | null | undefined): { category: FailureCategory; label: string; action: string } {
   const text = message ?? ""

@@ -7,7 +7,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { refreshCopy } from "@/app/actions/copy-trading"
+import { wantsOrdersAllowed } from "@/lib/copy/errors"
 import { groupCopies, type AccountView, type CopyState, type GroupView } from "@/lib/copy/view"
+import { AllowOrdersDialog } from "./allow-orders"
 
 // The Copy Trading pages share one picture of the trader's setup. It is loaded
 // with the page and refreshed while the page is in front — every 5 seconds in
@@ -20,6 +22,8 @@ type Store = {
   group: GroupView | null
   selectGroup: (id: number) => void
   account: (id: number) => AccountView | undefined
+  // open "Allow orders" for one of the trader's accounts (allow-orders.tsx)
+  allowOrders: (accountId: number) => void
   // ask for fresh data now (after something was changed)
   refresh: () => Promise<void>
   refreshing: boolean
@@ -33,6 +37,8 @@ export function useCopy(): Store {
 }
 
 const signature = (s: CopyState) => JSON.stringify({ ...s, at: "" })
+// what the trader has just done themselves, and was told as they did it
+const QUIET = new Set(["orders_allowed", "orders_stopped"])
 
 export function CopyProvider({ initial, children }: { initial: CopyState; children: React.ReactNode }) {
   const pathname = usePathname()
@@ -43,11 +49,16 @@ export function CopyProvider({ initial, children }: { initial: CopyState; childr
   const last = useRef(signature(initial))
   const seen = useRef({ event: Math.max(0, ...initial.events.map((e) => e.id)), copies: new Set(initial.orders.map((o) => o.masterOrderId)) })
   const busy = useRef(false)
+  const [allowing, setAllowing] = useState<number | null>(null)
 
   const apply = useCallback((next: CopyState) => {
     // tell the trader what happened since the last look
-    const events = next.events.filter((e) => e.id > seen.current.event).reverse()
-    for (const e of events.slice(-3)) (e.level === "error" ? toast.error : e.level === "warning" ? toast.warning : e.level === "success" ? toast.success : toast.message)(e.title, { description: e.body ?? undefined })
+    const events = next.events.filter((e) => e.id > seen.current.event && !QUIET.has(e.code)).reverse()
+    for (const e of events.slice(-3)) {
+      // an order that had no password to go out with: the way to give it one, on the message itself
+      const account = wantsOrdersAllowed(e) ? next.accounts.find((a) => a.id === e.accountId && a.canAllowOrders) : undefined
+      ;(e.level === "error" ? toast.error : e.level === "warning" ? toast.warning : e.level === "success" ? toast.success : toast.message)(e.title, { description: e.body ?? undefined, action: account ? { label: "Allow orders", onClick: () => setAllowing(account.id) } : undefined })
+    }
     for (const c of groupCopies(next.orders).filter((c) => !seen.current.copies.has(c.masterOrderId)).slice(0, 3)) {
       if (c.filled === c.total && c.total > 0) toast.success(`Trade copied: ${c.side === "long" ? "BUY" : "SELL"} ${c.symbol}`, { description: `${c.filled}/${c.total} followers${c.simulated ? " (simulated)" : ""}` })
     }
@@ -98,8 +109,14 @@ export function CopyProvider({ initial, children }: { initial: CopyState; childr
     [params, pathname, router],
   )
   const byId = useMemo(() => new Map([...state.accounts, ...state.shared].map((a) => [a.id, a])), [state.accounts, state.shared])
-  const store = useMemo<Store>(() => ({ state, group, selectGroup, account: (id) => byId.get(id), refresh, refreshing }), [state, group, selectGroup, byId, refresh, refreshing])
-  return <Ctx.Provider value={store}>{children}</Ctx.Provider>
+  const store = useMemo<Store>(() => ({ state, group, selectGroup, account: (id) => byId.get(id), allowOrders: setAllowing, refresh, refreshing }), [state, group, selectGroup, byId, refresh, refreshing])
+  const asking = allowing != null ? state.accounts.find((a) => a.id === allowing && a.canAllowOrders) : undefined
+  return (
+    <Ctx.Provider value={store}>
+      {children}
+      <AllowOrdersDialog account={asking ?? null} onClose={() => setAllowing(null)} onDone={refresh} />
+    </Ctx.Provider>
+  )
 }
 
 const TABS = [

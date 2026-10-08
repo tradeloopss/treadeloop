@@ -46,6 +46,9 @@ export type AccountView = {
   // whether TradeLoop can place orders on it (live mode needs this)
   canExecute: boolean
   executionNote: string
+  // whether orders can be switched on (or off) for it from Copy Trading: a MetaTrader 5
+  // account at a provider that lets TradeLoop keep a trading password for it
+  canAllowOrders: boolean
   dayPnl: number
   openPnl: number | null
   openNotional: number
@@ -155,6 +158,8 @@ export const ORDER_STATUS: Record<string, { label: string; tone: "good" | "ok" |
   unsupported: { label: "Not supported", tone: "bad" },
 }
 export const isFilled = (status: string) => status === "filled"
+// an attempt that is the copy, or is about to be: sending the same trade to the account again would open it twice
+export const isUnderway = (status: string) => status === "pending" || status === "sent" || status === "filled" || status === "partial"
 export const isFailure = (status: string) => status === "rejected" || status === "failed" || status === "blocked" || status === "unsupported" || status === "partial"
 
 export const money = (v: number | null | undefined, signed = false) => {

@@ -163,7 +163,7 @@ function SecurityNote({ className }: { className?: string }) {
 }
 
 export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { state, refresh } = useCopy()
+  const { state, allowOrders, refresh } = useCopy()
   const router = useRouter()
   const { pending, run } = useAction()
   const [step, setStep] = useState(0)
@@ -457,6 +457,22 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
                 <Check className="mx-auto size-6 text-[var(--gain)]" aria-hidden />
                 <p className="mt-2 text-base font-semibold">{account.name} is ready.</p>
                 <p className="mt-1 text-sm text-muted-foreground">Add it to a Copy Group to start using it as a {ROLE_LABELS[role].toLowerCase()}.</p>
+                {/* a follower takes orders only once its trader has allowed them: asked here, not three pages away */}
+                {role !== "leader" && account.canAllowOrders && (
+                  <div className={cn("mt-4 rounded-xl border p-3 text-start text-sm", !account.canExecute && "border-[var(--warning)]/50 bg-[var(--warning)]/10")}>
+                    {account.canExecute ? (
+                      <p className="font-medium">Orders are allowed on this account.</p>
+                    ) : (
+                      <>
+                        <p className="font-medium">One more step for a follower: allow orders</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">To copy trades into this account in Live, TradeLoop has to place orders on it. That takes its master (trading) password: the one you connected with, if that was the master password, or enter it now.</p>
+                        <button type="button" className={cn(linkBtnPrimary, "mt-2")} onClick={() => allowOrders(account.id)}>
+                          Allow orders
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
                 <button type="button" className={cn(linkBtnPrimary, "mt-4")} onClick={close}>
                   Done
                 </button>

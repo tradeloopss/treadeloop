@@ -534,7 +534,7 @@ export { ConnectAccountDialog } from "./connect-account"
 
 // One account in detail: its connection, its balance, what it is used for.
 export function AccountDrawer({ accountId, onClose }: { accountId: number | null; onClose: () => void }) {
-  const { state, account, refresh } = useCopy()
+  const { state, account, allowOrders, refresh } = useCopy()
   const router = useRouter()
   const { pending, run } = useAction()
   const [confirm, setConfirm] = useState(false)
@@ -590,10 +590,21 @@ export function AccountDrawer({ accountId, onClose }: { accountId: number | null
                 ["Day P&L", money(a.dayPnl, true)],
                 ["Latency", a.latencyMs != null ? `${a.latencyMs}ms` : "Not reported by this connection"],
                 ["Last heartbeat", ago(a.heartbeatAt)],
-                ["Orders", a.canExecute ? "Can receive orders" : a.executionNote],
+                ["Orders", a.canExecute ? "Can receive orders" : a.canAllowOrders ? "Not allowed yet" : a.executionNote],
                 a.propSync.tracked && ["PropSync", a.propSync.blocked ? (a.propSync.reason ?? "Blocked") : a.propSync.dailyLossRemaining != null ? `${money(a.propSync.dailyLossRemaining)} of daily loss remaining` : "Within its rules"],
               ]}
             />
+            {a.canAllowOrders && (
+              <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3", !a.canExecute && "border-[var(--warning)]/50 bg-[var(--warning)]/10")}>
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-medium">{a.canExecute ? "Orders are allowed" : "Orders aren't allowed yet"}</p>
+                  <p className="text-xs text-muted-foreground">{a.canExecute ? "TradeLoop can place copied orders on this account." : "To copy trades into this account, TradeLoop has to be allowed to place orders on it."}</p>
+                </div>
+                <button type="button" className={a.canExecute ? linkBtn : linkBtnPrimary} onClick={() => allowOrders(a.id)}>
+                  {a.canExecute ? "Change" : "Allow orders"}
+                </button>
+              </div>
+            )}
             <label className="flex flex-col gap-1.5 text-sm font-medium">
               Role
               <select className={fieldClass} disabled={pending} value={a.preferredRole} onChange={(e) => run(() => setCopyAccountRole(a.id, e.target.value), after)}>

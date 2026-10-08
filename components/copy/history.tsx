@@ -8,8 +8,8 @@ import { ArrowDown, ArrowDownRight, ArrowUpRight, CircleAlert, CircleCheck, Crow
 import { cn } from "@/lib/utils"
 import { readCopyAlerts, retryCopyOrder } from "@/app/actions/copy-trading"
 import { formatQuantity } from "@/lib/copy/contracts"
-import { classifyFailure } from "@/lib/copy/errors"
-import { ACTION_LABELS, ORDER_BUCKETS, ORDER_STATUS, ORDER_TYPES, isFailure, latencyParts, orderBucket, orderSide, price, type Copy, type EventView, type OrderBucket, type OrderView } from "@/lib/copy/view"
+import { classifyFailure, wantsOrdersAllowed } from "@/lib/copy/errors"
+import { ACTION_LABELS, ORDER_BUCKETS, ORDER_STATUS, ORDER_TYPES, isFailure, isUnderway, latencyParts, orderBucket, orderSide, price, type Copy, type EventView, type OrderBucket, type OrderView } from "@/lib/copy/view"
 import { useAction } from "@/components/insights/client"
 import { NotEnough, Pill, fieldClass, linkBtn } from "@/components/insights/ui"
 import { useCopy } from "./store"
@@ -142,7 +142,7 @@ const LEVEL = { error: { Icon: CircleAlert, cls: "text-[var(--loss)]" }, warning
 
 // Alerts and errors: what happened, why, and what the trader can do about it.
 export function AlertList({ events, limit = 8, problemsOnly }: { events: EventView[]; limit?: number; problemsOnly?: boolean }) {
-  const { state, refresh } = useCopy()
+  const { state, account, allowOrders, refresh } = useCopy()
   const router = useRouter()
   const { pending, run } = useAction()
   const list = (problemsOnly ? events.filter((e) => e.level === "error" || e.level === "warning") : events).slice(0, limit)
@@ -162,8 +162,11 @@ export function AlertList({ events, limit = 8, problemsOnly }: { events: EventVi
       <ul className="divide-y">
         {list.map((e) => {
           const { Icon, cls } = LEVEL[e.level]
-          // the refused entry this alert is about, if it can still be tried again
-          const order = e.masterOrderId && e.accountId != null ? state.orders.find((o) => o.masterOrderId === e.masterOrderId && o.followerAccountId === e.accountId && isFailure(o.status) && (o.action === "open" || o.action === "increase")) : undefined
+          // the refused entry this alert is about, if it can still be tried again: not once a later try has gone out
+          const attempts = e.masterOrderId && e.accountId != null ? state.orders.filter((o) => o.masterOrderId === e.masterOrderId && o.followerAccountId === e.accountId && (o.action === "open" || o.action === "increase")) : []
+          const order = attempts.some((o) => isUnderway(o.status)) ? undefined : attempts.find((o) => isFailure(o.status))
+          // the order had no password that trades to go out with, and the account can be given one
+          const allow = e.accountId != null && wantsOrdersAllowed(e) ? account(e.accountId) : undefined
           return (
             <li key={e.id} className="flex gap-2.5 py-2.5">
               <Icon className={cn("mt-0.5 size-4 shrink-0", cls)} aria-hidden />
@@ -180,6 +183,11 @@ export function AlertList({ events, limit = 8, problemsOnly }: { events: EventVi
                     <Link href={`/copy-trading/risk-management?group=${e.groupId}`} className={cn(linkBtn, "h-7 text-xs")}>
                       View rule / Adjust
                     </Link>
+                  )}
+                  {allow?.canAllowOrders && (!allow.canExecute || e.code !== "order_unsupported") && (
+                    <button type="button" className={cn(linkBtn, "h-7 text-xs")} onClick={() => allowOrders(allow.id)}>
+                      {allow.canExecute ? "Change password" : "Allow orders"}
+                    </button>
                   )}
                   {order && (
                     <button type="button" disabled={pending} className={cn(linkBtn, "h-7 text-xs")} onClick={() => run(() => retryCopyOrder(order.id), async () => (toast.success("Tried again with the current settings."), await after()))}>

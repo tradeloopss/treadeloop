@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { classifyFailure } from "@/lib/copy/errors"
+import { wantsOrdersAllowed, classifyFailure } from "@/lib/copy/errors"
 import { copyStats, copySummary, type AccountView, type CopyState, type GroupView, type OrderView, type PositionView } from "@/lib/copy/view"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC } from "@/lib/copy/engine"
 
@@ -65,7 +65,20 @@ test("the copy numbers are counted from the orders: success, failures, and laten
   assert.deepEqual([none.lastLatencyMs, none.avgLatencyMs, none.maxLatencyMs, none.successRate], [null, null, null, 1])
 })
 
-const account = (id: number): AccountView => ({ id, name: `Account ${id}`, broker: null, platform: "MetaTrader 5", login: String(id), currency: "USD", balance: 10_000, equity: 10_000, openPositions: 0, linked: true, health: "connected", healthNote: null, lastSyncAt: null, latencyMs: null, heartbeatAt: null, preferredRole: "follower", role: "follower", groups: [], shared: null, sharing: { ok: true }, provider: null, connectedBy: "TradeLoop cloud", authentication: null, canExecute: true, executionNote: "", dayPnl: 0, openPnl: null, openNotional: 0, propSync: NO_PROPSYNC, symbols: [], lane: "standard", pingMs: null })
+test("an order that had no password to trade with is the one alert that offers Allow orders", () => {
+  // never sent: the account has no trading password kept
+  assert.equal(wantsOrdersAllowed({ code: "order_unsupported", body: "Orders aren't allowed on this account yet." }), true)
+  // sent, and refused by the broker because the saved password is the investor one
+  assert.equal(wantsOrdersAllowed({ code: "order_failed", body: "Trade disabled (retcode 10017)" }), true)
+  assert.equal(classifyFailure("Trade disabled (retcode 10017)").action.includes("Allow orders"), true)
+  // anything else is not put right by a password
+  assert.equal(wantsOrdersAllowed({ code: "order_failed", body: "No money" }), false)
+  assert.equal(wantsOrdersAllowed({ code: "order_rejected", body: "Market closed" }), false)
+  assert.equal(wantsOrdersAllowed({ code: "blocked_daily_loss", body: "Trade disabled" }), false)
+  assert.equal(wantsOrdersAllowed({ code: "order_failed", body: null }), false)
+})
+
+const account = (id: number): AccountView => ({ id, name: `Account ${id}`, broker: null, platform: "MetaTrader 5", login: String(id), currency: "USD", balance: 10_000, equity: 10_000, openPositions: 0, linked: true, health: "connected", healthNote: null, lastSyncAt: null, latencyMs: null, heartbeatAt: null, preferredRole: "follower", role: "follower", groups: [], shared: null, sharing: { ok: true }, provider: null, connectedBy: "TradeLoop cloud", authentication: null, canExecute: true, canAllowOrders: true, executionNote: "", dayPnl: 0, openPnl: null, openNotional: 0, propSync: NO_PROPSYNC, symbols: [], lane: "standard", pingMs: null })
 const group = (id: number, status: GroupView["status"], leader: number, followers: number[]): GroupView => ({ id, name: `G${id}`, status, leaderAccountId: leader, followers: followers.map((accountId, i) => ({ id: id * 10 + i, accountId, config: { ...DEFAULT_FOLLOWER }, mappings: [] })), contracts: [], rules: { ...DEFAULT_RULES }, limits: { defaultMode: "same", defaultRatio: 1, globalRiskPct: 1, respectPropSync: true }, compliance: [], createdAt: "2026-10-01T00:00:00.000Z" })
 const pos = (accountId: number, over: Partial<PositionView> = {}): PositionView => ({ accountId, symbol: "XAUUSD", side: "long", quantity: 1, entry: 100, current: 101, openPnl: 10, stopLoss: null, takeProfit: null, simulated: false, groupId: null, ...over })
 

@@ -19,7 +19,7 @@ import { ConfirmDialog } from "./ui"
 // from either.
 
 function useMode() {
-  const { state, account, refresh } = useCopy()
+  const { state, account, allowOrders, refresh } = useCopy()
   const router = useRouter()
   const { pending, run } = useAction()
   const [dialog, setDialog] = useState<"live" | "simulation" | null>(null)
@@ -57,7 +57,7 @@ function useMode() {
           <li>
             Only trades the Leader opens <span className="font-semibold text-foreground">after</span> you switch are copied for real.{open > 0 ? ` The ${open} simulated ${open === 1 ? "position" : "positions"} open now stay simulated.` : " Trades that are already open are not copied."}
           </li>
-          <li>A follower needs a MetaTrader 5 account with its master (trading) password added in the Trade Manager.</li>
+          <li>A follower needs a MetaTrader 5 account that orders are allowed on: Connection, Manage, Allow orders.</li>
           <li>{speed}</li>
           <li>Start with the smallest size, on a demo account if you can.</li>
         </ul>
@@ -86,7 +86,7 @@ function useMode() {
       </ConfirmDialog>
     </>
   )
-  return { state, live, notReady, speed, setDialog, dialogs }
+  return { state, live, notReady, speed, setDialog, dialogs, allowOrders }
 }
 
 // The header's mark: Live or Simulation, in a word. For an admin it is also the switch.
@@ -118,7 +118,7 @@ export function ModeChip({ admin }: { admin: boolean }) {
 
 // The banner: shown in Simulation, and in Live only when something is wrong.
 export function ModeBanner({ admin }: { admin: boolean }) {
-  const { state, live, notReady, setDialog, dialogs } = useMode()
+  const { state, live, notReady, setDialog, dialogs, allowOrders } = useMode()
   if (live && notReady.length === 0 && state.liveData) return null
   const Icon = live ? TriangleAlert : FlaskConical
   return (
@@ -138,6 +138,14 @@ export function ModeBanner({ admin }: { admin: boolean }) {
           )}
           {!state.liveData && <span className="block">Live positions couldn&apos;t be read just now, so nothing was copied on this pass.</span>}
         </p>
+        {live &&
+          notReady
+            .filter((a) => a!.canAllowOrders)
+            .map((a) => (
+              <button key={a!.id} type="button" className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--warning)] px-3 text-sm font-semibold text-black transition-colors hover:bg-[var(--warning)]/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" onClick={() => allowOrders(a!.id)}>
+                Allow orders{notReady.length > 1 ? ` on ${a!.name}` : ""}
+              </button>
+            ))}
         {admin && !live && (
           <button type="button" className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--warning)] px-3 text-sm font-semibold text-black transition-colors hover:bg-[var(--warning)]/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" onClick={() => setDialog("live")}>
             Switch to Live
