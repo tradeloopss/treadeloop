@@ -19,6 +19,10 @@ export type ReasonCode =
   | "OWN_TO_OWN_BLOCKED"
   | "OWNERSHIP_UNVERIFIED"
   | "CROSS_USER_BLOCKED"
+  // a strategy shared between people (lib/compliance/kind.ts, lib/copy/shares.ts)
+  | "SHARED_LEADER_NOT_BROKER"
+  | "SHARED_FOLLOWER_NOT_BROKER"
+  | "SHARE_ENDED"
 
 export type Verdict = { allowed: true; provider: string | null } | { allowed: false; provider: string; reasonCode: ReasonCode; message: string }
 

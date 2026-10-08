@@ -8,8 +8,9 @@ import { setAppSetting } from "@/lib/app-settings"
 import { assertFeature } from "@/lib/features/server"
 import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
-import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenPositions, importContract, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
+import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenPositions, importContract, endSharedGroups, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
+import { createShare, joinShare, leaveShare, removeMember, revokeShare, rotateShareLink, setShareOpen } from "@/lib/copy/shares"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
 // the one the session resolved; the feature's release stage is checked on
@@ -105,6 +106,28 @@ export const retryCopyOrder = async (orderId: number) => act(({ userId, timeZone
 // that means is worked out on the server, not taken from here.
 // Pause All Copying: every group stops taking new copies. Nothing is closed.
 export const pauseAllCopying = async () => act(async ({ userId }) => ({ paused: await pauseAll(userId) }))
+// Sharing a strategy with friends (lib/copy/shares.ts). The owner's side: one
+// of their own broker accounts, by invitation, ended for one friend or for all.
+export const shareCopyAccount = async (accountId: number, name: string, attested: boolean) => act(async ({ userId }) => ({ share: await createShare(userId, { accountId: Number(accountId), name, attested: attested === true }) }))
+export const renewCopyShareLink = async (shareId: number) => act(async ({ userId }) => ({ token: await rotateShareLink(userId, Number(shareId)) }))
+export const setCopyShareOpen = async (shareId: number, open: boolean) => act(({ userId }) => setShareOpen(userId, Number(shareId), open === true))
+export const removeCopyShareFriend = async (shareId: number, friendId: string) =>
+  act(async ({ userId }) => {
+    const gone = await removeMember(userId, Number(shareId), String(friendId))
+    return { paused: await endSharedGroups([gone.userId], gone.accountId, `“${gone.name}” is no longer shared with you.`) }
+  })
+export const stopCopySharing = async (shareId: number) =>
+  act(async ({ userId }) => {
+    const gone = await revokeShare(userId, Number(shareId))
+    return { paused: await endSharedGroups(gone.userIds, gone.accountId, `“${gone.name}” is no longer shared.`) }
+  })
+// The friend's side: accept an invitation, or stop following.
+export const joinCopyShare = async (token: string, attested: boolean) => act(({ userId }) => joinShare(userId, String(token), attested === true))
+export const leaveCopyShare = async (shareId: number) =>
+  act(async ({ userId }) => {
+    const left = await leaveShare(userId, Number(shareId))
+    return { paused: left ? await endSharedGroups([userId], left.accountId, `You stopped following “${left.name}”.`) : 0 }
+  })
 export const disableAllFollowers = async (groupId: number) => act(({ userId }) => disableAll(userId, Number(groupId)))
 export const cancelCopyOrders = async (groupId: number, symbol: string) => act<{ cancelled: number }>(async ({ userId }) => ({ cancelled: await cancelOrders(userId, Number(groupId), String(symbol ?? "").slice(0, 40) || null) }))
 export const flattenCopyPositions = async (groupId: number, symbol: string | null, accountId?: number | null) => act<FlattenResult>(({ userId, timeZone }) => flattenPositions(userId, Number(groupId), symbol == null ? null : String(symbol), accountId == null ? null : Number(accountId), timeZone))

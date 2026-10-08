@@ -15,6 +15,7 @@ import { checkCopyGroup } from "@/app/actions/compliance"
 import { SafeMode } from "@/components/compliance/safe-mode"
 import { Sheet, useAction } from "@/components/insights/client"
 import { Rows, fieldClass, linkBtn, linkBtnPrimary } from "@/components/insights/ui"
+import { SharePanel, SharedSheet } from "./sharing"
 import { useCopy } from "./store"
 import { ConfirmDialog, HealthPill, Heartbeat, RolePill, Toggle, isOnline } from "./ui"
 
@@ -183,7 +184,7 @@ export function ChangeLeaderDialog({ open, onClose, group }: { open: boolean; on
   const { pending, run } = useAction()
   const [next, setNext] = useState<number | null>(null)
   const current = account(group.leaderAccountId)
-  const options = state.accounts.filter((a) => a.id !== group.leaderAccountId)
+  const options = [...state.accounts, ...state.shared].filter((a) => a.id !== group.leaderAccountId)
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -198,7 +199,7 @@ export function ChangeLeaderDialog({ open, onClose, group }: { open: boolean; on
             <option value="">Choose an account…</option>
             {options.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name} · {a.platform}
+                {a.name} · {a.shared ? a.connectedBy : a.platform}
                 {group.followers.some((f) => f.accountId === a.id) ? " (now a follower)" : ""}
               </option>
             ))}
@@ -293,7 +294,9 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
     onClose()
     reset()
   }
-  const byId = new Map(state.accounts.map((a) => [a.id, a]))
+  const byId = new Map([...state.accounts, ...state.shared].map((a) => [a.id, a]))
+  // the Leader is a friend's shared strategy: only the trader's own broker accounts may copy it
+  const sharedLeader = !!byId.get(leader ?? -1)?.shared
   const problems = activationProblems({ hasLeader: leader != null, leaderConnected: isOnline(byId.get(leader ?? -1)), followers: followers.map((f) => ({ name: byId.get(f.accountId)?.name ?? "Follower", config: f.config, connected: isOnline(byId.get(f.accountId)) })), contracts: contracts.length, symbolScope: rules.symbolScope })
   const blocked = [name.trim().length < 2 ? "Give the group a name." : null, leader == null ? "Choose a Leader." : null, followers.length === 0 ? "Choose at least one Follower." : null][step] ?? null
   const setMode = (accountId: number, patch: Partial<FollowerConfig>) => setFollowers((list) => list.map((f) => (f.accountId === accountId ? { ...f, config: { ...f.config, ...patch } } : f)))
@@ -324,10 +327,10 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
           ))}
         </ol>
 
-        {state.accounts.length < 2 && step < 7 ? (
+        {(state.accounts.length < 1 || state.accounts.length + state.shared.length < 2) && step < 7 ? (
           <div className="rounded-lg border border-dashed p-5 text-center text-sm">
             <p className="font-medium">A copy group needs at least two accounts.</p>
-            <p className="mt-1 text-muted-foreground">One to lead and one to follow. You have {state.accounts.length}.</p>
+            <p className="mt-1 text-muted-foreground">One to lead and one of your own to follow. You have {state.accounts.length}.</p>
             <Link href="/copy-trading/connection" className={cn(linkBtnPrimary, "mt-3")} onClick={close}>
               Connect an account
             </Link>
@@ -344,10 +347,11 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
             {step === 1 && (
               <fieldset className="space-y-2">
                 <legend className="mb-1 text-sm font-medium">Which account do the others copy?</legend>
-                {state.accounts.map((a) => (
+                {[...state.accounts, ...state.shared].map((a) => (
                   <AccountOption
                     key={a.id}
                     a={a}
+                    note={a.shared ? a.connectedBy.toLowerCase() : undefined}
                     type="radio"
                     checked={leader === a.id}
                     onChange={() => {
@@ -363,6 +367,8 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
                 <legend className="mb-1 text-sm font-medium">Which accounts copy it?</legend>
                 {state.accounts.filter((a) => a.id !== leader).map((a) => {
                   const on = followers.some((f) => f.accountId === a.id)
+                  // a friend's strategy is copied to broker accounts only (lib/compliance/kind.ts)
+                  if (sharedLeader && !a.sharing.ok) return <AccountOption key={a.id} a={a} type="checkbox" checked={false} disabled note="not a broker account: it can't copy a friend's strategy" onChange={() => {}} />
                   return <AccountOption key={a.id} a={a} type="checkbox" checked={on} note={state.mode === "live" && !a.canExecute ? "can't receive live orders" : undefined} onChange={() => setFollowers((list) => (on ? list.filter((f) => f.accountId !== a.id) : [...list, { accountId: a.id, config: { ...DEFAULT_FOLLOWER } }]))} />
                 })}
               </fieldset>
@@ -485,7 +491,7 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
           </div>
         )}
 
-        {state.accounts.length >= 2 && step < 7 && (
+        {state.accounts.length >= 1 && state.accounts.length + state.shared.length >= 2 && step < 7 && (
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             {step > 0 && (
               <button type="button" className={linkBtn} onClick={() => setStep(step - 1)}>
@@ -538,6 +544,7 @@ export function AccountDrawer({ accountId, onClose }: { accountId: number | null
     await refresh()
     router.refresh()
   }
+  if (a?.shared) return <SharedSheet account={a} onClose={onClose} />
   return (
     <>
       <Sheet
@@ -598,6 +605,7 @@ export function AccountDrawer({ accountId, onClose }: { accountId: number | null
               </select>
               <span className="text-xs font-normal text-muted-foreground">What you intend the account for. Inside a group it is whatever that group makes it.</span>
             </label>
+            <SharePanel key={a.id} account={a} />
             <div>
               <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Groups</p>
               {a.groups.length === 0 ? (

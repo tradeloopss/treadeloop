@@ -97,7 +97,7 @@ export function CopyProvider({ initial, children }: { initial: CopyState; childr
     },
     [params, pathname, router],
   )
-  const byId = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts])
+  const byId = useMemo(() => new Map([...state.accounts, ...state.shared].map((a) => [a.id, a])), [state.accounts, state.shared])
   const store = useMemo<Store>(() => ({ state, group, selectGroup, account: (id) => byId.get(id), refresh, refreshing }), [state, group, selectGroup, byId, refresh, refreshing])
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>
 }

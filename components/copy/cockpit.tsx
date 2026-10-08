@@ -99,7 +99,7 @@ export function Cockpit() {
   }
   const spec = contract ? (group.contracts.find((c) => c.symbol === contract) ?? specFor(contract)) : null
 
-  const scope: ScopeRow[] = contract ? symbolScope(group, state.accounts, state.positions, contract) : [{ accountId: group.leaderAccountId, leader: true, follower: null, symbol: "—", via: "same", positions: [] }, ...group.followers.map((f) => ({ accountId: f.accountId, leader: false, follower: f, symbol: "—", via: "same" as const, positions: [] }))]
+  const scope: ScopeRow[] = contract ? symbolScope(group, [...state.accounts, ...state.shared], state.positions, contract) : [{ accountId: group.leaderAccountId, leader: true, follower: null, symbol: "—", via: "same", positions: [] }, ...group.followers.map((f) => ({ accountId: f.accountId, leader: false, follower: f, symbol: "—", via: "same" as const, positions: [] }))]
   const rows: Row[] = scope.map((r) => {
     const a = account(r.accountId)
     return { ...r, account: a, net: netPosition(r.positions), risk: r.follower && a ? riskStatus(r.follower.config, { equity: a.equity, dayPnl: a.dayPnl, openNotional: 0, openQuantity: 0, connected: isOnline(a) }, group.limits.respectPropSync ? a.propSync : undefined) : null }
@@ -117,6 +117,8 @@ export function Cockpit() {
   // what a Flatten can't close from here, said before it is pressed
   const cantClose = (positions: PositionView[], a: AccountView | undefined): string | null => {
     if (!positions.some((p) => !p.simulated)) return null
+    // a friend's shared strategy: read, never traded on
+    if (a?.shared) return "A friend's account: only its owner can close its positions."
     if (state.mode !== "live") return "Simulation mode: no order is sent to a broker."
     return a?.canExecute ? null : (a?.executionNote ?? "This account can't receive orders from TradeLoop.")
   }

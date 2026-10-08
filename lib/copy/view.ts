@@ -1,6 +1,7 @@
 import { resolveFollowerSymbol, sameInstrument, type ContractSpec } from "./contracts"
 import type { CopyRules, FollowerConfig, Health, PropSyncState, Side, Step } from "./engine"
 import type { ProviderProfile } from "@/lib/compliance/engine"
+import type { ShareView } from "./shares"
 
 // What the Copy Trading pages are drawn from: everything the server knows
 // about a trader's copy setup, in a form that can be sent to the browser
@@ -37,6 +38,11 @@ export type AccountView = {
   // how TradeLoop reaches the account, and what it logs in with: said as it is
   connectedBy: string
   authentication: string | null
+  // A friend's strategy this trader may copy from (lib/copy/shares.ts): never
+  // theirs to trade on, and shown without its balance. null for the trader's own accounts.
+  shared: { shareId: number; owner: string } | null
+  // whether it may take part in a strategy shared between people: a broker account, or why not (lib/compliance/kind.ts)
+  sharing: { ok: true } | { ok: false; reason: string }
   // whether TradeLoop can place orders on it (live mode needs this)
   canExecute: boolean
   executionNote: string
@@ -104,7 +110,12 @@ export type EventView = { id: number; groupId: number | null; accountId: number 
 export type CopyState = {
   // simulation: the engine works everything out and records it, and sends nothing to a broker
   mode: "simulation" | "live"
+  // the trader's own accounts
   accounts: AccountView[]
+  // strategies friends share with the trader: Leaders to copy from, and nothing else
+  shared: AccountView[]
+  // the strategies the trader shares, and who follows each
+  shares: ShareView[]
   groups: GroupView[]
   positions: PositionView[]
   orders: OrderView[]
@@ -121,6 +132,9 @@ export type CopyState = {
 // An order's latency in words. When the copy lane sent the order itself it timed
 // both halves: its own (seeing the leader's trade, sizing, handing the order
 // over) and the broker's round trip, which no software on our side can shorten.
+// An account by id, the trader's own or a friend's shared strategy (a group's Leader may be either).
+export const accountIn = (state: Pick<CopyState, "accounts" | "shared">, id: number): AccountView | undefined => state.accounts.find((a) => a.id === id) ?? state.shared.find((a) => a.id === id)
+
 export function latencyParts(o: Pick<OrderView, "latencyMs" | "tradeloopMs">): { total: string; split: string | null } | null {
   if (o.latencyMs == null) return null
   if (o.tradeloopMs == null) return { total: `${o.latencyMs}ms`, split: null }

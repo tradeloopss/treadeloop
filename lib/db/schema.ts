@@ -2371,6 +2371,42 @@ export const providerRuleSets = pgTable(
   (t) => [uniqueIndex("provider_rule_sets_version").on(t.provider, t.version)]
 )
 
+// Sharing a strategy with friends (lib/copy/shares.ts): a trader lets the people
+// they invite copy one of their Leader accounts onto accounts of their own.
+// Broker accounts only, on both sides (lib/compliance/kind.ts). One share per
+// account; the link carries the token; "revoked" ends it for everyone.
+export const copyShares = pgTable(
+  "copy_shares",
+  {
+    id: serial("id").primaryKey(),
+    ownerId: text("ownerId").notNull(),
+    accountId: integer("accountId").notNull(),
+    name: text("name").notNull(),
+    token: text("token").notNull(),
+    status: text("status").notNull().default("active"), // active | paused (no new friends) | revoked
+    maxFriends: integer("maxFriends").notNull().default(10),
+    // when the owner confirmed it is their own account with a broker, not a prop firm's
+    attestedAt: timestamp("attestedAt").notNull(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("copy_shares_token").on(t.token), index("copy_shares_owner").on(t.ownerId)]
+)
+
+// Who accepted an invitation. A friend gets the trades and nothing else of the owner's.
+export const copyShareMembers = pgTable(
+  "copy_share_members",
+  {
+    id: serial("id").primaryKey(),
+    shareId: integer("shareId").notNull(),
+    userId: text("userId").notNull(),
+    status: text("status").notNull().default("active"), // active | removed (by the owner) | left
+    joinedAt: timestamp("joinedAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("copy_share_members_unique").on(t.shareId, t.userId), index("copy_share_members_user").on(t.userId)]
+)
+
 export const copyAccountPrefs = pgTable(
   "copy_account_prefs",
   {

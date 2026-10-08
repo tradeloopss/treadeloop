@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
@@ -8,11 +8,13 @@ import type { OpenTradeView } from "@/lib/trade-manager"
 import { localDay } from "@/lib/timezone"
 import { detectProvider, providerProfile, validateDirection, validateExecution, validateRole, type Party, type Verdict } from "@/lib/compliance/engine"
 import { ComplianceError, parties, recordBlock, ruleSets } from "@/lib/compliance/server"
+import { accountKind, validateSharing } from "@/lib/compliance/kind"
+import { accountFacts, joinedShares, listShares } from "./shares"
 import { pointValueAt, sameInstrument, specFor, type ContractSpec } from "./contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, NO_PROPSYNC, activationProblems, connectionHealth, followerOrderId, masterOrderId, planLeaderEvents, proportionalClose, translatePrice, validateCopyRules, type CopyAction, type CopyRules, type Decision, type FollowerConfig, type LivePosition, type PropSyncState, type RoundingRule, type Side, type SizingMode, type Step } from "./engine"
 import { PLAN_TTL_MS, clock, closeRef, decideEntry, entryRef, guardView, specOf, type LanePlan } from "./plan"
 import { classifyFailure } from "./errors"
-import { groupScope, symbolScope, type AccountScope, type AccountView, type ComplianceProblem, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
+import { groupScope, symbolScope, accountIn, type AccountScope, type AccountView, type ComplianceProblem, type CopyState, type EventView, type FollowerView, type GroupLimits, type GroupStatus, type GroupView, type OrderView, type PositionView, type Role } from "./view"
 
 // Copy Trading's server side: what a trader's setup is, and the engine that
 // turns a change on the leader's account into orders for the followers.
@@ -42,11 +44,11 @@ const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 // Where the live positions come from: the same reader as the Trade Manager,
 // for the signed-in trader. null = they couldn't be read this time.
-type LiveReader = (userId: string) => Promise<Pick<OpenTradeView, "id" | "accountId" | "symbol" | "side" | "quantity" | "entryPrice" | "currentPrice" | "unrealizedPnl" | "stopLoss" | "takeProfit" | "positionRef">[] | null>
-let readLive: LiveReader = async (userId) => {
+type LiveReader = (userId: string, onlyAccountId?: number) => Promise<Pick<OpenTradeView, "id" | "accountId" | "symbol" | "side" | "quantity" | "entryPrice" | "currentPrice" | "unrealizedPnl" | "stopLoss" | "takeProfit" | "positionRef">[] | null>
+let readLive: LiveReader = async (userId, onlyAccountId) => {
   try {
     const { loadOpenPositions } = await import("@/lib/trade-manager-server")
-    return (await loadOpenPositions(userId)).trades
+    return (await loadOpenPositions(userId, onlyAccountId)).trades
   } catch {
     return null
   }
@@ -146,11 +148,26 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   // live positions, as the brokers report them
   const positions: PositionView[] = []
   const keys = new Map<PositionView, string>()
-  for (const t of live ?? []) {
-    if (t.accountId == null) continue
-    const p: PositionView = { accountId: t.accountId, symbol: t.symbol, side: t.side, quantity: t.quantity, entry: t.entryPrice, current: t.currentPrice, openPnl: t.unrealizedPnl, stopLoss: t.stopLoss, takeProfit: t.takeProfit, simulated: false, groupId: null }
+  const ownIds = new Set(accountRows.map((a) => a.id))
+  const take = (t: NonNullable<typeof live>[number]) => {
+    const p: PositionView = { accountId: t.accountId!, symbol: t.symbol, side: t.side, quantity: t.quantity, entry: t.entryPrice, current: t.currentPrice, openPnl: t.unrealizedPnl, stopLoss: t.stopLoss, takeProfit: t.takeProfit, simulated: false, groupId: null }
     positions.push(p)
     keys.set(p, t.positionRef ?? `t${t.id}`)
+  }
+  // the trader's own accounts only: what belongs to anybody else comes through a share, below
+  for (const t of live ?? []) if (t.accountId != null && ownIds.has(t.accountId)) take(t)
+
+  // Strategies friends share with this trader (lib/copy/shares.ts): each is a
+  // Leader to copy from and nothing more. Its open trades are read, through its
+  // owner's own connection; its balance, its login and its owner's other
+  // accounts are not. One that couldn't be read makes the whole reading
+  // unusable: an unread Leader must never look like one that closed everything.
+  const joined = await joinedShares(userId)
+  let sharedRead = true
+  for (const j of joined) {
+    const theirs = await readLive(j.ownerId, j.accountId)
+    if (theirs == null) sharedRead = false
+    for (const t of theirs ?? []) if (t.accountId === j.accountId) take(t)
   }
   liveKeys.set(positions, keys)
   // the price of a symbol, from any account that reports one
@@ -222,14 +239,71 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
       symbols: [...new Set([...mine.map((x) => x.symbol), ...traded.filter((t) => t.accountId === a.id).map((t) => t.symbol)])].slice(0, 120),
       lane: m?.copySlot && m.copySeenAt && Date.now() - m.copySeenAt.getTime() < LANE_FRESH_MS ? "fast" : "standard",
       pingMs: m?.copySlot ? (m.copyPingMs ?? null) : null,
+      shared: null,
+      sharing: ((k) => (k.kind === "broker" ? { ok: true as const } : { ok: false as const, reason: k.reason }))(accountKind({ platform: m ? (m.platform === "mt4" ? "mt4" : "mt5") : r ? "rithmic" : p ? "other" : null, server: m?.server ?? null, broker: a.broker, provider: set?.name ?? null, propTracked: prop.get(a.id)?.state.tracked === true })),
     }
   })
+
+  // the friends' strategies, as accounts this trader can only lead a group with
+  const shared: AccountView[] = []
+  if (joined.length) {
+    const ids = joined.map((j) => j.accountId)
+    const [theirAccounts, theirConnections] = await Promise.all([
+      db.select({ id: tradingAccounts.id, currency: tradingAccounts.currency }).from(tradingAccounts).where(and(inArray(tradingAccounts.id, ids), eq(tradingAccounts.archived, false))),
+      db.select({ accountId: metatraderConnections.accountId, platform: metatraderConnections.platform, status: metatraderConnections.status, lastSyncedAt: metatraderConnections.lastSyncedAt, copySlot: metatraderConnections.copySlot, copySeenAt: metatraderConnections.copySeenAt }).from(metatraderConnections).where(inArray(metatraderConnections.accountId, ids)),
+    ])
+    for (const j of joined) {
+      const a = theirAccounts.find((x) => x.id === j.accountId)
+      if (!a) continue
+      const m = theirConnections.find((x) => x.accountId === j.accountId)
+      const mine = positions.filter((x) => x.accountId === j.accountId)
+      shared.push({
+        id: j.accountId,
+        name: j.name,
+        broker: null,
+        platform: m ? `MetaTrader ${m.platform === "mt4" ? 4 : 5}` : "Manual",
+        login: null,
+        currency: a.currency,
+        balance: null,
+        equity: null,
+        openPositions: mine.length,
+        linked: !!m,
+        // (never the owner's own status message: that is theirs to read)
+        health: m ? connectionHealth({ linked: true, status: m.status, lastSyncAt: m.lastSyncedAt?.getTime() ?? null }) : "disconnected",
+        healthNote: null,
+        lastSyncAt: m?.lastSyncedAt?.toISOString() ?? null,
+        latencyMs: null,
+        heartbeatAt: m?.lastSyncedAt?.toISOString() ?? null,
+        preferredRole: "leader",
+        role: "leader",
+        groups: memberships.get(j.accountId) ?? [],
+        provider: null,
+        connectedBy: `Shared by ${j.owner}`,
+        authentication: null,
+        shared: { shareId: j.shareId, owner: j.owner },
+        sharing: { ok: true },
+        canExecute: false,
+        executionNote: "A friend's account: TradeLoop reads its trades for you, and never places an order on it.",
+        dayPnl: 0,
+        openPnl: null,
+        openNotional: 0,
+        propSync: NO_PROPSYNC,
+        symbols: [...new Set(mine.map((x) => x.symbol))],
+        lane: m?.copySlot && m.copySeenAt && Date.now() - m.copySeenAt.getTime() < LANE_FRESH_MS ? "fast" : "standard",
+        pingMs: null,
+      })
+    }
+  }
+  // a group led by somebody else's account: is it still shared with this trader, and are both ends broker accounts?
+  const led = groupRows.filter((g) => !ownIds.has(g.leaderAccountId))
+  const sharingOf = new Map<number, ComplianceProblem[]>()
+  for (const g of led) sharingOf.set(g.id, await sharingProblems(userId, g.leaderAccountId, followerRows.filter((f) => f.groupId === g.id).map((f) => f.accountId)))
 
   const groups: GroupView[] = groupRows.map((g) => {
     const limits = limitRows.find((l) => l.groupId === g.id)
     const members = followerRows.filter((f) => f.groupId === g.id).map((f) => f.accountId)
     // only a group with an account at a provider that has rules is asked anything
-    const compliance = [g.leaderAccountId, ...members].some((id) => party.has(id)) ? groupProblems(party, g.leaderAccountId, members) : []
+    const compliance = [...(sharingOf.get(g.id) ?? []), ...([g.leaderAccountId, ...members].some((id) => party.has(id)) ? groupProblems(party, g.leaderAccountId, members) : [])]
     return {
       id: g.id,
       name: g.name,
@@ -258,7 +332,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const orders: OrderView[] = orderRows.map((o) => ({ id: o.id, groupId: o.groupId, correlationId: o.correlationId, masterOrderId: o.masterOrderId, masterAccountId: o.masterAccountId, followerAccountId: o.followerAccountId, action: o.action, symbol: o.symbol, leaderSymbol: o.leaderSymbol, side: o.side as Side, quantity: Number(o.quantity), leaderQuantity: num(o.leaderQuantity), requestedPrice: num(o.requestedPrice), executionPrice: num(o.executionPrice), status: o.status, reason: o.reason, slippage: num(o.slippage), latencyMs: o.latencyMs, tradeloopMs: o.tradeloopMs, simulated: o.simulated, createdAt: o.createdAt.toISOString(), steps: (Array.isArray((o.decision as { steps?: Step[] } | null)?.steps) ? (o.decision as { steps: Step[] }).steps : []) as Step[] }))
   const events: EventView[] = eventRows.map((e) => ({ id: e.id, groupId: e.groupId, accountId: e.accountId, level: e.level as EventView["level"], code: e.code, title: e.title, body: e.body, action: e.action, masterOrderId: e.masterOrderId, createdAt: e.createdAt.toISOString(), unread: !e.readAt }))
 
-  return { mode, accounts, groups, positions, orders, events, providers: sets.map(providerProfile), liveData: live != null, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
+  return { mode, accounts, shared, shares: await listShares(userId), groups, positions, orders, events, providers: sets.map(providerProfile), liveData: live != null && sharedRead, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
 }
 // the broker's own id of each live position, kept beside the state rather than sent to the browser
 const liveKeys = new WeakMap<PositionView[], Map<PositionView, string>>()
@@ -295,12 +369,59 @@ function groupProblems(party: Map<number, Party>, leader: number, followers: num
 }
 const asVerdict = (p: ComplianceProblem) => ({ allowed: false as const, provider: p.provider, reasonCode: p.reasonCode as Extract<Verdict, { allowed: false }>["reasonCode"], message: p.message })
 
-// A Copy Group is set up only as the providers of its accounts allow: asked
-// here for every change, whatever the page showed. A refusal is recorded.
+// The Leader of a group is the trader's own account, or a strategy a friend
+// shares with them (lib/copy/shares.ts). Nobody else's account, ever.
+async function ownLeader(userId: string, accountId: number): Promise<"own" | "shared"> {
+  if (!Number.isInteger(accountId) || accountId <= 0) throw new Error("That account doesn't exist.")
+  const [own] = await db.select({ id: tradingAccounts.id }).from(tradingAccounts).where(and(eq(tradingAccounts.id, accountId), eq(tradingAccounts.userId, userId), eq(tradingAccounts.archived, false))).limit(1)
+  if (own) return "own"
+  if ((await joinedShares(userId)).some((s) => s.accountId === accountId)) return "shared"
+  throw new Error("One of those accounts isn't yours, or has been archived.")
+}
+
+// A strategy shared between people is copied between broker accounts only
+// (lib/compliance/kind.ts): asked whenever a group's Leader is not the
+// trader's own account. Nothing when the Leader is their own.
+const SHARED = "Shared strategy"
+async function sharingProblems(userId: string, leader: number, followers: number[]): Promise<ComplianceProblem[]> {
+  const facts = await accountFacts([leader, ...followers])
+  const lead = facts.get(leader)
+  if (lead?.userId === userId) return []
+  // not shared with this trader (any more): nothing is read from it
+  if (!lead || !(await joinedShares(userId)).some((s) => s.accountId === leader)) return [{ accountId: leader, provider: SHARED, reasonCode: "SHARE_ENDED", message: "This strategy is no longer shared with you." }]
+  const leaderKind = accountKind(lead)
+  if (leaderKind.kind !== "broker") return [{ accountId: leader, provider: SHARED, reasonCode: "SHARED_LEADER_NOT_BROKER", message: `This strategy can't be copied any more. ${leaderKind.reason}` }]
+  const problems: ComplianceProblem[] = []
+  for (const id of followers) {
+    const f = facts.get(id)
+    if (!f) continue
+    const v = validateSharing(leaderKind, accountKind(f))
+    if (!v.allowed) problems.push({ accountId: id, provider: SHARED, reasonCode: v.reasonCode, message: v.message })
+  }
+  return problems
+}
+
+// When a strategy stops being shared with someone (removed by the owner, the
+// owner stops sharing, or they leave): their groups on it stop copying. What
+// they already hold is left as it is: only they close their own positions.
+export async function endSharedGroups(userIds: string[], accountId: number, why: string): Promise<number> {
+  if (!userIds.length) return 0
+  const groups = await db.update(copyGroups).set({ status: "paused", updatedAt: new Date() }).where(and(inArray(copyGroups.userId, userIds), eq(copyGroups.leaderAccountId, accountId), eq(copyGroups.status, "active"))).returning({ id: copyGroups.id, userId: copyGroups.userId })
+  for (const g of groups) {
+    await note(g.userId, { groupId: g.id, level: "warning", code: "group_paused", title: "Copying paused: the strategy is no longer shared", body: `${why} Positions that are already open are left as they are.`, action: "Close them yourself in the Cockpit if you want to, or choose another Leader for the group." })
+    await clearPlans(g.userId)
+    await syncCopyRoles(g.userId)
+  }
+  return groups.length
+}
+
+// A Copy Group is set up only as the providers of its accounts allow, and a
+// shared strategy only between broker accounts: asked here for every change,
+// whatever the page showed. A refusal is recorded.
 async function comply(userId: string, ask: { leader: number; followers: number[]; groupId?: number | null; action: string }): Promise<void> {
   const party = await parties(userId, [ask.leader, ...ask.followers])
   // a follower's own objection says more than the Master's (which way round is wrong, not just that it can't be read)
-  const found = groupProblems(party, ask.leader, ask.followers)
+  const found = [...(await sharingProblems(userId, ask.leader, ask.followers)), ...groupProblems(party, ask.leader, ask.followers)]
   const first = found.find((p) => p.accountId !== ask.leader) ?? found[0]
   if (!first) return
   await recordBlock(userId, asVerdict(first), { groupId: ask.groupId, accountId: first.accountId, action: ask.action })
@@ -310,8 +431,9 @@ async function comply(userId: string, ask: { leader: number; followers: number[]
 export async function previewCompliance(userId: string, leader: number, followers: number[]): Promise<ComplianceProblem[]> {
   const ids = [leader, ...followers]
   if (ids.some((id) => !Number.isInteger(id) || id <= 0)) return []
-  await ownAccounts(userId, ids)
-  return groupProblems(await parties(userId, ids), leader, followers)
+  await ownAccounts(userId, followers)
+  await ownLeader(userId, leader)
+  return [...(await sharingProblems(userId, leader, followers)), ...groupProblems(await parties(userId, ids), leader, followers)]
 }
 // After a provider's rules change: every active group with one of its
 // accounts is asked again, and one the rules now object to stops copying. Its
@@ -403,7 +525,9 @@ export async function createGroup(userId: string, input: GroupInput): Promise<nu
   if (followers.some((f) => f.accountId === leader)) throw new Error("The Leader can't also follow itself.")
   if (new Set(followers.map((f) => f.accountId)).size !== followers.length) throw new Error("An account is listed twice.")
   if (followers.length > MAX_FOLLOWERS) throw new Error(`A group can have up to ${MAX_FOLLOWERS} followers.`)
-  await ownAccounts(userId, [leader, ...followers.map((f) => f.accountId)])
+  // the followers are the trader's own; the Leader is too, or is a strategy a friend shares with them
+  await ownAccounts(userId, followers.map((f) => f.accountId))
+  await ownLeader(userId, leader)
   await comply(userId, { leader, followers: followers.map((f) => f.accountId), action: "create_group" })
   const existing = await db.select({ id: copyGroups.id, name: copyGroups.name }).from(copyGroups).where(eq(copyGroups.userId, userId))
   if (existing.length >= MAX_GROUPS) throw new Error(`You can have up to ${MAX_GROUPS} copy groups.`)
@@ -455,15 +579,17 @@ export async function setGroupActive(userId: string, groupId: number, active: bo
   }
   const state = await loadCopyState(userId, timeZone)
   const g = state.groups.find((x) => x.id === groupId)!
-  const byId = new Map(state.accounts.map((a) => [a.id, a]))
+  const byId = new Map([...state.accounts, ...state.shared].map((a) => [a.id, a]))
   const online = (id: number) => ["connected", "syncing", "warning"].includes(byId.get(id)?.health ?? "disconnected")
   const problems = activationProblems({ hasLeader: byId.has(g.leaderAccountId), leaderConnected: online(g.leaderAccountId), followers: g.followers.map((f) => ({ name: byId.get(f.accountId)?.name ?? "A follower", config: f.config, connected: online(f.accountId) })), contracts: g.contracts.length, symbolScope: g.rules.symbolScope })
-  if (problems.length) throw new Error(problems.join(" "))
+  // what the rules have against the group comes first: a strategy that is no
+  // longer shared is not "a group with no Leader chosen"
   if (g.compliance.length) {
     const first = g.compliance.find((p) => p.accountId !== g.leaderAccountId) ?? g.compliance[0]
     await recordBlock(userId, asVerdict(first), { groupId, accountId: first.accountId, action: "activate_group" })
     throw new ComplianceError(asVerdict(first))
   }
+  if (problems.length) throw new Error(problems.join(" "))
   await baseline(userId, g, state)
   await db.update(copyGroups).set({ status: "active", timeZone, updatedAt: new Date() }).where(eq(copyGroups.id, groupId))
   await note(userId, { groupId, level: "success", code: "group_activated", title: `“${g.name}” is copying`, body: state.mode === "live" ? "New trades on the Leader are sent to the followers." : "Simulation: new trades on the Leader are worked out and recorded for each follower, and nothing is sent to a broker." })
@@ -480,7 +606,7 @@ async function baseline(userId: string, g: GroupView, state: CopyState) {
 
 export async function changeLeader(userId: string, groupId: number, accountId: number, timeZone: string): Promise<void> {
   const g = await ownGroup(userId, groupId)
-  await ownAccounts(userId, [accountId])
+  await ownLeader(userId, accountId)
   if (g.leaderAccountId === accountId) return
   const others = await db.select({ accountId: copyGroupFollowers.accountId }).from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, groupId))
   await comply(userId, { leader: accountId, followers: others.map((f) => f.accountId).filter((id) => id !== accountId), groupId, action: "change_leader" })
@@ -655,7 +781,7 @@ async function queue(ctx: Pick<Ctx, "userId" | "state" | "prop">, accountId: num
 async function copyEntry(ctx: Ctx, leader: { id: number; version: number }, p: LivePosition, quantity: number, action: "open" | "increase", only?: { accountId: number; suffix: string }) {
   const { group: g, state } = ctx
   const master = masterOrderId(g.id, leader.id, leader.version)
-  const leaderAccount = state.accounts.find((a) => a.id === g.leaderAccountId)
+  const leaderAccount = accountIn(state, g.leaderAccountId)
   // A new position, live: each follower's order has a name of its own, and the
   // copy lane may already have sent it (a retry is a different order: no name).
   const named = ctx.mode === "live" && action === "open" && !only
@@ -801,7 +927,7 @@ async function runGroup(ctx: Ctx): Promise<number> {
   const { group: g, state } = ctx
   // A leader whose connection isn't up reports nothing — and "nothing" must
   // never be read as "everything was closed". Wait until it is back.
-  const leaderAccount = state.accounts.find((x) => x.id === g.leaderAccountId)
+  const leaderAccount = accountIn(state, g.leaderAccountId)
   if (leaderAccount?.health !== "connected") return 0
   if (leaderAccount.lastSyncAt && ctx.now.getTime() - new Date(leaderAccount.lastSyncAt).getTime() > LEADER_FRESH_MS) return 0
   const keys = liveKeys.get(state.positions)
@@ -955,7 +1081,7 @@ async function reconcile(userId: string, state: CopyState) {
 // A follower whose positions are still being closed keeps its terminal until
 // the broker has confirmed them, whatever has become of its group: Flatten All
 // pauses the group, and that is exactly when its closes must go out fastest.
-export async function syncCopyRoles(userId: string): Promise<void> {
+export async function syncCopyRoles(userId: string, deep = true): Promise<void> {
   const [groups, followers, connections, owed] = await Promise.all([
     db.select({ id: copyGroups.id, leaderAccountId: copyGroups.leaderAccountId }).from(copyGroups).where(and(eq(copyGroups.userId, userId), eq(copyGroups.status, "active"))),
     db.select({ groupId: copyGroupFollowers.groupId, accountId: copyGroupFollowers.accountId }).from(copyGroupFollowers).where(and(eq(copyGroupFollowers.userId, userId), eq(copyGroupFollowers.enabled, true))),
@@ -963,12 +1089,22 @@ export async function syncCopyRoles(userId: string): Promise<void> {
     db.selectDistinct({ accountId: copyPositions.accountId }).from(copyPositions).where(and(eq(copyPositions.userId, userId), eq(copyPositions.role, "follower"), eq(copyPositions.status, "open"), eq(copyPositions.simulated, false), isNotNull(copyPositions.closeRequestedAt), lte(copyPositions.closeAttempts, CLOSE_ATTEMPTS))),
   ])
   const active = new Set(groups.map((g) => g.id))
-  const leads = new Set(groups.map((g) => g.leaderAccountId))
+  // an account of this trader's that leads a friend's group (a shared strategy) is a Leader too
+  const mine = connections.map((c) => c.accountId).filter((id): id is number => id != null)
+  const followed = mine.length ? await db.select({ leaderAccountId: copyGroups.leaderAccountId }).from(copyGroups).where(and(eq(copyGroups.status, "active"), inArray(copyGroups.leaderAccountId, mine), ne(copyGroups.userId, userId))) : []
+  const leads = new Set([...groups, ...followed].map((g) => g.leaderAccountId))
   const follows = new Set([...followers.filter((f) => active.has(f.groupId)).map((f) => f.accountId), ...owed.map((o) => o.accountId)])
   for (const c of connections) {
     const role = c.accountId == null ? null : leads.has(c.accountId) && follows.has(c.accountId) ? "both" : leads.has(c.accountId) ? "leader" : follows.has(c.accountId) ? "follower" : null
     if (role !== (c.copyRole ?? null)) await db.update(metatraderConnections).set({ copyRole: role, ...(role === "leader" || role === "both" ? {} : { copyPlan: null }) }).where(eq(metatraderConnections.id, c.id))
   }
+  // and the owners of the strategies this trader copies: their account's role follows from this trader's groups too
+  if (!deep) return
+  const all = await db.select({ leaderAccountId: copyGroups.leaderAccountId }).from(copyGroups).where(eq(copyGroups.userId, userId))
+  const foreign = [...new Set(all.map((g) => g.leaderAccountId))].filter((id) => !mine.includes(id))
+  if (!foreign.length) return
+  const owners = await db.selectDistinct({ userId: metatraderConnections.userId }).from(metatraderConnections).where(and(inArray(metatraderConnections.accountId, foreign), ne(metatraderConnections.userId, userId)))
+  for (const o of owners) await syncCopyRoles(o.userId, false)
 }
 
 // Takes the plans away: the lane stops copying by itself at its next look (a
@@ -1145,7 +1281,9 @@ export async function flattenPositions(userId: string, groupId: number, symbol: 
   if (!group) throw new Error("That copy group no longer exists.")
   // an unreadable feed must not be taken for "nothing is open"
   if (!state.liveData) throw new Error("Live positions couldn't be read just now, so nothing was closed. Try again in a moment.")
-  const scope: (AccountScope & { symbol?: string })[] = contract == null ? groupScope(group, state.positions) : symbolScope(group, state.accounts, state.positions, contract)
+  // A friend's shared account is read, never traded on: its positions are its
+  // owner's to close, and are not part of anything flattened from here.
+  const scope: (AccountScope & { symbol?: string })[] = (contract == null ? groupScope(group, state.positions) : symbolScope(group, [...state.accounts, ...state.shared], state.positions, contract)).filter((r) => !state.shared.some((s) => s.id === r.accountId))
   const rows = accountId == null ? scope : scope.filter((r) => r.accountId === accountId)
   if (accountId != null && !rows.length) throw new Error("That account isn't part of this group.")
 

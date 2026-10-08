@@ -9,6 +9,7 @@ import { ago, money, type AccountView } from "@/lib/copy/view"
 import { useAction } from "@/components/insights/client"
 import { NotEnough, Section, linkBtn, linkBtnPrimary } from "@/components/insights/ui"
 import { AccountDrawer, ConnectAccountDialog } from "./dialogs"
+import { SharedStrategies } from "./sharing"
 import { useCopy } from "./store"
 import { AccountCard, HealthPill, PageHead, PlatformIcon, RolePill, Stat, Toggle, isOnline } from "./ui"
 
@@ -142,6 +143,7 @@ export function Connection() {
         </>
       )}
 
+      <SharedStrategies onOpen={setManage} />
       <ConnectAccountDialog open={connect} onClose={() => setConnect(false)} />
       <AccountDrawer accountId={manage} onClose={() => setManage(null)} />
     </>
