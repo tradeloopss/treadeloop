@@ -22,3 +22,6 @@ tsconfig.tsbuildinfo
 # Large broker/tutorial videos — host externally, not in git (GitHub 100MB limit)
 public/brokers/*.wmv
 public/**/*.wmv
+
+# python bytecode (the sync server bridges are run and tested with Python)
+__pycache__/
