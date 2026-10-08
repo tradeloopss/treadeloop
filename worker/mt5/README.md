@@ -214,7 +214,10 @@ seconds of logging in before each order, and a first login on a terminal that
 has never seen the account can take half a minute. On 8 Oct 2026 two new
 followers copied in 2.4 and 3.5 seconds and one order timed out. So there is
 a lane terminal for every account that copies (five then: `c1 c3 c4 c6 c7`),
-and the shared ones are for syncing.
+and two spare ones (`c8 c9`: a bridge with no terminal started, about 140 MB
+each) so the next account added to a group is fast from its first trade. The
+lane hands a free terminal to a copying account by itself. The shared ones
+are for syncing.
 
 Adding one (nothing running is touched; the lane itself restarts, a few seconds):
 
