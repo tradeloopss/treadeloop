@@ -10,7 +10,7 @@ import { resolveTimeZone } from "@/lib/timezone"
 import type { ContractSpec } from "@/lib/copy/contracts"
 import { BACKGROUND_SETTING, LIVE_SETTING, syncCopyRoles, clearPlans, cancelOrders, changeLeader, createGroup, deleteGroup, detachAccount, disableAll, flattenPositions, importContract, endSharedGroups, markEventsRead, pauseAll, removeContract, renameGroup, retryOrder, runEngine, saveFollowers, saveLimits, saveRules, setAccountRole, setFollowerEnabled, setGroupActive, type FlattenResult, type FollowerInput, type GroupInput } from "@/lib/copy/server"
 import type { CopyState, GroupLimits } from "@/lib/copy/view"
-import { createShare, joinShare, leaveShare, removeMember, revokeShare, rotateShareLink, setShareOpen } from "@/lib/copy/shares"
+import { createShare, leaveShare, removeMember, revokeShare, rotateShareLink, setShareOpen } from "@/lib/copy/shares"
 
 // Everything the Copy Trading pages ask the server to do. The trader is always
 // the one the session resolved; the feature's release stage is checked on
@@ -121,8 +121,7 @@ export const stopCopySharing = async (shareId: number) =>
     const gone = await revokeShare(userId, Number(shareId))
     return { paused: await endSharedGroups(gone.userIds, gone.accountId, `“${gone.name}” is no longer shared.`) }
   })
-// The friend's side: accept an invitation, or stop following.
-export const joinCopyShare = async (token: string, attested: boolean) => act(({ userId }) => joinShare(userId, String(token), attested === true))
+// The friend's side: stop following. (Accepting an invitation is app/actions/copy-invite.ts: it is what opens Copy Trading to them.)
 export const leaveCopyShare = async (shareId: number) =>
   act(async ({ userId }) => {
     const left = await leaveShare(userId, Number(shareId))

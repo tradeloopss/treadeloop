@@ -189,6 +189,29 @@ export async function leaveShare(userId: string, shareId: number): Promise<{ acc
   return s && row ? s : null
 }
 
+// Copy Trading by invitation: someone a trader shares a strategy with may use
+// Copy Trading while they follow it, whatever stage the feature is in
+// (lib/features/server.ts). And for as long as they still have a group of their
+// own afterwards, so what they copied is never left where they can't reach it.
+export async function invitedToCopyTrading(userId: string): Promise<boolean> {
+  try {
+    const [member] = await db
+      .select({ id: copyShareMembers.id })
+      .from(copyShareMembers)
+      .innerJoin(copyShares, eq(copyShares.id, copyShareMembers.shareId))
+      .where(and(eq(copyShareMembers.userId, userId), eq(copyShareMembers.status, "active"), ne(copyShares.status, "revoked")))
+      .limit(1)
+    if (member) return true
+    const [was] = await db.select({ id: copyShareMembers.id }).from(copyShareMembers).where(eq(copyShareMembers.userId, userId)).limit(1)
+    if (!was) return false
+    const [group] = await db.select({ id: copyGroups.id }).from(copyGroups).where(eq(copyGroups.userId, userId)).limit(1)
+    return !!group
+  } catch {
+    // unreadable means "not invited", never "let in"
+    return false
+  }
+}
+
 export type JoinedShare = { shareId: number; accountId: number; ownerId: string; name: string; owner: string }
 
 // The strategies a trader may copy from: accepted, and still shared.

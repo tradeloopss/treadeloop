@@ -40,6 +40,9 @@ export const PANEL_WIDGETS: WidgetDef[] = [
   { id: "performanceSummary", label: "Performance Summary", description: "Win/loss breakdown, hold times and more", section: "panel", span: 3 },
   { id: "recentTrades", label: "Recent Trades", description: "Your five most recent trades", section: "panel", span: 2 },
   { id: "streaks", label: "Streaks & Extremes", description: "Best and worst trades, streaks and averages", section: "panel", span: 1 },
+  // The Calendar page's own calendar. Not in the default layout: its figures
+  // are sent to the browser only for a layout that has it (dashboard/page.tsx).
+  { id: "monthCalendar", label: "Full Calendar", description: "The month-by-month P&L calendar from the Calendar page", section: "panel", span: 3 },
 ]
 
 export const ALL_WIDGETS: WidgetDef[] = [...STAT_WIDGETS, ...PANEL_WIDGETS]

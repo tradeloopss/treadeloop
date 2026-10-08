@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Copy, Link2, ShieldCheck, UserMinus, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { joinCopyShare, leaveCopyShare, removeCopyShareFriend, renewCopyShareLink, setCopyShareOpen, shareCopyAccount, stopCopySharing } from "@/app/actions/copy-trading"
+import { leaveCopyShare, removeCopyShareFriend, renewCopyShareLink, setCopyShareOpen, shareCopyAccount, stopCopySharing } from "@/app/actions/copy-trading"
+import { acceptCopyInvite } from "@/app/actions/copy-invite"
 import { formatQuantity } from "@/lib/copy/contracts"
 import type { InviteView } from "@/lib/copy/shares"
 import { ago, type AccountView } from "@/lib/copy/view"
@@ -79,7 +80,7 @@ export function SharePanel({ account }: { account: AccountView }) {
                 <Copy className="size-3.5" aria-hidden /> Copy
               </button>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">Anyone with this link who has Copy Trading can ask to follow. Send it only to people you know.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Anyone with this link can follow the strategy, and gets Copy Trading for it. Send it only to people you know.</p>
           </div>
           <div>
             <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -320,7 +321,7 @@ export function JoinInvite({ token, invite }: { token: string; invite: InviteVie
             <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]" checked={attested} onChange={(e) => setAttested(e.target.checked)} />
             <span>I will copy it only to my own accounts with a broker, never to a prop-firm account.</span>
           </label>
-          <button type="button" disabled={pending || !attested} className={cn(linkBtnPrimary, "h-10 px-4")} onClick={() => run(() => joinCopyShare(token, attested), async () => (toast.success(`“${invite.name}” was added. Create a Copy Group to start copying it.`), router.push("/copy-trading/connection")))}>
+          <button type="button" disabled={pending || !attested} className={cn(linkBtnPrimary, "h-10 px-4")} onClick={() => run(() => acceptCopyInvite(token, attested), async () => (toast.success(`“${invite.name}” was added. Create a Copy Group to start copying it.`), router.push("/copy-trading/connection")))}>
             {pending ? "Adding…" : "Follow this strategy"}
           </button>
         </div>

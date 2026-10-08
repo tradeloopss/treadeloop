@@ -8,6 +8,7 @@ import { recordHeartbeat } from "@/lib/heartbeat"
 import { isOwnerEmail } from "@/lib/subscription"
 import { DEFAULT_TIME_ZONE } from "@/lib/timezone"
 import { BACKGROUND_SETTING, engineMode, runEngine } from "./server"
+import { invitedToCopyTrading } from "./shares"
 
 // Copy Trading with nobody watching: one pass of the engine for every trader
 // who has a group switched on. A timer on the sync server calls it every few
@@ -55,6 +56,8 @@ export async function runBackground(budgetMs = 40_000): Promise<BackgroundResult
   const stage = normalizeReleases(await getAppSetting("feature_releases").catch(() => null)).copy_trading
   const rows = await db.select({ id: user.id, role: user.role, email: user.email, banned: user.banned }).from(user).where(inArray(user.id, traders))
   const allowed = new Set(rows.filter((u) => !u.banned && canUseFeature(stage, isAdminRole(u.role) || isOwnerEmail(u.email))).map((u) => u.id))
+  // and for whoever copies a strategy a friend shared with them: the invitation is what lets them in
+  for (const u of rows) if (!u.banned && !allowed.has(u.id) && (await invitedToCopyTrading(u.id))) allowed.add(u.id)
 
   // Ask the MetaTrader worker for these leaders sooner than its usual minute.
   const leaders = [...new Set(groups.filter((g) => allowed.has(g.userId)).map((g) => g.leaderAccountId))]

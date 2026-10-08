@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { getAdmin } from "@/lib/admin/guard"
 import { getAppSetting, setAppSetting } from "@/lib/app-settings"
+import { invitedToCopyTrading } from "@/lib/copy/shares"
 import { DEFAULT_RELEASES, canUseFeature, normalizeReleases, type FeatureKey, type Releases, type Stage } from "./release"
 
 // Who gets a feature that is being rolled out (lib/features/release.ts). The
@@ -34,11 +35,14 @@ export const featureAccess = cache(async (): Promise<FeatureAccess> => {
   const [admin, releases, session] = await Promise.all([getAdmin(), getReleases(), auth.api.getSession({ headers: await headers() })])
   const isAdmin = !!admin
   const signedIn = !!session?.user
+  // Copy Trading is also open to someone a trader has shared a strategy with:
+  // the invitation is what lets them in (lib/copy/shares.ts). Only asked when the stage doesn't.
+  const copyTrading = signedIn && (canUseFeature(releases.copy_trading, isAdmin) || (await invitedToCopyTrading(session!.user.id)))
   return {
     userId: session?.user?.id ?? null,
     isAdmin,
     releases,
-    can: { edge_lab: signedIn && canUseFeature(releases.edge_lab, isAdmin), psychology: signedIn && canUseFeature(releases.psychology, isAdmin), copy_trading: signedIn && canUseFeature(releases.copy_trading, isAdmin) },
+    can: { edge_lab: signedIn && canUseFeature(releases.edge_lab, isAdmin), psychology: signedIn && canUseFeature(releases.psychology, isAdmin), copy_trading: copyTrading },
   }
 })
 
@@ -47,7 +51,8 @@ export const featureAccess = cache(async (): Promise<FeatureAccess> => {
 export async function requireFeature(feature: FeatureKey): Promise<{ userId: string; isAdmin: boolean; stage: Stage; access: FeatureAccess }> {
   const access = await featureAccess()
   if (!access.userId || !access.can[feature]) notFound()
-  return { userId: access.userId, isAdmin: access.isAdmin, stage: access.releases[feature], access }
+  // (someone who isn't on the team and has the feature has it as a beta user does, whatever let them in)
+  return { userId: access.userId, isAdmin: access.isAdmin, stage: access.isAdmin ? access.releases[feature] : "beta", access }
 }
 
 // For a feature's server actions: the same check, reported as an error.

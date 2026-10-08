@@ -21,12 +21,17 @@ import { AffiliateClaim } from "@/components/affiliate/tracker"
 import { userHasPerk } from "@/lib/affiliates/perk-access"
 import { ATTRIBUTION_COOKIE, attributionSecret, claimable } from "@/lib/affiliates/token"
 import { featureAccess } from "@/lib/features/server"
+import { PATH_HEADER } from "@/lib/path-header"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const startedAt = Date.now()
   const requestHeaders = await headers()
   const session = await auth.api.getSession({ headers: requestHeaders })
-  if (!session?.user) redirect("/sign-in")
+  if (!session?.user) {
+    // someone following an invitation link comes back to it once signed in
+    const asked = requestHeaders.get(PATH_HEADER) ?? ""
+    redirect(asked.startsWith("/copy-trading/join/") ? `/sign-in?next=${encodeURIComponent(asked)}` : "/sign-in")
+  }
 
   // No active subscription (new sign-up, or a trial/plan that lapsed). Rather
   // than bouncing them to /pricing, the app renders behind a blur with the
@@ -62,7 +67,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     : null
   // Someone logged in as a user sees what that user sees: featureAccess gives
   // an impersonating admin no admin rights.
-  const insights = { edge_lab: features.can.edge_lab ? features.releases.edge_lab : undefined, psychology: features.can.psychology ? features.releases.psychology : undefined, copy_trading: features.can.copy_trading ? features.releases.copy_trading : undefined }
+  const insights = { edge_lab: features.can.edge_lab ? features.releases.edge_lab : undefined, psychology: features.can.psychology ? features.releases.psychology : undefined, copy_trading: features.can.copy_trading ? (features.isAdmin ? features.releases.copy_trading : "beta") : undefined }
   const bottomBar = !!(insights.edge_lab || insights.psychology)
   const locked = plan === null
   // Only matters for the paywall: whether to offer the free trial or (once

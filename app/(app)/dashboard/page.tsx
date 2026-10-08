@@ -3,11 +3,12 @@ import { headers } from "next/headers"
 import { getTrades } from "@/app/actions/trades"
 import { getAccounts, getActiveAccountIds } from "@/app/actions/accounts"
 import { getJournalEntries } from "@/app/actions/journal"
+import { getPlaybooks } from "@/app/actions/playbooks"
 import { getRecentSyncEvents } from "@/app/actions/sync-events"
 import { AutoSyncBanner } from "@/components/auto-sync-banner"
 import { isPro, getUserPlan } from "@/lib/subscription"
-import { analyze, formatCurrency, type TradeStat } from "@/lib/calc"
-import { computeDayPnl } from "@/lib/day-pnl"
+import { analyze, formatCurrency, tradingSession, type TradeStat } from "@/lib/calc"
+import { computeDayPnl, tradeDate } from "@/lib/day-pnl"
 import { computeDailyAccountPnl, computeAccountPnlInRange } from "@/lib/daily-account-pnl"
 import { resolveTimeZone, localDay } from "@/lib/timezone"
 import { resolvePnlPeriod } from "@/lib/pnl-period"
@@ -15,6 +16,7 @@ import type { BrokerBreakdown } from "@/app/actions/daily-pnl-share"
 import { DashboardHeaderActions } from "@/components/dashboard-header-actions"
 import { ConnectFirstAccountDialog } from "@/components/onboarding/connect-first-account-dialog"
 import { CurrentWeekCalendar } from "@/components/current-week-calendar"
+import { PnlCalendar, type CalendarTrade } from "@/components/pnl-calendar"
 import { LastWeekReport } from "@/components/last-week-report"
 import type { ReportTrade } from "@/components/period-insights"
 import { PageHeader } from "@/components/page-header"
@@ -38,7 +40,7 @@ import { intlLocale } from "@/lib/i18n"
 import { getDropTeaser } from "@/lib/cases/queries"
 import { CasesPromoModal } from "@/components/cases/promo-modal"
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ edit?: string }> }) {
   const startedAt = Date.now()
   const t = await getT()
   // The recent-trades loop names each trade `t`; the translator is `tr` there.
@@ -256,7 +258,29 @@ export default async function DashboardPage() {
     ),
   }
 
+  // The full calendar carries a line for every closed trade, so it is built
+  // only for a layout that shows it, and while the layout is being edited
+  // (that is when it can be added). Everyone else's dashboard stays as light as it was.
+  const fullCalendar = (await searchParams).edit === "1" || template.panelWidgets.includes("monthCalendar")
+  const calendarTrades: CalendarTrade[] = fullCalendar
+    ? rows
+        .filter((r) => r.status === "closed")
+        .map((r) => ({ date: tradeDate(r, tz), pnl: Number(r.pnl), r: r.rMultiple == null ? null : Number(r.rMultiple), rating: r.rating, symbol: r.symbol, side: r.side === "short" ? "short" : "long", session: tradingSession(r.entryTime), playbookId: r.playbookId, tags: r.tags ?? [] }))
+    : []
+  const calendarPlaybooks = fullCalendar ? (await getPlaybooks()).map((p) => ({ id: p.id, name: p.name })) : []
+
   const panelWidgets: Record<string, React.ReactNode> = {
+    monthCalendar: fullCalendar ? (
+      <Card className="h-full p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-muted-foreground">{t("Calendar")}</h2>
+          <Link href="/calendar" className="text-xs font-medium text-primary hover:underline">
+            {t("Open Calendar")}
+          </Link>
+        </div>
+        <PnlCalendar trades={calendarTrades} noteDates={journalEntries.filter((e) => e.notes).map((e) => e.date)} playbooks={calendarPlaybooks} />
+      </Card>
+    ) : null,
     weekCalendar: <CurrentWeekCalendar byDay={dayPnlByDay} />,
     tradingScore: <TradingScore overall={tradingScore.overall} axes={tradingScore.axes} />,
     lastWeekReport: <LastWeekReport trades={reportTrades} />,
