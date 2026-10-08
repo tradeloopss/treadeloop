@@ -6,7 +6,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { ArrowLeft, ArrowRight, Bitcoin, CandlestickChart, Check, LayoutGrid, Layers, LineChart, ShieldCheck, SlidersHorizontal, Users, Zap } from "lucide-react"
+import { ArrowLeft, ArrowRight, CandlestickChart, Check, LayoutGrid, Layers, LineChart, Plus, ShieldCheck, SlidersHorizontal, TriangleAlert, Users, Wallet, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { helpHref } from "@/lib/urls"
 import { setCopyAccountRole } from "@/app/actions/copy-trading"
@@ -16,22 +16,28 @@ import { BrandMark } from "@/components/brand-mark"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { IntegrationBadge, SafeMode } from "@/components/compliance/safe-mode"
 import type { ProviderProfile } from "@/lib/compliance/engine"
-import { ROLE_LABELS, money, type Role } from "@/lib/copy/view"
+import { ROLE_LABELS, money, type AccountView, type Role } from "@/lib/copy/view"
 import { useAction } from "@/components/insights/client"
 import { linkBtn, linkBtnPrimary } from "@/components/insights/ui"
 import { useCopy } from "./store"
-import { HealthPill, Heartbeat } from "./ui"
+import { HealthPill, Heartbeat, RolePill } from "./ui"
 
-// Connect Account, Copy Trading's own: the platform, TradeLoop's connection
-// form for it (the same ones as on the Accounts page), a check that the account
-// came through, and what it will be used for.
+// Connect Account, Copy Trading's own. Two ways in: an account the trader
+// already has in TradeLoop, which only needs to be told what it is for; or a
+// new one, with TradeLoop's connection form for it (the same ones as on the
+// Accounts page), a check that it came through, and what it will be used for.
+//
+// MetaTrader 5, MetaTrader 4 and Rithmic only: those are the accounts Copy
+// Trading reads at first hand. And said before anything is connected: a forex
+// prop firm's account is its trader's responsibility, and the firm is asked
+// first.
 //
 // What a card says is what the connection does. A broker or prop firm with
 // rules of its own (lib/compliance) is listed from its rules profile, never by
 // name here: whether it can be connected, on what terms, and the way its own
 // copier offers.
 
-type Category = "forex" | "futures" | "crypto"
+type Category = "forex" | "futures"
 type Card = {
   key: string
   name: string
@@ -63,18 +69,35 @@ const PLATFORMS: Card[] = [
   { key: "mt5", name: "MetaTrader 5", description: "Forex, CFDs and more, with the read-only investor password. Receives copied orders once its trading password is added.", tags: ["Forex", "CFDs", "Indices", "Commodities"], category: "forex", logo: <Logo src="/brokers/sm/metatrader.png" />, action: "Connect", recommended: true },
   { key: "mt4", name: "MetaTrader 4", description: "The classic Forex platform, with the read-only investor password. Can lead a group; can't receive orders yet.", tags: ["Forex", "CFDs", "Indices", "Commodities"], category: "forex", logo: <Logo src="/brokers/sm/metatrader.png" />, action: "Connect" },
   { key: "rithmic", name: "Rithmic", description: "Futures prop firms, on your Rithmic login. Can lead a group; can't receive orders yet.", tags: ["Futures", "Options"], category: "futures", logo: <Logo src="/brokers/sm/rithmic.png" />, action: "Connect" },
-  { key: "tradingview", name: "TradingView", description: "Paper trading, through the TradeLoop browser extension. Paired on the Accounts page.", tags: ["Stocks", "Forex", "Crypto", "Indices"], category: "crypto", logo: <Logo src="/brokers/sm/tradingview.png" dark="/brokers/sm/tradingview-dark.png" />, action: "Setup guide" },
-  { key: "tradovate", name: "Tradovate", description: "Futures, through NinjaTrader with the TradeLoop add-on. Set up on the Accounts page; can lead a group.", tags: ["Futures"], category: "futures", logo: <Logo src="/brokers/sm/tradovate.png" />, action: "Connect" },
 ]
+
+// The logos TradeLoop has for the providers with rules of their own; any other gets its initials.
+const PROVIDER_LOGOS: Record<string, { src: string; dark?: string }> = { fundingpips: { src: "/brokers/sm/fundingpips.png", dark: "/brokers/sm/fundingpips-dark.png" } }
+const providerLogo = (key: string, name: string) => (PROVIDER_LOGOS[key] ? <Logo {...PROVIDER_LOGOS[key]} /> : <Initials name={name} />)
+// An account the trader already has: its provider's logo where it has one, else its platform's.
+const accountLogo = (a: AccountView) => (a.provider && PROVIDER_LOGOS[a.provider] ? <Logo {...PROVIDER_LOGOS[a.provider]} /> : <Logo src={a.platform === "Rithmic" ? "/brokers/sm/rithmic.png" : "/brokers/sm/metatrader.png"} />)
+// The accounts Copy Trading connects: MetaTrader 5, MetaTrader 4 and Rithmic.
+const copyable = (a: AccountView) => a.linked && (a.platform === "Rithmic" || a.platform.startsWith("MetaTrader"))
+
+// Said before anything is connected, in both ways in.
+function PropFirmNote() {
+  return (
+    <div role="note" className="flex items-start gap-3 rounded-xl border border-[var(--warning)]/50 bg-[var(--warning)]/10 p-3 text-sm">
+      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-[var(--warning)]" aria-hidden />
+      <p>
+        <span className="font-semibold">Important: a forex prop-firm account is your responsibility.</span> <span className="text-muted-foreground">Ask your firm first whether it allows a trade copier, and a connection from a server like ours. Many don&apos;t, and breaking a firm&apos;s rules can cost you the account. TradeLoop knows the rules of the firms it lists by name, and of no other.</span>
+      </p>
+    </div>
+  )
+}
 
 const CATEGORIES: { key: "all" | Category; label: string; icon: typeof LayoutGrid }[] = [
   { key: "all", label: "All Platforms", icon: LayoutGrid },
   { key: "forex", label: "Forex & CFDs", icon: LineChart },
   { key: "futures", label: "Futures", icon: CandlestickChart },
-  { key: "crypto", label: "Crypto", icon: Bitcoin },
 ]
 
-const STEPS = ["Platform", "Login", "Confirm"]
+const STEPS = ["Account", "Login", "Confirm"]
 const ROLES: Role[] = ["leader", "follower", "both"]
 
 function Stepper({ current }: { current: number }) {
@@ -114,10 +137,10 @@ function Showcase() {
           <Logo src="/brokers/sm/metatrader.png" />
         </span>
         <span className={cn(tile, "top-6 right-2 rotate-6")}>
-          <Logo src="/brokers/sm/tradingview.png" dark="/brokers/sm/tradingview-dark.png" />
+          <Logo {...PROVIDER_LOGOS.fundingpips} />
         </span>
         <span className={cn(tile, "top-[4.5rem] left-1 rotate-3")}>
-          <Logo src="/brokers/sm/tradovate.png" />
+          <Logo src="/brokers/sm/exness.png" />
         </span>
         <span className={cn(tile, "top-[5.5rem] right-6 -rotate-3")}>
           <Logo src="/brokers/sm/rithmic.png" />
@@ -131,7 +154,7 @@ function Showcase() {
           [ShieldCheck, "Secure Connection"],
           [Zap, "Real-Time Copying"],
           [SlidersHorizontal, "Full Trade Control"],
-          [Layers, "Multi-Platform Support"],
+          [Layers, "MetaTrader 5, MetaTrader 4, Rithmic"],
         ].map(([Icon, label]) => {
           const I = Icon as typeof ShieldCheck
           return (
@@ -178,7 +201,12 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
   const [relay, setRelay] = useState<ProviderProfile | null>(null)
   const [direct, setDirect] = useState<ProviderProfile | null>(null)
   const [checking, setChecking] = useState(false)
-  const account = state.accounts.filter((a) => !before.includes(a.id))[0]
+  // the two ways in: an account the trader already has, or a new one
+  const current = state.accounts.filter(copyable)
+  const [way, setWay] = useState<"current" | "new" | null>(null)
+  const mode = way ?? (current.length ? "current" : "new")
+  const [picked, setPicked] = useState<number | null>(null)
+  const account = picked != null ? state.accounts.find((a) => a.id === picked) : state.accounts.filter((a) => !before.includes(a.id))[0]
 
   const cards: Card[] = [
     ...PLATFORMS,
@@ -190,7 +218,7 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
         : `TradeLoop doesn't connect to ${p.name} accounts. See what its rules allow${p.ownCopier ? ", and the way round" : ""}.`,
       tags: ["MetaTrader 5", "Prop firm"],
       category: "forex",
-      logo: <Initials name={p.name} />,
+      logo: providerLogo(p.provider, p.name),
       action: p.connectable ? "Connect" : "See how",
       provider: p,
     })),
@@ -204,11 +232,24 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
     setProvider(null)
     setRelay(null)
     setDirect(null)
+    setPicked(null)
   }
   const close = () => {
     onClose()
     reset()
     setCategory("all")
+    setWay(null)
+  }
+  // An account the trader already has: nothing to log in to, only what it is for. One at a provider
+  // with rules of its own is told so on the way (it may only be allowed to lead).
+  const use = (a: AccountView) => {
+    setPicked(a.id)
+    setRelay(null)
+    setProvider(null)
+    setPlatform(null)
+    setDirect(state.providers.find((p) => p.provider === a.provider) ?? null)
+    setRole(a.preferredRole !== "unassigned" ? a.preferredRole : a.provider ? "leader" : "follower")
+    setStep(3)
   }
   const check = async () => {
     setChecking(true)
@@ -222,6 +263,7 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
   }
   const choose = (card: Card) => {
     setBefore(state.accounts.map((a) => a.id))
+    setPicked(null)
     setRelay(null)
     setDirect(null)
     setProvider(card.provider ?? null)
@@ -240,7 +282,7 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
           </span>
           <div className="min-w-0 flex-1 basis-64">
             <DialogTitle className="text-xl font-bold tracking-tight sm:text-2xl">Connect Account</DialogTitle>
-            <DialogDescription className="mt-1 max-w-xl text-sm">Link your trading account to start copy trading. Choose your platform and follow the connection steps.</DialogDescription>
+            <DialogDescription className="mt-1 max-w-xl text-sm">Use an account you already have in TradeLoop, or connect a new one. MetaTrader 5, MetaTrader 4 and Rithmic.</DialogDescription>
           </div>
           <Stepper current={step === 0 ? 1 : step === 1 ? 2 : 3} />
         </header>
@@ -250,7 +292,30 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
           <nav className="flex min-w-0 shrink-0 flex-col gap-4 lg:w-60" aria-label="Platforms">
             {step === 0 ? (
               <ul className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:p-0">
-                {CATEGORIES.map((c) => (
+                {(
+                  [
+                    { key: "current", label: "Your accounts", icon: Wallet, count: current.length },
+                    { key: "new", label: "Add a new account", icon: Plus, count: null },
+                  ] as const
+                ).map((w) => (
+                  <li key={w.key} className="shrink-0">
+                    <button
+                      type="button"
+                      aria-pressed={mode === w.key}
+                      onClick={() => setWay(w.key)}
+                      className={cn(
+                        "flex h-11 w-full items-center gap-2.5 rounded-xl border px-3 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none lg:h-12",
+                        mode === w.key ? "border-primary bg-primary text-primary-foreground" : "border-border text-foreground hover:bg-muted/50",
+                      )}
+                    >
+                      <w.icon className="size-4 shrink-0" aria-hidden />
+                      <span className="flex-1 text-start">{w.label}</span>
+                      {w.count != null && <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums", mode === w.key ? "bg-white/20" : "bg-muted")}>{w.count}</span>}
+                    </button>
+                  </li>
+                ))}
+                {mode === "new" && <li aria-hidden className="hidden h-px bg-border lg:my-1 lg:block" />}
+                {(mode === "new" ? CATEGORIES : []).map((c) => (
                   <li key={c.key} className="shrink-0">
                     <button
                       type="button"
@@ -270,14 +335,29 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
               </ul>
             ) : (
               <div className="rounded-xl border bg-card/60 p-4">
-                {chosen && (
+                {picked != null && account ? (
                   <div className="flex items-center gap-3">
-                    <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border">{chosen.logo}</span>
+                    <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border">{accountLogo(account)}</span>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{chosen.name}</p>
-                      <p className="text-xs text-muted-foreground">{relay ? "Relay account" : STEPS[step === 1 ? 1 : 2]}</p>
+                      <p className="truncate text-sm font-semibold">{account.name}</p>
+                      <p className="text-xs text-muted-foreground">One of your accounts</p>
                     </div>
                   </div>
+                ) : (
+                  chosen && (
+                    <div className="flex items-center gap-3">
+                      <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border">{chosen.logo}</span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{chosen.name}</p>
+                        <p className="text-xs text-muted-foreground">{relay ? "Relay account" : STEPS[step === 1 ? 1 : 2]}</p>
+                      </div>
+                    </div>
+                  )
+                )}
+                {step === 3 && picked != null && (
+                  <button type="button" className={cn(linkBtn, "mt-3 w-full")} onClick={reset}>
+                    <ArrowLeft className="size-3.5" aria-hidden /> Your accounts
+                  </button>
                 )}
                 {step === 1 && (
                   <button type="button" className={cn(linkBtn, "mt-3 w-full")} onClick={reset}>
@@ -291,8 +371,58 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
 
           {/* ------------------------------------------------ middle: the platforms, then the steps */}
           <div className="min-w-0 flex-1">
-            {step === 0 && (
-              <>
+            {step === 0 && <PropFirmNote />}
+            {step === 0 && mode === "current" && (
+              <div className="mt-3">
+                {current.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-6 text-center">
+                    <Wallet className="mx-auto size-6 text-muted-foreground" aria-hidden />
+                    <p className="mt-2 text-sm font-medium">No MetaTrader or Rithmic account in TradeLoop yet</p>
+                    <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">Connect one, and it appears here and on the Accounts page alike.</p>
+                    <button type="button" className={cn(linkBtnPrimary, "mt-3")} onClick={() => setWay("new")}>
+                      <Plus className="size-3.5" aria-hidden /> Add a new account
+                    </button>
+                  </div>
+                ) : (
+                  <ul className="space-y-3">
+                    {current.map((a) => (
+                      <li key={a.id}>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border bg-card p-4 transition-colors hover:border-primary/40">
+                          <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border">{accountLogo(a)}</span>
+                          <div className="min-w-0 flex-1 basis-44">
+                            <p className="flex flex-wrap items-center gap-2 text-base font-semibold">
+                              <span className="min-w-0 truncate">{a.name}</span>
+                              {a.role !== "unassigned" && <RolePill role={a.role} />}
+                            </p>
+                            <p className="mt-0.5 text-sm text-muted-foreground tabular-nums">
+                              {a.platform}
+                              {a.login ? ` · #${a.login}` : ""} · {money(a.balance)}
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <HealthPill health={a.health} />
+                              <span className="text-xs text-muted-foreground">{a.groups.length ? `in ${a.groups.length} ${a.groups.length === 1 ? "Copy Group" : "Copy Groups"}` : "not used in Copy Trading yet"}</span>
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => use(a)} className={cn(a.role === "unassigned" ? linkBtnPrimary : linkBtn, "h-10 w-full shrink-0 px-4 sm:w-auto")}>
+                            {a.role === "unassigned" ? "Use this account" : "Change its role"} <ArrowRight className="size-4" aria-hidden />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  MetaTrader 5, MetaTrader 4 and Rithmic accounts are listed. The one you want isn&apos;t here?{" "}
+                  <button type="button" className="font-medium text-primary hover:underline" onClick={() => setWay("new")}>
+                    Add a new account
+                  </button>
+                  .
+                </p>
+                <SecurityNote className="mt-4 lg:hidden" />
+              </div>
+            )}
+            {step === 0 && mode === "new" && (
+              <div className="mt-3">
                 <ul className="space-y-3">
                   {shown.map((c) => (
                     <li key={c.key}>
@@ -321,14 +451,14 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
                   ))}
                 </ul>
                 <p className="mt-3 text-xs text-muted-foreground">
-                  A CSV import or a manual account is added on the{" "}
+                  Any other kind of account (a CSV import, a manual account, TradingView, Tradovate) is added on the{" "}
                   <Link href="/accounts" className="font-medium text-primary hover:underline">
                     Accounts page
                   </Link>
-                  . It can&apos;t be copied from or to.
+                  , for your journal. It isn&apos;t connected to Copy Trading from here.
                 </p>
                 <SecurityNote className="mt-4 lg:hidden" />
-              </>
+              </div>
             )}
 
             {step === 1 && (
@@ -386,15 +516,6 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
                 {/* TradeLoop's own connection forms: the same ones as on the Accounts page */}
                 {(platform === "mt5" || platform === "mt4") && <ConnectFlow initial={{ platform }} lockPlatform onDone={connected} onBack={reset} />}
                 {platform === "rithmic" && <ConnectForm onDone={connected} />}
-                {(platform === "tradingview" || platform === "tradovate") && (
-                  <div className="rounded-xl border border-dashed p-4 text-sm">
-                    <p>{platform === "tradingview" ? "TradingView is paired from the Accounts page, with the TradeLoop browser extension." : "Tradovate is set up on the Accounts page: NinjaTrader with the TradeLoop add-on."}</p>
-                    <p className="mt-1 text-muted-foreground">Once the account is there it appears on the Connection page, ready to be given a role.</p>
-                    <Link href={platform === "tradingview" ? "/accounts?connect=tradingview" : "/accounts"} className={cn(linkBtnPrimary, "mt-3")}>
-                      Open Accounts
-                    </Link>
-                  </div>
-                )}
               </div>
             )}
 
@@ -445,7 +566,7 @@ export function ConnectAccountDialog({ open, onClose }: { open: boolean; onClose
                 </fieldset>
                 <p className="text-xs text-muted-foreground">A role isn&apos;t permanent: an account can be a Leader in one Copy Group and a Follower in another.</p>
                 <div className="flex justify-end">
-                  <button type="button" disabled={pending} className={linkBtnPrimary} onClick={() => run(() => setCopyAccountRole(account.id, role), async () => (toast.success("Account connected."), await refresh(), setStep(4)))}>
+                  <button type="button" disabled={pending} className={linkBtnPrimary} onClick={() => run(() => setCopyAccountRole(account.id, role), async () => (toast.success(picked != null ? `${account.name} is a ${ROLE_LABELS[role].toLowerCase()} now.` : "Account connected."), await refresh(), setStep(4)))}>
                     {pending ? "Saving…" : "Next"}
                   </button>
                 </div>

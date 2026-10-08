@@ -11,6 +11,7 @@ import { syncSummary, type CopyRules } from "@/lib/copy/engine"
 import { ago, copyStats, copySummary, groupCopies, money, sizingSummary, type GroupView } from "@/lib/copy/view"
 import { Sheet, useAction } from "@/components/insights/client"
 import { NotEnough, Pill, Section, linkBtn, linkBtnPrimary, type PillTone } from "@/components/insights/ui"
+import { copyAllowanceText } from "@/lib/plan-allowance"
 import { AccountDrawer, ConnectAccountDialog, ContractDialog, GroupWizard, RulesEditor } from "./dialogs"
 import { AlertList, CopyFeed } from "./history"
 import { useCopy } from "./store"
@@ -231,7 +232,7 @@ export function CopyDashboard() {
         <p>Nothing is closed: every open position stays exactly as it is. To close positions, use Flatten in the Cockpit.</p>
       </ConfirmDialog>
 
-      <Section title="Copy groups" description="Each group has one Leader and the accounts that copy it.">
+      <Section title="Copy groups" description={`Each group has one Leader and the accounts that copy it. Your plan includes ${copyAllowanceText(state.allowance)}: you have ${state.groups.length} of ${state.allowance.groups}.`}>
         {state.accounts.length === 0 ? (
           <>
             <NotEnough title="No trading accounts connected yet.">Connect the account you trade on and the accounts that should copy it.</NotEnough>

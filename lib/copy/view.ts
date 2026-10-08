@@ -2,6 +2,7 @@ import { resolveFollowerSymbol, sameInstrument, type ContractSpec } from "./cont
 import type { CopyRules, FollowerConfig, Health, PropSyncState, Side, Step } from "./engine"
 import type { ProviderProfile } from "@/lib/compliance/engine"
 import type { TradingCheck } from "@/lib/order-execution/trading-check"
+import type { CopyAllowance } from "@/lib/plan-allowance"
 import type { ShareView } from "./shares"
 
 // What the Copy Trading pages are drawn from: everything the server knows
@@ -130,6 +131,8 @@ export type CopyState = {
   events: EventView[]
   // the providers that have rules of their own, as the trader is shown them
   providers: ProviderProfile[]
+  // what the trader's plan includes: how many Copy Groups, and how many accounts in each (lib/plan-allowance.ts)
+  allowance: CopyAllowance
   // false when the live positions couldn't be read this time
   liveData: boolean
   // the background engine: whether it is switched on, and when it last ran

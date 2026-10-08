@@ -10,6 +10,7 @@ import { changeCopyLeader, createCopyGroup, detachCopyAccount, importCopyContrac
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatQuantity, searchContracts } from "@/lib/copy/contracts"
 import { DEFAULT_FOLLOWER, DEFAULT_RULES, RULE_TOGGLES, SIZING_MODES, activationProblems, sizingLabel, type CopyRules, type FollowerConfig, type SizingMode } from "@/lib/copy/engine"
+import { copyAllowanceProblem } from "@/lib/plan-allowance"
 import { ROLE_LABELS, ago, money, type AccountView, type ComplianceProblem, type GroupView, type Role } from "@/lib/copy/view"
 import { checkCopyGroup } from "@/app/actions/compliance"
 import { SafeMode } from "@/components/compliance/safe-mode"
@@ -295,6 +296,10 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
     reset()
   }
   const byId = new Map([...state.accounts, ...state.shared].map((a) => [a.id, a]))
+  // what the plan includes (lib/plan-allowance.ts): said here, and held to on the server
+  const { allowance } = state
+  const groupLimit = copyAllowanceProblem(allowance, { groups: state.groups.length })
+  const roomForFollower = followers.length + 1 < allowance.accounts
   // the Leader is a friend's shared strategy: only the trader's own broker accounts may copy it
   const sharedLeader = !!byId.get(leader ?? -1)?.shared
   const problems = activationProblems({ hasLeader: leader != null, leaderConnected: isOnline(byId.get(leader ?? -1)), followers: followers.map((f) => ({ name: byId.get(f.accountId)?.name ?? "Follower", config: f.config, connected: isOnline(byId.get(f.accountId)) })), contracts: contracts.length, symbolScope: rules.symbolScope })
@@ -327,7 +332,17 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
           ))}
         </ol>
 
-        {(state.accounts.length < 1 || state.accounts.length + state.shared.length < 2) && step < 7 ? (
+        {groupLimit && step < 7 ? (
+          <div className="rounded-lg border border-dashed p-5 text-center text-sm">
+            <p className="font-medium">Your plan&apos;s Copy Groups are all in use.</p>
+            <p className="mx-auto mt-1 max-w-md text-muted-foreground">{groupLimit.replace(" at /pricing", "")}</p>
+            {allowance.plan === "essential" && (
+              <Link href="/pricing" className={cn(linkBtnPrimary, "mt-3")} onClick={close}>
+                See Pro
+              </Link>
+            )}
+          </div>
+        ) : (state.accounts.length < 1 || state.accounts.length + state.shared.length < 2) && step < 7 ? (
           <div className="rounded-lg border border-dashed p-5 text-center text-sm">
             <p className="font-medium">A copy group needs at least two accounts.</p>
             <p className="mt-1 text-muted-foreground">One to lead and one of your own to follow. You have {state.accounts.length}.</p>
@@ -365,8 +380,12 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
             {step === 2 && (
               <fieldset className="space-y-2">
                 <legend className="mb-1 text-sm font-medium">Which accounts copy it?</legend>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Your plan includes up to {allowance.accounts} accounts in a Copy Group: the Leader and {allowance.accounts - 1} {allowance.accounts - 1 === 1 ? "Follower" : "Followers"}.{allowance.plan === "essential" && " Pro includes 5."}
+                </p>
                 {state.accounts.filter((a) => a.id !== leader).map((a) => {
                   const on = followers.some((f) => f.accountId === a.id)
+                  if (!on && !roomForFollower) return <AccountOption key={a.id} a={a} type="checkbox" checked={false} disabled note="your plan's accounts for one group are taken" onChange={() => {}} />
                   // a friend's strategy is copied to broker accounts only (lib/compliance/kind.ts)
                   if (sharedLeader && !a.sharing.ok) return <AccountOption key={a.id} a={a} type="checkbox" checked={false} disabled note="not a broker account: it can't copy a friend's strategy" onChange={() => {}} />
                   return <AccountOption key={a.id} a={a} type="checkbox" checked={on} note={state.mode === "live" && !a.canExecute ? "can't receive live orders" : undefined} onChange={() => setFollowers((list) => (on ? list.filter((f) => f.accountId !== a.id) : [...list, { accountId: a.id, config: { ...DEFAULT_FOLLOWER } }]))} />

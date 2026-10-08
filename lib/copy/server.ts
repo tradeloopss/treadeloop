@@ -2,6 +2,8 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from
 import { db } from "@/lib/db"
 import { copyAccountPrefs, copyEvents, copyGroupContracts, copyGroupFollowers, copyGroups, copyOrders, copyPositions, copyRiskLimits, copyRules, copySymbolMappings, metatraderConnections, orderCommands, providerAccounts, rithmicConnections, trades, tradingAccounts } from "@/lib/db/schema"
 import { getAppSetting } from "@/lib/app-settings"
+import { copyAllowance, copyAllowanceProblem, type CopyAllowance } from "@/lib/plan-allowance"
+import { isPro } from "@/lib/subscription"
 import { encrypt } from "@/lib/crypto"
 import { TRADING_CHECK_NOTES, tradingCheckOf, tradingUsable } from "@/lib/order-execution/trading-check"
 import { readHeartbeat } from "@/lib/heartbeat"
@@ -37,6 +39,16 @@ export const LEADER_FRESH_MS = 5 * 60_000
 // How recently the copy lane must have read an account for the account to count as on it.
 export const LANE_FRESH_MS = 20_000
 export const MAX_GROUPS = 20
+
+// What the trader's plan includes of Copy Trading (lib/plan-allowance.ts): how
+// many Copy Groups, and how many accounts in each. Asked of the plan on the
+// server for every group made, every follower added and every group switched
+// on, whatever the page showed. (A test tells it who is on which plan.)
+let allowanceReader: (userId: string) => Promise<CopyAllowance> = async (userId) => copyAllowance(await isPro(userId))
+export function setAllowanceReader(reader: (userId: string) => Promise<CopyAllowance>) {
+  allowanceReader = reader
+}
+export const allowanceOf = (userId: string): Promise<CopyAllowance> => allowanceReader(userId)
 export const MAX_FOLLOWERS = 25
 export const MAX_CONTRACTS = 30
 
@@ -344,7 +356,7 @@ export async function loadCopyState(userId: string, timeZone: string): Promise<C
   const orders: OrderView[] = orderRows.map((o) => ({ id: o.id, groupId: o.groupId, correlationId: o.correlationId, masterOrderId: o.masterOrderId, masterAccountId: o.masterAccountId, followerAccountId: o.followerAccountId, action: o.action, symbol: o.symbol, leaderSymbol: o.leaderSymbol, side: o.side as Side, quantity: Number(o.quantity), leaderQuantity: num(o.leaderQuantity), requestedPrice: num(o.requestedPrice), executionPrice: num(o.executionPrice), status: o.status, reason: o.reason, slippage: num(o.slippage), latencyMs: o.latencyMs, tradeloopMs: o.tradeloopMs, simulated: o.simulated, createdAt: o.createdAt.toISOString(), steps: (Array.isArray((o.decision as { steps?: Step[] } | null)?.steps) ? (o.decision as { steps: Step[] }).steps : []) as Step[] }))
   const events: EventView[] = eventRows.map((e) => ({ id: e.id, groupId: e.groupId, accountId: e.accountId, level: e.level as EventView["level"], code: e.code, title: e.title, body: e.body, action: e.action, masterOrderId: e.masterOrderId, createdAt: e.createdAt.toISOString(), unread: !e.readAt }))
 
-  return { mode, accounts, shared, shares: await listShares(userId), groups, positions, orders, events, providers: sets.map(providerProfile), liveData: live != null && sharedRead, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
+  return { mode, accounts, shared, shares: await listShares(userId), groups, positions, orders, events, providers: sets.map(providerProfile), allowance: await allowanceOf(userId), liveData: live != null && sharedRead, engine: { background: background !== false, lastRunAt: beat?.at.toISOString() ?? null, ok: beat?.ok ?? false }, at: new Date().toISOString() }
 }
 // the broker's own id of each live position, kept beside the state rather than sent to the browser
 const liveKeys = new WeakMap<PositionView[], Map<PositionView, string>>()
@@ -558,6 +570,8 @@ export async function createGroup(userId: string, input: GroupInput): Promise<nu
   await comply(userId, { leader, followers: followers.map((f) => f.accountId), action: "create_group" })
   const existing = await db.select({ id: copyGroups.id, name: copyGroups.name }).from(copyGroups).where(eq(copyGroups.userId, userId))
   if (existing.length >= MAX_GROUPS) throw new Error(`You can have up to ${MAX_GROUPS} copy groups.`)
+  const over = copyAllowanceProblem(await allowanceOf(userId), { groups: existing.length, accounts: { want: followers.length + 1 } })
+  if (over) throw new Error(over)
   if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) throw new Error("You already have a group with that name.")
   const rules = cleanRules(input.rules)
   const symbols = [...new Set((input.contracts ?? []).map((s) => String(s).trim().toUpperCase()).filter((s) => /^[A-Z0-9._-]{1,20}$/.test(s)))].slice(0, MAX_CONTRACTS)
@@ -617,6 +631,9 @@ export async function setGroupActive(userId: string, groupId: number, active: bo
     throw new ComplianceError(asVerdict(first))
   }
   if (problems.length) throw new Error(problems.join(" "))
+  // within the plan: as many groups copying at a time as it includes, each of as many accounts
+  const over = copyAllowanceProblem(state.allowance, { groups: state.groups.filter((x) => x.id !== groupId && x.status === "active").length, accounts: { want: g.followers.length + 1 }, switchingOn: true })
+  if (over) throw new Error(over)
   await baseline(userId, g, state)
   await db.update(copyGroups).set({ status: "active", timeZone, updatedAt: new Date() }).where(eq(copyGroups.id, groupId))
   await note(userId, { groupId, level: "success", code: "group_activated", title: `“${g.name}” is copying`, body: state.mode === "live" ? "New trades on the Leader are sent to the followers." : "Simulation: new trades on the Leader are worked out and recorded for each follower, and nothing is sent to a broker." })
@@ -663,6 +680,9 @@ export async function saveFollowers(userId: string, groupId: number, input: Foll
   await ownAccounts(userId, list.map((f) => f.accountId))
   await comply(userId, { leader: g.leaderAccountId, followers: list.map((f) => f.accountId), groupId, action: "save_followers" })
   const existing = await db.select().from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, groupId))
+  // more accounts than the plan includes: what the group has is kept, another is not taken
+  const over = copyAllowanceProblem(await allowanceOf(userId), { accounts: { want: list.length + 1, had: existing.length + 1 } })
+  if (over) throw new Error(over)
   const gone = existing.filter((e) => !list.some((f) => f.accountId === e.accountId))
   if (gone.length) {
     await db.delete(copySymbolMappings).where(inArray(copySymbolMappings.followerId, gone.map((e) => e.id)))
@@ -1049,6 +1069,10 @@ async function bindPositions(userId: string, state: CopyState) {
 // How many times a close the broker refused is sent again, and how long between tries.
 const CLOSE_ATTEMPTS = 4
 const CLOSE_RETRY_MS = 8_000
+// How much newer than a close a reading of the account has to be before "the
+// broker still lists it" is believed: the two clocks are not the same machine's,
+// and a broker's own list can trail its fill by a moment.
+const CLOSE_SETTLE_MS = 2_000
 // An order the copy lane sent and has said nothing about for this long is taken as lost.
 const LANE_ORDER_LOST_MS = 120_000
 
@@ -1109,6 +1133,13 @@ async function reconcile(userId: string, state: CopyState) {
   for (const pos of recent) {
     const still = state.positions.find((p) => !p.simulated && p.accountId === pos.accountId && keys?.get(p) === pos.positionRef)
     if (!still) continue
+    // Only on a reading of the account taken after the close was recorded. The
+    // list this pass began with is older than a close it has just booked above:
+    // the position is on it because it had not been closed yet, and asking for
+    // it again sent a second close after the first had gone through (refused
+    // as "position not found", with a warning that it was still open).
+    const read = state.accounts.find((a) => a.id === pos.accountId)?.lastSyncAt
+    if (!read || !pos.closedAt || new Date(read).getTime() < pos.closedAt.getTime() + CLOSE_SETTLE_MS) continue
     await db.update(copyPositions).set({ status: "open", closedAt: null, quantity: String(still.quantity), closeRequestedAt: new Date(), closeAttempts: 0, updatedAt: new Date(0) }).where(eq(copyPositions.id, pos.id))
     await note(userId, { groupId: pos.groupId, accountId: pos.accountId, level: "warning", code: "close_unconfirmed", title: `Still open at the broker — ${name(pos.accountId)}`, body: `${pos.symbol} ${pos.side === "long" ? "BUY" : "SELL"} ${still.quantity} was recorded as closed, but the broker never confirmed it and still lists the position.`, action: "It is being closed now. If it is still there in a minute, close it on the broker's platform." })
   }
