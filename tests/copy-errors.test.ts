@@ -71,6 +71,11 @@ test("an order that had no password to trade with is the one alert that offers A
   // sent, and refused by the broker because the saved password is the investor one
   assert.equal(wantsOrdersAllowed({ code: "order_failed", body: "Trade disabled (retcode 10017)" }), true)
   assert.equal(classifyFailure("Trade disabled (retcode 10017)").action.includes("Allow orders"), true)
+  // sent, and the broker would not log the trading password in at all
+  assert.equal(wantsOrdersAllowed({ code: "order_failed", body: "The broker rejected the trading password saved for this account." }), true)
+  assert.equal(classifyFailure("The broker rejected the trading password saved for this account.").label, "Trading password")
+  // the login password refused at a sync is the Accounts page's to put right, not this window's
+  assert.equal(classifyFailure("MetaTrader rejected the login — check the account number, investor password and server name").category, "authentication")
   // anything else is not put right by a password
   assert.equal(wantsOrdersAllowed({ code: "order_failed", body: "No money" }), false)
   assert.equal(wantsOrdersAllowed({ code: "order_rejected", body: "Market closed" }), false)

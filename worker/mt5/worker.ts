@@ -48,6 +48,17 @@ const ORDER_PIN_MS = 90_000
 // Orders get a tighter bridge timeout than syncs so a stuck terminal fails
 // within the user's expected window instead of hanging up to a minute.
 const ORDER_BRIDGE_TIMEOUT_MS = 25_000
+// An order refused before anything left for the broker (the login, the server
+// list, the terminal's Algo Trading switch) is tried again this soon, not after
+// the two minutes a lease lasts: a copy that late is a different trade.
+const ORDER_RETRY_MS = 5_000
+// A market order that has waited this long is not sent any more. By then the
+// price has moved, and for a copy the Leader may already be out of the trade:
+// opening it now would leave the follower in a position nothing will close.
+// (Closes and changes to a position are still sent however late: those are
+// wanted late rather than never.)
+const ORDER_MAX_AGE_MS = 90_000
+const ORDER_NOT_SENT = new Set(["auth", "server", "autotrading"])
 const WORKER_ID = `${os.hostname()}:${process.pid}`
 
 // ---------------------------------------------------------------------------
@@ -291,6 +302,25 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
       await finishCommand(cmd.id, "failed", "Order execution isn't enabled for this account (no trading password).")
       return
     }
+    if (cmd.kind === "place" && (cmd.orderType == null || cmd.orderType === "market") && Date.now() - cmd.createdAt.getTime() > ORDER_MAX_AGE_MS) {
+      await finishCommand(cmd.id, "failed", `${cmd.resultMessage ? `${cmd.resultMessage} ` : ""}Not tried again: ${ORDER_MAX_AGE_MS / 1000} seconds had passed, and a market order that late would be a different trade.`)
+      return
+    }
+    // A terminal knows only the servers of the broker pack it was started
+    // with. A sync loads the account's pack first, and an order has to as well:
+    // on a terminal last used for another broker the login is refused, for a
+    // password that is right. (It was, whenever an account without a copy-lane
+    // terminal of its own took an order after another broker's sync.)
+    const broker = brokerFor(connection.server)
+    if (!broker) {
+      await finishCommand(cmd.id, "failed", `Orders can't be sent to "${connection.server}" yet: this broker's servers aren't set up on our sync server.`)
+      return
+    }
+    if (bridge.broker !== broker.slug) {
+      await callBridge(bridge, "/reset", { serversDat: wineServersDat(broker.slug) }, 60_000)
+      bridge.broker = broker.slug
+      bridge.login = null
+    }
     const num = (v: string | null) => (v != null ? Number(v) : null)
     const body = {
       login: connection.login,
@@ -338,12 +368,14 @@ async function executeOrderCommand(bridge: Bridge, cmd: OrderCommandRow, connect
     }
     console.log(`[mt5] order ${cmd.id} (${cmd.kind} ${connection.login}): ${result.accepted ? "filled" : `rejected — ${result.comment}`}`)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const kind = err instanceof BridgeError ? err.kind : "internal"
+    // an order logs in with the trading password: say which password the broker refused
+    const msg = kind === "auth" ? "The broker rejected the trading password saved for this account." : err instanceof Error ? err.message : String(err)
     const attempts = cmd.attempts + 1
     const giveUp = attempts >= 3
     await db
       .update(orderCommands)
-      .set({ status: giveUp ? "failed" : "pending", resultMessage: msg, attempts, leaseUntil: null, updatedAt: new Date() })
+      .set({ status: giveUp ? "failed" : "pending", resultMessage: msg, attempts, leaseUntil: !giveUp && ORDER_NOT_SENT.has(kind) ? new Date(Date.now() + ORDER_RETRY_MS) : null, updatedAt: new Date() })
       .where(eq(orderCommands.id, cmd.id))
     console.warn(`[mt5] order ${cmd.id} attempt ${attempts} failed${giveUp ? " (giving up)" : ""}: ${msg}`)
   }
@@ -440,6 +472,15 @@ const MAX_BACKOFF_MS = 30 * 60_000
 // itself instead of sitting failed until someone reconnects.
 const PERMANENT = new Set(["unsupported"])
 const RETRY_SHOWN = new Set(["auth", "server"])
+// A login refused once is, far more often than not, the terminal and not the
+// password: a shared terminal restarted with another broker's pack answers
+// "authorization failed" for an account that logs in a moment later (about one
+// sync in fifty). An account that was syncing is not shown as failing for
+// that (Copy Trading stops copying into an account that is): it is tried
+// again within seconds, this many times, and only then shown. A new account
+// gets one such try, so a wrong password is still told to its owner at once.
+const QUIET_RETRIES = 2
+const QUIET_RETRY_MS = 8_000
 // How the "we don't have this server" error starts — requeueNewlySupported
 // looks for it once a broker is added.
 const UNSUPPORTED_PREFIX = `We don't have "`
@@ -619,7 +660,8 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
     // a brand-new account that never connected and keeps failing for some other
     // reason. An auth/server error on any account keeps retrying (retryShown).
     const giveUp = permanent || (connection.status === "pending" && errorCount >= 5 && !retryShown)
-    const backoff = Math.min(SYNC_INTERVAL_MS * 2 ** (errorCount - 1), MAX_BACKOFF_MS)
+    const quiet = retryShown && !giveUp && errorCount <= (connection.status === "connected" ? QUIET_RETRIES : connection.status === "pending" ? 1 : 0)
+    const backoff = quiet ? QUIET_RETRY_MS * errorCount : Math.min(SYNC_INTERVAL_MS * 2 ** (errorCount - 1), MAX_BACKOFF_MS)
     if (!permanent) {
       bridge.failures++
       bridge.lastError = message
@@ -635,7 +677,7 @@ async function syncConnection(bridge: Bridge, connection: Connection) {
               statusMessage: permanent ? message : "Couldn't reach MetaTrader right now — please try connecting again in a few minutes.",
               nextSyncAt: null,
             }
-          : retryShown
+          : retryShown && !quiet
             ? {
                 // Show the failure, but keep a nextSyncAt so it auto-recovers.
                 status: "error",

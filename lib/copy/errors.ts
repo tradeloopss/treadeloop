@@ -3,10 +3,11 @@
 // adds the kind of failure and the next step. Pure: used by the engine when it
 // writes an alert and by the pages when they show an order's reason.
 
-export type FailureCategory = "authentication" | "connection" | "symbol" | "margin" | "volume" | "market_closed" | "broker_rejection" | "compliance" | "account_disabled" | "timeout" | "unknown"
+export type FailureCategory = "authentication" | "trading_password" | "connection" | "symbol" | "margin" | "volume" | "market_closed" | "broker_rejection" | "compliance" | "account_disabled" | "timeout" | "unknown"
 
 export const FAILURE_LABELS: Record<FailureCategory, string> = {
   authentication: "Authentication",
+  trading_password: "Trading password",
   connection: "Connection",
   symbol: "Symbol",
   margin: "Insufficient margin",
@@ -21,6 +22,7 @@ export const FAILURE_LABELS: Record<FailureCategory, string> = {
 
 const ACTIONS: Record<FailureCategory, string> = {
   authentication: "Reconnect the account with its current password on the Accounts page.",
+  trading_password: "The broker didn't accept the trading password saved for this account. Enter the master password again under Allow orders, then use Retry.",
   connection: "Check the account on the Connection page, then use Retry.",
   symbol: "Map this symbol to the follower's own name for it in Risk Management, under Symbol mapping.",
   margin: "Free up margin on the account, or lower its copy size in Risk Management.",
@@ -37,6 +39,7 @@ const ACTIONS: Record<FailureCategory, string> = {
 const PATTERNS: [FailureCategory, RegExp][] = [
   ["compliance", /does(n't| not) permit|not permitted|places no orders on|can't be connected to tradeloop|can't be in a copy group/i],
   ["timeout", /timed? ?out|did(n't| not) answer|stopped before the broker answered|no answer/i],
+  ["trading_password", /rejected the trading password/i],
   ["authentication", /rejected the login|invalid account|authori[sz]ation failed|wrong password|invalid password|not authori[sz]ed/i],
   ["account_disabled", /trade (is )?disabled|trading (is |has been )?disabled|account (is )?disabled|autotrading disabled|read.?only|investor password|can't receive orders/i],
   ["margin", /no money|not enough money|insufficient (margin|funds)|\bmargin\b/i],
@@ -48,7 +51,7 @@ const PATTERNS: [FailureCategory, RegExp][] = [
 ]
 
 // An alert its trader can put right on the spot: the order had no password that trades to go out with.
-export const wantsOrdersAllowed = (e: { code: string; body: string | null }): boolean => e.code === "order_unsupported" || (e.code.startsWith("order_") && classifyFailure(e.body).category === "account_disabled")
+export const wantsOrdersAllowed = (e: { code: string; body: string | null }): boolean => e.code === "order_unsupported" || (e.code.startsWith("order_") && ["account_disabled", "trading_password"].includes(classifyFailure(e.body).category))
 
 export function classifyFailure(message: string | null | undefined): { category: FailureCategory; label: string; action: string } {
   const text = message ?? ""

@@ -16,6 +16,8 @@ parallelism. Listens on 127.0.0.1 only and requires the shared token.
 import argparse
 import ctypes
 import ctypes.wintypes as wt
+import hashlib
+import hmac
 import os
 import shutil
 import time
@@ -42,6 +44,57 @@ FILLING = {}
 # the server, an evaluation that has ended), and when that was last found: such
 # an account is logged in once, not again on every call for the next minutes.
 NO_TRADE = {}
+
+# Who may use a session that is already open.
+#
+# The terminals are shared: one is on an account because the last caller logged
+# it in, and the next caller may be another connection to the same account.
+# Being on the account already therefore says nothing about the password in the
+# request, and a session used to be reused for any password at all: an account
+# could be "connected" with a wrong password while its owner's sync kept a
+# terminal on it, and an order could have gone out on a master session whose
+# password its caller never had.
+#
+# So an open session is reused only for a password the broker itself has
+# accepted for that account, in a login made by this process (ACCEPTED), and a
+# session that can trade only for a password that opened one (TRADES). Anything
+# else is logged in for real, and the broker decides. What is kept is a keyed
+# digest, in memory, never the password, and a refused login forgets the
+# account's digests.
+_DIGEST_KEY = os.urandom(32)
+ACCEPTED = {}
+TRADES = {}
+
+
+def _digest(account, server, password):
+    return hmac.new(_DIGEST_KEY, f"{account}\0{server.strip().lower()}\0{password}".encode("utf-8"), hashlib.sha256).digest()
+
+
+def _known(table, account, server, password):
+    return _digest(account, server, password) in table.get(account, ())
+
+
+def _remember(table, account, server, password):
+    if len(table) > 2000:
+        table.clear()
+    held = table.setdefault(account, set())
+    if len(held) > 16:
+        held.clear()
+    held.add(_digest(account, server, password))
+
+
+def _forget(account):
+    ACCEPTED.pop(account, None)
+    TRADES.pop(account, None)
+
+
+def refused(account):
+    """A login the terminal reports as failed: what the worker is told, and,
+    when it is the broker saying no, the end of what this account was known by."""
+    code, message = last_error()
+    if code == -6:
+        _forget(account)
+    return login_error(code, message)
 # MT5 fields that are 64-bit ids — sent as strings so JavaScript can't round them.
 ID_FIELDS = {"ticket", "order", "position_id", "position_by_id", "identifier", "magic", "external_id"}
 
@@ -72,9 +125,16 @@ def start_terminal(account, password, server):
     # a terminal started on a desktop that names a dead window dies as it logs in
     mend_desktop()
     if not mt5.initialize(path=args.terminal, portable=True, login=account, password=password, server=server, timeout=90_000):
-        code, message = last_error()
+        err = refused(account)
         mt5.shutdown()
-        raise login_error(code, message)
+        raise err
+    # initialize() also attaches to a terminal that is still running, and one
+    # already on this account is not made to ask the broker again. A password
+    # the broker has not accepted yet is put to it now.
+    if not _known(ACCEPTED, account, server, password) and not mt5.login(account, password=password, server=server, timeout=60_000):
+        err = refused(account)
+        mt5.shutdown()
+        raise err
 
 
 def record(obj):
@@ -90,23 +150,24 @@ def current_login():
 
 
 def login(account, password, server):
-    """Logs the terminal into `account`, reusing the session when it already is."""
+    """Logs the terminal into `account`, reusing the session when it is
+    already on it and the password is one the broker has accepted for it."""
     if mt5.terminal_info() is None:
         start_terminal(account, password, server)
     else:
         term = mt5.terminal_info()
         have_login, have_server = current_login()
-        if term and term.connected and have_login == account and (have_server or "").lower() == server.lower():
+        if term and term.connected and have_login == account and (have_server or "").lower() == server.lower() and _known(ACCEPTED, account, server, password):
             return False
         if not mt5.login(account, password=password, server=server, timeout=60_000):
-            code, message = last_error()
-            raise login_error(code, message)
+            raise refused(account)
     # The terminal reports success before the account is fully loaded; wait
     # for it to show the right account and a live connection.
     deadline = time.time() + 20
     while time.time() < deadline:
         term = mt5.terminal_info()
         if term and term.connected and current_login()[0] == account:
+            _remember(ACCEPTED, account, server, password)
             return True
         time.sleep(0.25)
     raise BridgeError(504, "timeout", "Logged in, but the broker never finished connecting the account")
@@ -344,48 +405,72 @@ def ensure_trading_login(account, password, server):
     # refused by the broker with retcode 10017 "Trade disabled".
     info = mt5.account_info()
     here = term is not None and term.connected and info is not None and info.login == account
-    if here and term.trade_allowed and info.trade_allowed:
-        NO_TRADE.pop(account, None)
+    # The session is used as it is only for a password that opened one like it
+    # (see ACCEPTED): a master session is not lent to a caller without the
+    # master password, whoever left the terminal on the account.
+    digest = _digest(account, server, password)
+    if here and term.trade_allowed and info.trade_allowed and digest in TRADES.get(account, ()):
+        NO_TRADE.pop(digest, None)
         return
-    if here and not info.trade_allowed and time.time() - NO_TRADE.get(account, 0) < 300:
+    if here and not info.trade_allowed and time.time() - NO_TRADE.get(digest, 0) < 300:
         return
     if term is None:
         start_terminal(account, password, server)
     elif not mt5.login(account, password=password, server=server, timeout=60_000):
-        code, message = last_error()
-        raise login_error(code, message)
+        raise refused(account)
     deadline = time.time() + 20
     while time.time() < deadline:
         term = mt5.terminal_info()
         if term and term.connected and current_login()[0] == account:
+            _remember(ACCEPTED, account, server, password)
             info = mt5.account_info()
-            if info is not None and not info.trade_allowed:
-                NO_TRADE[account] = time.time()
+            if info is not None and info.trade_allowed:
+                _remember(TRADES, account, server, password)
+            elif info is not None:
+                if len(NO_TRADE) > 2000:
+                    NO_TRADE.clear()
+                NO_TRADE[digest] = time.time()
             return
         time.sleep(0.25)
     raise BridgeError(504, "timeout", "Logged in, but the account never finished connecting")
 
 
+# A user32 of our own: the argument types set here are nobody else's. They have
+# to be set: a window handle is 64 bits wide, and passed untyped it goes as a C
+# int, which raises for any handle above 2^31.
+_WINDOW_VISITOR = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+_user32 = ctypes.WinDLL("user32")
+_user32.EnumWindows.argtypes = [_WINDOW_VISITOR, wt.LPARAM]
+_user32.IsWindowVisible.argtypes = [wt.HWND]
+_user32.GetWindowTextW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
+_user32.SetForegroundWindow.argtypes = [wt.HWND]
+
+
 def _terminal_window(account):
     """The terminal's main window handle. Its title starts with the logged-in
     account number (e.g. "474587297 - Exness-MT5Trial15: …")."""
-    user32 = ctypes.windll.user32
     found = []
     needle = str(account)
 
-    @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+    @_WINDOW_VISITOR
     def visit(hwnd, _lparam):
-        if user32.IsWindowVisible(hwnd):
-            buf = ctypes.create_unicode_buffer(512)
-            user32.GetWindowTextW(hwnd, buf, 512)
-            title = buf.value or ""
-            # The main terminal window carries the account + server; skip the
-            # tiny "Default IME" helper window.
-            if needle in title and "IME" not in title:
-                found.append(hwnd)
+        # Whatever one window does, the next is still looked at: an exception
+        # here ends the enumeration, and the terminal's window was then never
+        # reached, so Algo Trading was never switched on from here.
+        try:
+            if _user32.IsWindowVisible(hwnd):
+                buf = ctypes.create_unicode_buffer(512)
+                _user32.GetWindowTextW(hwnd, buf, 512)
+                title = buf.value or ""
+                # The main terminal window carries the account + server; skip the
+                # tiny "Default IME" helper window.
+                if needle in title and "IME" not in title:
+                    found.append(hwnd)
+        except Exception:
+            pass
         return True
 
-    user32.EnumWindows(visit, 0)
+    _user32.EnumWindows(visit, 0)
     return found[0] if found else None
 
 
@@ -397,7 +482,7 @@ def _press_algo_button(account):
     hwnd = _terminal_window(account)
     if not hwnd:
         return
-    user32.SetForegroundWindow(hwnd)
+    _user32.SetForegroundWindow(hwnd)
     time.sleep(0.2)
     VK_CONTROL, VK_E, KEYEVENTF_KEYUP = 0x11, 0x45, 0x0002
     user32.keybd_event(VK_CONTROL, 0, 0, 0)
