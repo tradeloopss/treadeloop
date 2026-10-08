@@ -36,6 +36,7 @@ namespace NinjaTrader.Core
     public class GeneralOptionsStub
     {
         public TimeZoneInfo TimeZoneInfo { get { return TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"); } }
+        public bool MultiProvider { get; set; }
     }
 
     public static class Globals
@@ -49,21 +50,83 @@ namespace NinjaTrader.Cbi
 {
     public enum Currency { UsDollar, Euro }
     public enum AccountItem { CashValue, NetLiquidation, RealizedProfitLoss }
-    public enum ConnectionStatus { Connected, Disconnected, ConnectionLost }
+    public enum ConnectionStatus { Disconnected, Disconnecting, ConnectionLost, Connected, Connecting }
+    public enum ErrorCode { NoError, LogOnFailed, OrderRejected, UserAbort, LoginExpired, Panic }
+    public enum TradovateAccountType { Simulation, Live }
     public enum MarketPosition { Flat, Long, Short }
     public enum InstrumentType { Future, Stock, Forex, Cfd, Option }
     public enum Provider { NinjaTrader, Tradovate, Rithmic, Simulator, Playback }
 
-    public class ConnectionOptions
+    // In NinjaTrader this is abstract, with a class per kind of connection.
+    public class ConnectOptions
     {
         public Provider Provider { get; set; }
         public string Name { get; set; }
+        public string User { get; set; }
+        public string Password { get; set; }
+        public bool ConnectOnStartup { get; set; }
+    }
+
+    // NinjaTrader's own connection to Tradovate. Not in the documented API: the add-on finds it by name.
+    public class TradovateOptions : ConnectOptions
+    {
+        public TradovateOptions() { Provider = Provider.NinjaTrader; }
+        public TradovateAccountType AccountType { get; set; }
+    }
+
+    public class ConnectionStatusEventArgs : EventArgs
+    {
+        public Connection Connection { get; set; }
+        public ConnectionStatus Status { get; set; }
+        public ErrorCode Error { get; set; }
+        public string NativeError { get; set; }
     }
 
     public class Connection
     {
-        public ConnectionOptions Options { get; set; }
+        public static readonly Collection<Connection> Connections = new Collection<Connection>();
+        public static event EventHandler<ConnectionStatusEventArgs> ConnectionStatusUpdate;
+
+        public ConnectOptions Options { get; set; }
         public ConnectionStatus Status { get; set; }
+
+        // Test hooks: what "Tradovate" says to a login (null = accepted, else why not), and what was asked of NinjaTrader.
+        public static Func<ConnectOptions, string> Verdict;
+        public static readonly List<string> Asked = new List<string>();
+
+        public static Connection Connect(ConnectOptions options)
+        {
+            TradovateOptions tradovate = options as TradovateOptions;
+            lock (Asked) Asked.Add("connect " + options.Name + " " + (tradovate == null ? "?" : tradovate.AccountType.ToString()) + " startup=" + options.ConnectOnStartup);
+            Connection connection = new Connection { Options = options, Status = ConnectionStatus.Connecting };
+            string refusal = Verdict == null ? null : Verdict(options);
+            if (refusal == null)
+            {
+                lock (Connections) Connections.Add(connection);
+                connection.Status = ConnectionStatus.Connected;
+                Raise(connection, ErrorCode.NoError, null);
+            }
+            else
+            {
+                connection.Status = ConnectionStatus.Disconnected;
+                Raise(connection, ErrorCode.LogOnFailed, refusal);
+            }
+            return connection;
+        }
+
+        public void Disconnect()
+        {
+            lock (Asked) Asked.Add("disconnect " + Options.Name);
+            lock (Connections) Connections.Remove(this);
+            Status = ConnectionStatus.Disconnected;
+            Raise(this, ErrorCode.NoError, null);
+        }
+
+        private static void Raise(Connection connection, ErrorCode error, string nativeError)
+        {
+            EventHandler<ConnectionStatusEventArgs> handler = ConnectionStatusUpdate;
+            if (handler != null) handler(null, new ConnectionStatusEventArgs { Connection = connection, Status = connection.Status, Error = error, NativeError = nativeError });
+        }
     }
 
     public class MasterInstrument
@@ -118,7 +181,7 @@ namespace NinjaTrader.Cbi
             Name = name;
             Denomination = Currency.UsDollar;
             Executions = new Collection<Execution>();
-            Connection = new Connection { Options = new ConnectionOptions { Provider = provider, Name = connection }, Status = ConnectionStatus.Connected };
+            Connection = new Connection { Options = new ConnectOptions { Provider = provider, Name = connection }, Status = ConnectionStatus.Connected };
             values[AccountItem.CashValue] = cash;
             values[AccountItem.NetLiquidation] = cash;
             values[AccountItem.RealizedProfitLoss] = 0;

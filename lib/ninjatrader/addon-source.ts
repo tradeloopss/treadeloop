@@ -13,14 +13,32 @@
 // reflection with a safe fallback, so a NinjaTrader update can't break the
 // compile. Checked by compiling against stand-ins of those types
 // (tests/ninjatrader/, csc).
+//
+// The build for TradeLoop's own server (`provision` given) carries a second
+// add-on in the same file, TradeLoop Provision. That one is never in a file a
+// trader downloads. It asks the NinjaTrader worker (worker/ninjatrader, over
+// 127.0.0.1) which Tradovate logins traders have entered in TradeLoop, keeps
+// one NinjaTrader connection per login, named "tl-<id>", and tells the worker
+// which were accepted and which Tradovate refused. A login is held in memory
+// for the connection it makes: it is not written to a file, to NinjaTrader's
+// saved connections or to the Output window. Like the rest, it only reads: it
+// connects and disconnects, and never touches an order.
 
 export const ADDON_VERSION = "1.0.0"
 export const ADDON_FILENAME = "TradeLoopSync.cs"
 
-export function addonSource(opts: { key: string; syncUrl: string }): string {
+// `provision`: only for the copy that runs in NinjaTrader on TradeLoop's own server. Where the worker's
+// local API is (always this machine: 127.0.0.1) and the token it asks for.
+export function addonSource(opts: { key: string; syncUrl: string; provision?: { url: string; token: string } }): string {
   if (!/^tlnt_[A-Za-z0-9_-]{20,}$/.test(opts.key)) throw new Error("invalid add-on key")
   if (!/^https?:\/\/[A-Za-z0-9.:/_-]+$/.test(opts.syncUrl)) throw new Error("invalid sync URL")
-  return TEMPLATE.split("__TRADELOOP_SYNC_KEY__")
+  if (opts.provision) {
+    if (!/^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(opts.provision.url)) throw new Error("the provision API is only ever on 127.0.0.1")
+    if (!/^[A-Za-z0-9_-]{20,}$/.test(opts.provision.token)) throw new Error("invalid provision token")
+  }
+  const provision = opts.provision ? PROVISION_TEMPLATE.split("__TRADELOOP_PROVISION_URL__").join(opts.provision.url).split("__TRADELOOP_PROVISION_TOKEN__").join(opts.provision.token) : ""
+  return (TEMPLATE + provision)
+    .split("__TRADELOOP_SYNC_KEY__")
     .join(opts.key)
     .split("__TRADELOOP_SYNC_URL__")
     .join(opts.syncUrl)
@@ -491,6 +509,453 @@ namespace NinjaTrader.NinjaScript.AddOns
         }
 
         private static void OutputNote(string message)
+        {
+            NinjaTrader.Code.Output.Process("[TradeLoop] " + message, PrintTo.OutputTab1);
+        }
+    }
+}
+`
+
+// TradeLoop Provision: appended to the file for TradeLoop's own server only (see the top of this file).
+const PROVISION_TEMPLATE = String.raw`
+
+// ---------------------------------------------------------------------------
+// TradeLoop Provision — only in the copy that runs on TradeLoop's own server.
+//
+// Keeps one NinjaTrader connection for each Tradovate login a trader entered in
+// TradeLoop. The logins come from the TradeLoop worker on this machine
+// (127.0.0.1); each is used to make its connection and nothing else: not
+// written to a file, not added to NinjaTrader's saved connections, not printed.
+// It connects and disconnects. It never places, changes or cancels an order.
+namespace NinjaTrader.NinjaScript.AddOns
+{
+    public class TradeLoopProvision : AddOnBase
+    {
+        private const string ProvisionUrl = "__TRADELOOP_PROVISION_URL__";
+        private const string ProvisionToken = "__TRADELOOP_PROVISION_TOKEN__";
+
+        private static int PollSeconds = 15;       // how often the list of logins is read
+        private static int RetrySeconds = 60;      // a login that didn't connect is tried again after this, then twice as long each time
+        private static int MaxRetrySeconds = 900;  // ... up to this
+        private const int RefusalsToReject = 2;   // refused this many times running, the trader is asked to enter it again
+        private const string Prefix = "tl-";      // the connections that are ours; any other connection here is left alone
+
+        private sealed class Login
+        {
+            public string Id;
+            public string Name;
+            public string AccountType;
+            public string User;
+            public string Password;
+            public string Status;
+        }
+
+        // What has been tried for one connection name.
+        private sealed class Attempt
+        {
+            public string Id;
+            public string User;
+            public string Password;
+            public DateTime NextTry = DateTime.MinValue;
+            public int Tries;
+            public int Refusals;
+            public bool Rejected;
+            public bool SaidConnected;
+        }
+
+        private readonly object gate = new object();
+        private readonly Dictionary<string, Attempt> attempts = new Dictionary<string, Attempt>(StringComparer.OrdinalIgnoreCase);
+        private System.Threading.Timer timer;
+        private int busy;
+        private volatile bool stopped;
+        private bool saidUnreachable;
+        private bool saidNoType;
+
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Name = "TradeLoop Provision";
+                Description = "Keeps the Tradovate logins traders entered in TradeLoop connected.";
+            }
+            else if (State == State.Active)
+            {
+                Start();
+            }
+            else if (State == State.Terminated)
+            {
+                Stop();
+            }
+        }
+
+        private void Start()
+        {
+            if (!ProvisionUrl.StartsWith("http://127.0.0.1:"))
+            {
+                Note("This copy has no worker to ask. Nothing to do.");
+                return;
+            }
+            stopped = false;
+            AllowSeveralConnections();
+            Connection.ConnectionStatusUpdate += OnConnectionStatusUpdate;
+            timer = new System.Threading.Timer(OnTimer, null, Math.Min(5000, PollSeconds * 1000), PollSeconds * 1000);
+            Note("TradeLoop Provision is running.");
+        }
+
+        // The connections are left as they are: NinjaTrader closes them itself when it
+        // closes, and a recompile of this file finds them again by name.
+        private void Stop()
+        {
+            if (stopped) return;
+            stopped = true;
+            if (timer != null) { timer.Dispose(); timer = null; }
+            Connection.ConnectionStatusUpdate -= OnConnectionStatusUpdate;
+        }
+
+        private void OnTimer(object state)
+        {
+            if (stopped) return;
+            if (Interlocked.Exchange(ref busy, 1) == 1) return;
+            try { Reconcile(); }
+            catch (Exception err) { Note("Couldn't bring the connections in step: " + err.GetType().Name + "."); }
+            finally { Interlocked.Exchange(ref busy, 0); }
+        }
+
+        // ------------------------------------------------------------------ in step
+
+        private void Reconcile()
+        {
+            string body;
+            int status = Http("GET", ProvisionUrl + "/provision?format=lines", null, 15000, out body);
+            if (status != 200)
+            {
+                if (!saidUnreachable) Note("Can't reach the TradeLoop worker (" + (status == 0 ? "no answer" : "HTTP " + status) + "). Connections stay as they are; trying again on its own.");
+                saidUnreachable = true;
+                return;
+            }
+            if (saidUnreachable) Note("Reached the TradeLoop worker again.");
+            saidUnreachable = false;
+
+            Dictionary<string, Login> wanted = Parse(body);
+
+            List<Connection> live = new List<Connection>();
+            lock (Connection.Connections)
+                foreach (Connection connection in Connection.Connections)
+                    live.Add(connection);
+
+            // 1. What is connected and shouldn't be: taken out in TradeLoop, refused and
+            //    waiting for the trader, or entered again with another password.
+            Dictionary<string, Connection> ours = new Dictionary<string, Connection>(StringComparer.OrdinalIgnoreCase);
+            foreach (Connection connection in live)
+            {
+                string name = NameOf(connection);
+                if (name == null || !name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                Login login;
+                if (!wanted.TryGetValue(name, out login) || !SameLogin(connection, login))
+                {
+                    try { connection.Disconnect(); } catch (Exception) { }
+                    Note(name + ": disconnected.");
+                    continue;
+                }
+                ours[name] = connection;
+            }
+            lock (gate)
+            {
+                List<string> gone = new List<string>();
+                foreach (string name in attempts.Keys)
+                    if (!wanted.ContainsKey(name)) gone.Add(name);
+                foreach (string name in gone) attempts.Remove(name);
+            }
+
+            // 2. What should be connected and isn't. One new login a pass, so a restart
+            //    with many logins doesn't arrive at Tradovate all at once.
+            DateTime now = DateTime.UtcNow;
+            foreach (Login login in wanted.Values)
+            {
+                Attempt attempt = AttemptFor(login);
+                Connection connection;
+                if (ours.TryGetValue(login.Name, out connection))
+                {
+                    if (connection.Status == ConnectionStatus.Connected) Connected(login.Name);
+                    continue;
+                }
+                bool due;
+                lock (gate)
+                {
+                    due = !attempt.Rejected && now >= attempt.NextTry;
+                    if (due)
+                    {
+                        attempt.Tries++;
+                        attempt.NextTry = now.AddSeconds(Math.Min(MaxRetrySeconds, RetrySeconds * Math.Pow(2, Math.Min(attempt.Tries - 1, 4))));
+                    }
+                }
+                if (!due) continue;
+                Open(login);
+                break;
+            }
+        }
+
+        // The lines the worker sends: id, connection name, live|simulation, username
+        // and password in base64, status; tabs between. A login the trader has to
+        // enter again ("reauth") isn't wanted until they have.
+        private static Dictionary<string, Login> Parse(string body)
+        {
+            Dictionary<string, Login> wanted = new Dictionary<string, Login>(StringComparer.OrdinalIgnoreCase);
+            foreach (string raw in (body ?? "").Split('\n'))
+            {
+                string[] f = raw.TrimEnd('\r').Split('\t');
+                if (f.Length != 6) continue;
+                Login login = new Login();
+                login.Id = f[0];
+                login.Name = f[1];
+                login.AccountType = f[2];
+                login.Status = f[5];
+                try
+                {
+                    login.User = Encoding.UTF8.GetString(Convert.FromBase64String(f[3]));
+                    login.Password = Encoding.UTF8.GetString(Convert.FromBase64String(f[4]));
+                }
+                catch (Exception) { continue; }
+                int id;
+                if (!int.TryParse(login.Id, NumberStyles.None, CultureInfo.InvariantCulture, out id)) continue;
+                if (!login.Name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                if (login.User.Length == 0 || login.Password.Length == 0) continue;
+                if (login.Status == "reauth" || login.Status == "disconnected") continue;
+                wanted[login.Name] = login;
+            }
+            return wanted;
+        }
+
+        private Attempt AttemptFor(Login login)
+        {
+            lock (gate)
+            {
+                Attempt attempt;
+                if (!attempts.TryGetValue(login.Name, out attempt) || attempt.User != login.User || attempt.Password != login.Password)
+                {
+                    // new, or entered again: what was tried before doesn't count against it
+                    attempt = new Attempt();
+                    attempt.User = login.User;
+                    attempt.Password = login.Password;
+                    attempts[login.Name] = attempt;
+                }
+                attempt.Id = login.Id;
+                return attempt;
+            }
+        }
+
+        private static string NameOf(Connection connection)
+        {
+            try { return connection == null || connection.Options == null ? null : connection.Options.Name; }
+            catch (Exception) { return null; }
+        }
+
+        private static bool SameLogin(Connection connection, Login login)
+        {
+            try { return connection.Options.User == login.User && connection.Options.Password == login.Password; }
+            catch (Exception) { return true; }
+        }
+
+        // ------------------------------------------------------------------ connecting
+
+        private void Open(Login login)
+        {
+            ConnectOptions options = NewOptions(login);
+            if (options == null)
+            {
+                if (!saidNoType) Note("This NinjaTrader has no Tradovate connection type; no login can be connected.");
+                saidNoType = true;
+                return;
+            }
+            Note(login.Name + ": connecting.");
+            try
+            {
+                // What becomes of it arrives in OnConnectionStatusUpdate.
+                Connection.Connect(options);
+            }
+            catch (Exception err)
+            {
+                Note(login.Name + ": the connection couldn't be started (" + err.GetType().Name + ").");
+            }
+        }
+
+        // NinjaTrader's own connection to Tradovate (the one its Connections menu calls
+        // "NinjaTrader"). It isn't in the documented add-on API, so it is found by name;
+        // the documented ConnectOptions members carry the login.
+        private static ConnectOptions NewOptions(Login login)
+        {
+            try
+            {
+                Type type = typeof(Connection).Assembly.GetType("NinjaTrader.Cbi.TradovateOptions", false);
+                if (type == null) return null;
+                ConnectOptions options = Activator.CreateInstance(type) as ConnectOptions;
+                if (options == null) return null;
+                options.Name = login.Name;
+                options.User = login.User;
+                options.Password = login.Password;
+                options.ConnectOnStartup = false;
+                PropertyInfo accountType = type.GetProperty("AccountType", BindingFlags.Public | BindingFlags.Instance);
+                if (accountType != null && accountType.CanWrite && accountType.PropertyType.IsEnum)
+                    accountType.SetValue(options, Enum.Parse(accountType.PropertyType, login.AccountType == "live" ? "Live" : "Simulation"), null);
+                return options;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        // NinjaTrader connects one thing at a time unless "Multi-provider" is on
+        // (Tools → Options → General). Here there is a connection per trader.
+        private static void AllowSeveralConnections()
+        {
+            try
+            {
+                Type globals = typeof(Connection).Assembly.GetType("NinjaTrader.Core.Globals", false);
+                PropertyInfo general = globals == null ? null : globals.GetProperty("GeneralOptions", BindingFlags.Public | BindingFlags.Static);
+                object options = general == null ? null : general.GetValue(null, null);
+                PropertyInfo multi = options == null ? null : options.GetType().GetProperty("MultiProvider", BindingFlags.Public | BindingFlags.Instance);
+                if (multi != null && multi.CanWrite && multi.PropertyType == typeof(bool) && !(bool)multi.GetValue(options, null))
+                {
+                    multi.SetValue(options, true, null);
+                    Note("Multi-provider was off; switched on for this session.");
+                }
+            }
+            catch (Exception) { }
+        }
+
+        private void OnConnectionStatusUpdate(object sender, ConnectionStatusEventArgs e)
+        {
+            if (stopped || e == null || e.Connection == null) return;
+            string name = NameOf(e.Connection);
+            if (name == null || !name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) return;
+            if (e.Status == ConnectionStatus.Connected)
+            {
+                Connected(name);
+                return;
+            }
+            lock (gate)
+            {
+                Attempt attempt;
+                if (attempts.TryGetValue(name, out attempt)) attempt.SaidConnected = false;
+            }
+            if (e.Error == ErrorCode.LogOnFailed) Refused(name, e.NativeError);
+        }
+
+        private void Connected(string name)
+        {
+            string id = null;
+            lock (gate)
+            {
+                Attempt attempt;
+                if (!attempts.TryGetValue(name, out attempt) || attempt.SaidConnected) return;
+                attempt.SaidConnected = true;
+                attempt.Tries = 0;
+                attempt.Refusals = 0;
+                attempt.NextTry = DateTime.MinValue;
+                id = attempt.Id;
+            }
+            Note(name + ": connected.");
+            Report(id, "connected", null);
+        }
+
+        // Tradovate said no to the login itself. Twice running, and it stops being
+        // tried: the trader is told, and entering it again in TradeLoop starts it over.
+        private void Refused(string name, string nativeError)
+        {
+            string id = null;
+            string password = null;
+            lock (gate)
+            {
+                Attempt attempt;
+                if (!attempts.TryGetValue(name, out attempt) || attempt.Rejected) return;
+                attempt.Refusals++;
+                if (attempt.Refusals < RefusalsToReject) return;
+                attempt.Rejected = true;
+                id = attempt.Id;
+                password = attempt.Password;
+            }
+            Note(name + ": Tradovate refused the login. Waiting for the trader to enter it again.");
+            string said = (nativeError ?? "").Trim();
+            // what Tradovate said goes to the trader only if it is short and can't be carrying the password back
+            bool usable = said.Length > 0 && said.Length <= 160 && said.IndexOf(password, StringComparison.Ordinal) < 0;
+            Report(id, "reauth", usable ? "Tradovate didn't accept this login: " + said : "Tradovate didn't accept this username and password.");
+        }
+
+        // ------------------------------------------------------------------ telling the worker
+
+        private void Report(string id, string status, string message)
+        {
+            if (id == null) return;
+            StringBuilder sb = new StringBuilder("{\"id\":").Append(id).Append(",\"status\":\"").Append(status).Append('"');
+            if (message != null)
+            {
+                sb.Append(",\"message\":\"");
+                foreach (char c in message)
+                {
+                    if (c == '"') sb.Append("\\\"");
+                    else if (c == '\\') sb.Append("\\\\");
+                    else if (c < ' ') sb.Append(' ');
+                    else sb.Append(c);
+                }
+                sb.Append('"');
+            }
+            string json = sb.Append('}').ToString();
+            // not on NinjaTrader's own thread: the event that led here must not wait for the network
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                string response;
+                for (int i = 0; i < 3 && !stopped; i++)
+                {
+                    int code = Http("POST", ProvisionUrl + "/report", json, 10000, out response);
+                    if (code >= 200 && code < 300) return;
+                    Thread.Sleep(5000);
+                }
+            });
+        }
+
+        private static int Http(string method, string url, string json, int timeoutMs, out string response)
+        {
+            response = "";
+            try
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+                request.Method = method;
+                request.Proxy = null;
+                request.Accept = "*/*";
+                request.UserAgent = "TradeLoopProvision NinjaTrader";
+                request.Headers["Authorization"] = "Bearer " + ProvisionToken;
+                request.Timeout = timeoutMs;
+                request.ReadWriteTimeout = timeoutMs;
+                if (json != null)
+                {
+                    request.ContentType = "application/json";
+                    byte[] bytes = Encoding.UTF8.GetBytes(json);
+                    request.ContentLength = bytes.Length;
+                    using (Stream stream = request.GetRequestStream())
+                        stream.Write(bytes, 0, bytes.Length);
+                }
+                using (HttpWebResponse res = (HttpWebResponse)request.GetResponse())
+                using (Stream stream = res.GetResponseStream())
+                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                {
+                    response = reader.ReadToEnd();
+                    return (int)res.StatusCode;
+                }
+            }
+            catch (WebException err)
+            {
+                HttpWebResponse res = err.Response as HttpWebResponse;
+                if (res == null) return 0;
+                using (res) return (int)res.StatusCode;
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+        }
+
+        private static void Note(string message)
         {
             NinjaTrader.Code.Output.Process("[TradeLoop] " + message, PrintTo.OutputTab1);
         }

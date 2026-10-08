@@ -11,23 +11,27 @@ NinjaTrader can run two ways, both read-only (nothing places, changes or
 cancels orders) and both feeding the same pipeline (the provider-neutral
 tables → `buildProviderTrades`):
 
-- **On the VPS, with credentials — the default when it's set up.** The trader
-  enters their Tradovate login in TradeLoop, like MetaTrader; NinjaTrader runs
-  on the sync VPS and syncs on its own, no PC of the trader's needed. See
-  "Credentials, on the VPS" below.
+- **On TradeLoop's own server, with credentials — the default when it's set
+  up.** The trader enters their Tradovate login in TradeLoop, like MetaTrader;
+  NinjaTrader runs on a Windows server of ours and syncs on its own, no PC of
+  the trader's needed. See "Credentials, on the VPS" below.
 - **On the trader's own PC.** The trader installs a one-file add-on into their
   own NinjaTrader; it syncs while that's open. See "The add-on, on the PC".
 
 ## Credentials, on the VPS (like MetaTrader)
 
 Enabled by setting `NINJATRADER_RELAY_SECRET` on the app and running the
-NinjaTrader worker (`worker/ninjatrader`). When set, Add account → Tradovate
-shows a login form instead of the add-on download.
+NinjaTrader worker and the Windows server (`worker/ninjatrader`). Add account →
+Tradovate then shows a login form instead of the add-on download, to whoever
+the "Tradovate by login" feature is released to (`/admin/features`: the team
+first, every user when it is opened). The action that saves a login checks the
+same two things, so a login nobody would connect is never taken.
 
 ```
 Trader enters Tradovate login ─► ninjatrader_connections (password AES-256-GCM)
                                     │
-worker.ts (VPS) ─ /provision (127.0.0.1) ─► provisioner ─► NinjaTrader 8 (VPS)
+worker.ts (Linux) ─ /provision (127.0.0.1, by SSH tunnel) ─► TradeLoop Provision
+                                        add-on in NinjaTrader 8 (Windows server)
                                                              connection "tl-<id>"
                                                                 │
                      TradeLoop add-on (relay) ─► POST /api/ninjatrader/relay
@@ -55,12 +59,18 @@ worker.ts (VPS) ─ /provision (127.0.0.1) ─► provisioner ─► NinjaTrader
   identically named accounts never cross — and stored per user through the same
   code as the PC add-on. `splitByUser` (in `relay-core`, unit-tested) does the
   attribution.
-- **Provisioner + NinjaTrader.** NinjaTrader 8 on the VPS with the relay build
-  of the add-on loaded (the worker writes it to `NINJATRADER_ADDON_FILE`), plus
-  a helper that polls the worker's `/provision` and adds/connects the `tl-<id>`
-  connections to match. NinjaTrader holds many Tradovate connections at once, so
-  one instance serves every user. Setting this helper up is the VPS operator
-  step — see `worker/ninjatrader/README.md`.
+- **NinjaTrader + TradeLoop Provision.** NinjaTrader 8 on a Windows server with
+  the server build of the add-on loaded (the worker writes it to
+  `NINJATRADER_ADDON_FILE`). That build carries a second add-on, TradeLoop
+  Provision, which reads the worker's `/provision` every 15 s and keeps one
+  NinjaTrader connection per login to match: it connects a new login,
+  reconnects one whose password was entered again, disconnects one that was
+  removed, and reports a login Tradovate refuses twice running as `reauth`. A
+  login goes into the connection it makes and nowhere else. A prop firm's
+  accounts are on Tradovate's simulation side and an account with Tradovate
+  itself is live; which one a login is connected to follows the firm the trader
+  picked (`accountTypeOf`). The servers, the tunnel between them and how to
+  deploy are in `worker/ninjatrader/README.md`.
 
 On the Accounts page each login is one row (like MetaTrader), showing Sync
 Live / Connecting / Needs reconnect. Disconnecting clears the stored password
@@ -167,5 +177,12 @@ add-on key.
   - an account that connects later is picked up
   - times are converted from New York to UTC
 
-The stand-ins are shaped after NinjaTrader's documented API. The first run
-inside a real NinjaTrader is the final check.
+It also compiles the server build and runs TradeLoop Provision through a
+session (`provision-harness.cs`) with the test playing the worker: a login that
+connects, one refused twice and then entered again, a changed password, a
+removed login, and the connections that must never be touched.
+
+The stand-ins are shaped after NinjaTrader's API. Both builds also compile
+against the real NinjaTrader 8.1.8.3 assemblies (`C:	lcompile.ps1` on the
+Windows server). The first run inside a signed-in NinjaTrader is the final
+check.

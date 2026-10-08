@@ -25,6 +25,7 @@ import { db } from "@/lib/db"
 import { ninjatraderConnections } from "@/lib/db/schema"
 import { decrypt } from "@/lib/crypto"
 import { addonSource } from "@/lib/ninjatrader/addon-source"
+import { provisionLine } from "@/lib/ninjatrader/provision-lines"
 import { tlog } from "@/lib/tradovate/log"
 
 function env(name: string, fallback?: string): string {
@@ -79,7 +80,10 @@ async function claimDue(limit: number): Promise<number[]> {
 
 // A tiny 127.0.0.1-only HTTP server the NinjaTrader-side provisioner calls.
 //   GET  /provision  -> the logins to ensure in NinjaTrader, passwords included
-//                       (decrypted here, in memory only)
+//                       (decrypted here, in memory only). With ?format=lines,
+//                       one login a line for the add-on, which has no JSON
+//                       library: id, connection name, live|simulation, the
+//                       username and the password in base64, status; tabs between.
 //   POST /report     -> { id, status: "connected"|"reauth"|"error", message? }
 // Bearer NINJATRADER_PROVISION_TOKEN on both. Never exposed off localhost.
 function startProvisionServer() {
@@ -93,6 +97,10 @@ function startProvisionServer() {
     try {
       if (req.method === "GET" && req.url?.startsWith("/provision")) {
         const rows = await activeConnections()
+        if (new URL(req.url, "http://127.0.0.1").searchParams.get("format") === "lines") {
+          res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" })
+          return res.end(rows.map((r) => provisionLine({ id: r.id, name: r.ntConnectionName, kind: r.connectionKind, username: r.username, password: r.passwordEnc ? safeDecrypt(r.passwordEnc) : "", status: r.status })).join("\n"))
+        }
         return send(200, {
           logins: rows.map((r) => ({
             id: r.id,
@@ -212,9 +220,11 @@ async function setRow(id: number, values: Partial<Row>) {
 function writeAddonFile() {
   try {
     mkdirSync(dirname(ADDON_FILE), { recursive: true })
-    // The relay build of the add-on: same code, keyed with the relay secret,
-    // posting to /api/ninjatrader/relay. Load it once into NinjaTrader.
-    writeFileSync(ADDON_FILE, "﻿" + addonSource({ key: RELAY_SECRET, syncUrl: `${APP_URL.replace(/\/+$/, "")}/api/ninjatrader/relay` }))
+    // The server build of the add-on: the same relay code, keyed with the relay
+    // secret and posting to /api/ninjatrader/relay, plus TradeLoop Provision,
+    // which asks this worker for the logins. Load it once into NinjaTrader. It
+    // holds both secrets, so it is for the server's administrators only.
+    writeFileSync(ADDON_FILE, "﻿" + addonSource({ key: RELAY_SECRET, syncUrl: `${APP_URL.replace(/\/+$/, "")}/api/ninjatrader/relay`, provision: { url: `http://127.0.0.1:${PROVISION_PORT}`, token: PROVISION_TOKEN } }), { mode: 0o600 })
   } catch (err) {
     tlog("addon_write_failed", { message: err instanceof Error ? err.message : String(err) }, "warn")
   }

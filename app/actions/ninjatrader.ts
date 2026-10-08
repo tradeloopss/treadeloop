@@ -6,6 +6,8 @@ import { auth } from "@/lib/auth"
 import { requirePro } from "@/lib/subscription"
 import { ninjaTraderViewFor, revokeDevice, setAccountEnabled, type NinjaTraderView } from "@/lib/ninjatrader/connections"
 import { connectCredentials, disconnectCredentials, listCredentials, type NinjaCredentialView } from "@/lib/ninjatrader/credentials"
+import { relayConfigured } from "@/lib/ninjatrader/relay"
+import { assertFeature } from "@/lib/features/server"
 
 // The NinjaTrader add-on in the Add account window and on Accounts. Results,
 // not exceptions: Next hides thrown messages in production.
@@ -49,6 +51,14 @@ export async function connectTradovateCredentials(input: { username: string; pas
     await requirePro(id, "Tradovate sync")
   } catch {
     return { ok: false, error: "Tradovate sync is included with Pro. Upgrade in TradeLoop under Billing." }
+  }
+  // Only where there is a NinjaTrader of ours to sign the login in, and for whom that is released: a
+  // login nobody will connect is not taken.
+  if (!relayConfigured()) return { ok: false, error: "Tradovate sync by login isn't switched on yet." }
+  try {
+    await assertFeature("tradovate_vps")
+  } catch {
+    return { ok: false, error: "Tradovate sync by login isn't available on your account yet." }
   }
   const result = await connectCredentials(id, input)
   if (!result.ok) return result

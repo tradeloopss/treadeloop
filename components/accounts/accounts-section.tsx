@@ -16,6 +16,7 @@ import { tradovateConnectionsFor } from "@/lib/tradovate/connections"
 import { ninjaTraderViewFor, type NinjaTraderView } from "@/lib/ninjatrader/connections"
 import { listCredentials, type NinjaCredentialView } from "@/lib/ninjatrader/credentials"
 import { relayConfigured } from "@/lib/ninjatrader/relay"
+import { featureAccess } from "@/lib/features/server"
 
 const num = (v: string | number | null | undefined) => (v == null || v === "" ? null : Number(v))
 
@@ -353,7 +354,8 @@ export async function AccountsSection({
         mock: tradovateStatus.mode === "mock",
         connectionId: tradovateParam && /^\d+$/.test(tradovateParam) ? Number(tradovateParam) : null,
         error: tradovateErrorCode ? (TRADOVATE_ERRORS[tradovateErrorCode] ?? TRADOVATE_ERRORS.exchange) : null,
-        ninjaVps: relayConfigured(),
+        // the login form: where the server side is set up, and for whom it is released (the team first)
+        ninjaVps: relayConfigured() && (await featureAccess()).can.tradovate_vps,
       }}
     />
   )
