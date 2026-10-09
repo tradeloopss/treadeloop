@@ -256,7 +256,7 @@ export function CopyDashboard() {
         )}
       </Section>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,22rem)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_minmax(0,22rem)]">
         <Section title="Live activity" description="The Leader's orders, and what the followers did with each.">
           <CopyFeed copies={copies} limit={6} />
         </Section>

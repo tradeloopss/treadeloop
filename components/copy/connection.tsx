@@ -131,7 +131,7 @@ export function Connection() {
           </div>
           {/* phone and tablet: a card to tap for each account */}
           <section aria-label="Accounts" className="space-y-2 lg:hidden">
-            <ul className="grid gap-2 sm:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {state.accounts.map((a) => (
                 <li key={a.id}>
                   <AccountCard account={a} onOpen={() => setManage(a.id)} />

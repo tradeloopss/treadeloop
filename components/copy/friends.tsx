@@ -192,7 +192,7 @@ function Shared({ strategy: s, after }: { strategy: SharedStrategy; after: () =>
       </div>
 
       <div className="space-y-3 p-3 sm:p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Invitation link</p>
             <div className="mt-1 flex gap-1.5">

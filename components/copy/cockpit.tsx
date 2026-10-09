@@ -551,7 +551,9 @@ export function Cockpit() {
       {/* ------------------------------------------------------------ both: orders, activity, health */}
       <OrderHistory orders={orders} />
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      {/* grid-cols-1, not an implicit auto column: an auto track grows to the widest content
+          (long account names), pushing the page wider than a phone's screen. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <section aria-label="Live activity" className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <Repeat2 className="size-4 text-primary" aria-hidden /> Live Activity

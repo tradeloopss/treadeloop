@@ -181,7 +181,7 @@ export function RiskManagement() {
         <Stat label="Global risk" value={`${formatQuantity(limits.globalRiskPct)}%`} sub="Default for Risk % mode" />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,20rem)_1fr]">
         <Section title="Leader account" description="The reference account: followers copy what it trades.">
           {leader ? (
             <div className="space-y-2 text-sm">
