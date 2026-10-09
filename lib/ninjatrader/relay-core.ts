@@ -26,6 +26,8 @@ export interface UserSlice {
   userId: string
   accounts: NtAccount[]
   executions: NtParsed["executions"]
+  orders: NtParsed["orders"]
+  positions: NtParsed["positions"]
   rowIds: number[]
 }
 
@@ -35,7 +37,7 @@ export interface UserSlice {
 // dropped. Attribution is only ever by connection name, so two users'
 // identically named accounts never cross.
 export function splitByUser(
-  parsed: Pick<NtParsed, "accounts" | "executions">,
+  parsed: Pick<NtParsed, "accounts" | "executions"> & Partial<Pick<NtParsed, "orders" | "positions">>,
   resolve: (connectionName: string) => { userId: string; rowId: number } | null,
 ): { slices: UserSlice[]; matchedRowIds: number[]; unknownConnections: string[] } {
   const accountToOwner = new Map<string, { userId: string; rowId: number }>()
@@ -54,7 +56,7 @@ export function splitByUser(
   const byUser = new Map<string, UserSlice>()
   const slice = (userId: string) => {
     let s = byUser.get(userId)
-    if (!s) byUser.set(userId, (s = { userId, accounts: [], executions: [], rowIds: [] }))
+    if (!s) byUser.set(userId, (s = { userId, accounts: [], executions: [], orders: [], positions: [], rowIds: [] }))
     return s
   }
   for (const a of parsed.accounts) {
@@ -67,6 +69,15 @@ export function splitByUser(
   for (const e of parsed.executions) {
     const owner = accountToOwner.get(e.providerAccountId)
     if (owner) slice(owner.userId).executions.push(e)
+  }
+  // orders and positions are attributed by account name, exactly like executions
+  for (const o of parsed.orders ?? []) {
+    const owner = accountToOwner.get(o.providerAccountId)
+    if (owner) slice(owner.userId).orders.push(o)
+  }
+  for (const p of parsed.positions ?? []) {
+    const owner = accountToOwner.get(p.providerAccountId)
+    if (owner) slice(owner.userId).positions.push(p)
   }
   return { slices: [...byUser.values()], matchedRowIds: [...matched], unknownConnections: [...unknown] }
 }

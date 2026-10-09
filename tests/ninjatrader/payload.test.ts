@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { assetClassFor, brokerFor, currencyCode, parsePayload, skipReason, symbolFor } from "@/lib/ninjatrader/payload"
+import { assetClassFor, brokerFor, currencyCode, orderStatusOf, orderTypeOf, parsePayload, skipReason, symbolFor } from "@/lib/ninjatrader/payload"
 import { hashDeviceKey, keyFromAuthorization, newDeviceKey } from "@/lib/ninjatrader/keys"
 import { buildTradesFromExecutions } from "@/lib/tradovate/fills"
 import { executionKey } from "@/lib/providers/idempotency"
@@ -130,4 +130,71 @@ test("device keys: random, hashed, parsed from the Authorization header", () => 
   assert.equal(keyFromAuthorization(`Bearer tlnt_short`), null)
   assert.equal(keyFromAuthorization(null), null)
   assert.equal(keyFromAuthorization(`Basic ${a.key}`), null)
+})
+
+test("parses orders and positions, normalizing status and type (Phase 2)", () => {
+  const b = {
+    v: 1,
+    client: { version: "1.1.0", machine: "PC" },
+    accounts: [{ name: "APEX-1", provider: "NinjaTrader", currency: "UsDollar", cashValue: 50000 }],
+    executions: [],
+    orders: [
+      { account: "APEX-1", id: "O1", root: "ES", expiry: "2025-12", instrumentType: "Future", side: "buy", qty: 2, filled: 2, avgFillPrice: 6500, orderType: "StopMarket", state: "Working", stopPrice: 6490, name: "Stop loss", oco: "oco1", time: "2025-11-03T14:30:00.000Z" },
+      { account: "APEX-1", id: "O2", root: "ES", expiry: "2025-12", instrumentType: "Future", side: "sell", qty: 1, orderType: "Limit", state: "Filled", limitPrice: 6520 },
+    ],
+    positions: [
+      { account: "APEX-1", root: "ES", expiry: "2025-12", instrumentType: "Future", marketPosition: "Short", qty: 3, avgPrice: 6510 },
+      { account: "APEX-1", root: "NQ", expiry: "2025-12", instrumentType: "Future", marketPosition: "Flat", qty: 0 },
+    ],
+  }
+  const r = parsePayload(b, NOW)
+  assert.ok(r.ok)
+  const [o1, o2] = r.value.orders
+  assert.deepEqual([o1.providerOrderId, o1.symbol, o1.side, o1.orderType, o1.status, o1.stopPrice], ["O1", "ESZ5", "buy", "stop", "working", 6490])
+  assert.equal((o1.raw as Record<string, unknown>).oco, "oco1")
+  assert.equal((o1.raw as Record<string, unknown>).name, "Stop loss")
+  assert.deepEqual([o2.orderType, o2.status, o2.limitPrice], ["limit", "filled", 6520])
+  const [p1, p2] = r.value.positions
+  assert.deepEqual([p1.symbol, p1.netQuantity, p1.averagePrice], ["ESZ5", -3, 6510])
+  assert.deepEqual([p2.symbol, p2.netQuantity], ["NQZ5", 0])
+})
+
+test("an older payload with no orders/positions still parses (backward compatible)", () => {
+  const r = parsePayload(body([fill()]), NOW)
+  assert.ok(r.ok)
+  assert.deepEqual([r.value.orders, r.value.positions], [[], []])
+})
+
+test("order status and type normalization", () => {
+  assert.equal(orderStatusOf("PartFilled"), "partially_filled")
+  assert.equal(orderStatusOf("Cancelled"), "cancelled")
+  assert.equal(orderStatusOf("Rejected"), "rejected")
+  assert.equal(orderStatusOf("Working"), "working")
+  assert.equal(orderStatusOf("weird"), "unknown")
+  assert.equal(orderTypeOf("StopLimit"), "stop_limit")
+  assert.equal(orderTypeOf("Market"), "market")
+})
+
+test("SL/TP is classified only when reliable, never guessed (Phase 3)", () => {
+  const ord = (over: Record<string, unknown>) => ({ account: "A", root: "ES", expiry: "2025-12", instrumentType: "Future", side: "sell", qty: 1, state: "Working", ...over })
+  const b = {
+    v: 1,
+    client: {},
+    accounts: [{ name: "A", provider: "NinjaTrader", currency: "UsDollar" }],
+    executions: [],
+    orders: [
+      ord({ id: "n1", name: "Stop loss", orderType: "StopMarket", stopPrice: 6490 }), // by name -> stop
+      ord({ id: "n2", name: "Profit target", orderType: "Limit", limitPrice: 6520 }), // by name -> target
+      ord({ id: "b1", orderType: "StopMarket", oco: "oco1", stopPrice: 6490 }), // bracket stop leg -> stop
+      ord({ id: "b2", orderType: "Limit", oco: "oco1", limitPrice: 6520 }), // bracket limit leg -> target
+      ord({ id: "k1", orderType: "StopMarket", oco: "oco2", side: "buy" }), // two-stop OCO (breakout) -> unknown
+      ord({ id: "k2", orderType: "StopMarket", oco: "oco2", side: "sell" }),
+      ord({ id: "p1", orderType: "Limit", limitPrice: 6500 }), // plain limit -> unknown
+      ord({ id: "s1", orderType: "StopMarket", stopPrice: 6480 }), // lone stop, no name/oco -> unknown (could be a stop-entry)
+    ],
+  }
+  const r = parsePayload(b, NOW)
+  assert.ok(r.ok)
+  const purpose = Object.fromEntries(r.value.orders.map((o) => [o.providerOrderId, o.raw.purpose]))
+  assert.deepEqual(purpose, { n1: "stop", n2: "target", b1: "stop", b2: "target", k1: "unknown", k2: "unknown", p1: "unknown", s1: "unknown" })
 })

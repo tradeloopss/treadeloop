@@ -1041,16 +1041,45 @@ export const providerDeviceKeys = pgTable(
     provider: text("provider").notNull(), // ninjatrader
     keyHash: text("keyHash").notNull(),
     keyHint: text("keyHint").notNull(),
-    label: text("label"), // the computer's name, as the add-on reports it
+    label: text("label"), // the computer's name (hostname), as the add-on reports it
+    os: text("os"), // the OS string the add-on reports (null = unknown)
+    installationId: text("installationId"), // stable per-install id the add-on keeps across key rotation
     clientVersion: text("clientVersion"),
     lastSeenAt: timestamp("lastSeenAt"),
     lastSyncAt: timestamp("lastSyncAt"), // last time it brought new or changed fills
-    lastStatus: text("lastStatus"), // ok | error
+    lastHeartbeatAt: timestamp("lastHeartbeatAt"), // last contact of any kind (sync or heartbeat)
+    lastStatus: text("lastStatus"), // ok | error (last ingest result)
     lastError: text("lastError"),
+    // device lifecycle (distinct from lastStatus): pairing | connected | disconnected | error | revoked.
+    // "disconnected" is derived at read time from lastSeenAt; the column holds the last authoritative state.
+    status: text("status").notNull().default("pairing"),
+    ntConnected: boolean("ntConnected"), // null = unknown (never claim connected falsely)
+    brokerConnected: boolean("brokerConnected"), // null = unknown
+    queueDepth: integer("queueDepth"), // pending events the add-on still has to send, if it reports them
+    errorCount: integer("errorCount").notNull().default(0),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     revokedAt: timestamp("revokedAt"),
   },
-  (t) => [uniqueIndex("provider_device_keys_hash").on(t.keyHash), index("provider_device_keys_user").on(t.userId, t.provider)],
+  (t) => [uniqueIndex("provider_device_keys_hash").on(t.keyHash), index("provider_device_keys_user").on(t.userId, t.provider), index("provider_device_keys_status").on(t.provider, t.status)],
+)
+
+// Short-lived pairing codes (the "ABC-123" shown in the dashboard). The add-on
+// redeems one for a device key; the plaintext code is never stored, only its
+// SHA-256 hash. Single-use (consumedAt), expiring (expiresAt), tied to a user.
+// This is an additional onboarding path — the keyed add-on download still works.
+export const ninjatraderPairCodes = pgTable(
+  "ninjatrader_pair_codes",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    codeHash: text("codeHash").notNull(),
+    label: text("label"), // optional friendly name chosen when generating
+    expiresAt: timestamp("expiresAt").notNull(),
+    consumedAt: timestamp("consumedAt"),
+    deviceKeyId: integer("deviceKeyId"), // the provider_device_keys row minted on redemption
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ninjatrader_pair_codes_hash").on(t.codeHash), index("ninjatrader_pair_codes_user").on(t.userId)],
 )
 
 // A Tradovate login the trader entered to be synced through NinjaTrader on the

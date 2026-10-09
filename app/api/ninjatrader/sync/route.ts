@@ -61,6 +61,8 @@ export async function POST(req: Request) {
       accounts: result.accounts,
       inserted: result.inserted,
       updated: result.updated,
+      orders: result.orders,
+      positions: result.positions,
       rejected: parsed.value.rejected.length,
       skippedAccounts: result.skippedAccounts,
     })

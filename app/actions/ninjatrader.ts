@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@/lib/auth"
 import { requirePro } from "@/lib/subscription"
 import { ninjaTraderViewFor, revokeDevice, setAccountEnabled, type NinjaTraderView } from "@/lib/ninjatrader/connections"
+import { reconcileNinjaTrader, type ReconcileSummary } from "@/lib/ninjatrader/reconcile"
+import { createPairCode, type PairCodeView } from "@/lib/ninjatrader/pairing"
 import { connectCredentials, disconnectCredentials, listCredentials, type NinjaCredentialView } from "@/lib/ninjatrader/credentials"
 import { relayConfigured } from "@/lib/ninjatrader/relay"
 import { assertFeature } from "@/lib/features/server"
@@ -39,6 +41,30 @@ export async function setNinjaTraderAccountSync(rowId: number, enabled: boolean)
   if (!(await setAccountEnabled(id, rowId, enabled))) return { ok: false, error: "That account isn't connected." }
   revalidatePath("/accounts")
   return { ok: true, value: undefined }
+}
+
+// Generate an "ABC-123" pairing code so the trader can fetch their add-on at
+// the VPS without signing in there. Pro-gated, like the add-on download.
+export async function generateNinjaTraderPairCode(): Promise<Result<PairCodeView>> {
+  const id = await userId()
+  if (!id) return { ok: false, error: "Sign in again." }
+  try {
+    await requirePro(id, "NinjaTrader sync")
+  } catch {
+    return { ok: false, error: "NinjaTrader sync is included with Pro. Upgrade in TradeLoop under Billing." }
+  }
+  return { ok: true, value: await createPairCode(id) }
+}
+
+// Manual "Reconcile": rebuild the journal from everything the add-on has sent.
+// Safe and idempotent — it never creates duplicates or deletes trustworthy data.
+export async function reconcileNinjaTraderNow(): Promise<Result<ReconcileSummary>> {
+  const id = await userId()
+  if (!id) return { ok: false, error: "Sign in again." }
+  const res = await reconcileNinjaTrader(id)
+  if (!res.ok) return { ok: false, error: "No NinjaTrader add-on is connected yet." }
+  revalidatePath("/accounts")
+  return { ok: true, value: res.summary }
 }
 
 // Tradovate through NinjaTrader on the VPS: the trader enters their Tradovate

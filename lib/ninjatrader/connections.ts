@@ -3,7 +3,7 @@ import { db } from "@/lib/db"
 import { providerAccounts, providerDeviceKeys, providerExecutions, tradingConnections } from "@/lib/db/schema"
 import { newDeviceKey } from "@/lib/ninjatrader/keys"
 import { brokerFor, ENVIRONMENT } from "@/lib/ninjatrader/payload"
-import { PROVIDER, realtimeState } from "@/lib/ninjatrader/sync"
+import { PROVIDER, deviceStatus, realtimeState, type DeviceStatus } from "@/lib/ninjatrader/sync"
 
 // What the Accounts page and the Add account window show for the NinjaTrader
 // add-on: the installed add-ons (by key — never the key itself) and the
@@ -14,14 +14,20 @@ export const MAX_ACTIVE_KEYS = 10
 export interface NinjaTraderDeviceView {
   id: number
   label: string | null
+  os: string | null
   keyHint: string
   clientVersion: string | null
   createdAt: string
   lastSeenAt: string | null
   lastSyncAt: string | null
+  lastHeartbeatAt: string | null
   lastStatus: string | null
   lastError: string | null
   online: boolean
+  // the separate layers the dashboard shows (Phase 4): connector / NinjaTrader / broker
+  status: DeviceStatus
+  queueDepth: number | null
+  errorCount: number
 }
 
 export interface NinjaTraderAccountView {
@@ -44,6 +50,8 @@ export interface NinjaTraderView {
   connectionId: number | null
   online: boolean
   lastSeenAt: string | null
+  events: number // total executions received, across accounts
+  lastExecutionAt: string | null
   devices: NinjaTraderDeviceView[]
   accounts: NinjaTraderAccountView[]
 }
@@ -93,21 +101,29 @@ export async function ninjaTraderViewFor(userId: string): Promise<NinjaTraderVie
   }
 
   const lastSeen = devices.reduce<Date | null>((m, d) => (d.lastSeenAt && (!m || d.lastSeenAt > m) ? d.lastSeenAt : m), null)
+  const lastExecution = accounts.reduce<string | null>((m, a) => (a.lastExecutionAt && (!m || a.lastExecutionAt > m) ? a.lastExecutionAt : m), null)
   return {
     connectionId: connection?.id ?? null,
     online: realtimeState(lastSeen) === "live",
     lastSeenAt: iso(lastSeen),
+    events: accounts.reduce((n, a) => n + a.executions, 0),
+    lastExecutionAt: lastExecution,
     devices: devices.map((d) => ({
       id: d.id,
       label: d.label,
+      os: d.os,
       keyHint: d.keyHint,
       clientVersion: d.clientVersion,
       createdAt: d.createdAt.toISOString(),
       lastSeenAt: iso(d.lastSeenAt),
       lastSyncAt: iso(d.lastSyncAt),
+      lastHeartbeatAt: iso(d.lastHeartbeatAt),
       lastStatus: d.lastStatus,
       lastError: d.lastError,
       online: realtimeState(d.lastSeenAt) === "live",
+      status: deviceStatus(d),
+      queueDepth: d.queueDepth,
+      errorCount: d.errorCount,
     })),
     accounts,
   }

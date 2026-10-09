@@ -365,6 +365,13 @@
       "when": 1791490000000,
       "tag": "0051_pnl_card_design",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791534378826,
+      "tag": "0052_device_connector_state",
+      "breakpoints": true
     }
   ]
 }

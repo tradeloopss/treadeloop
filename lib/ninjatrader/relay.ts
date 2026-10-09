@@ -56,7 +56,7 @@ export async function ingestRelayPayload(parsed: NtParsed): Promise<RelayResult>
   for (const slice of slices) {
     let ingest: IngestResult
     try {
-      ingest = await ingestForUser(slice.userId, { client: parsed.client, accounts: slice.accounts, executions: slice.executions, rejected: [] })
+      ingest = await ingestForUser(slice.userId, { client: parsed.client, accounts: slice.accounts, executions: slice.executions, orders: slice.orders, positions: slice.positions, rejected: [] })
     } catch (err) {
       tlog("relay_ingest_failed", { userId: slice.userId, message: err instanceof Error ? err.message : String(err) }, "error")
       continue

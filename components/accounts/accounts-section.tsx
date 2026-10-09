@@ -255,6 +255,10 @@ export async function AccountsSection({
           .map((a): HubConnection => {
             const acct = account(a.tradingAccountId)
             const deviceError = ninjatrader.devices.find((d) => d.lastStatus === "error")
+            // the add-on that's reporting (or the most recent), for the layered status
+            const dev = ninjatrader.devices.find((d) => d.online) ?? ninjatrader.devices[0]
+            const st = dev?.status
+            const layer = (s: "online" | "offline" | "unknown" | undefined) => (s === "online" ? t("Connected") : s === "offline" ? t("Disconnected") : t("Unknown"))
             const health = a.planLimited ? "error" : deviceError ? "warning" : "connected"
             return {
               key: `nt:${a.id}`,
@@ -277,10 +281,13 @@ export async function AccountsSection({
               account: acct,
               reconnect: null,
               diagnostics: [
-                { label: t("NinjaTrader"), value: ninjatrader.online ? t("Online") : t("Offline — syncs when NinjaTrader is open") },
-                { label: t("Last check-in"), at: ninjatrader.lastSeenAt },
+                { label: t("NinjaTrader"), value: ninjatrader.online ? layer(st?.ninjaTrader ?? "online") : t("Offline — syncs when NinjaTrader is open") },
+                { label: t("Broker"), value: ninjatrader.online ? layer(st?.broker) : t("Unknown") },
+                { label: t("Last heartbeat"), at: dev?.lastHeartbeatAt ?? ninjatrader.lastSeenAt },
                 { label: t("Fills received"), value: String(a.executions) },
                 { label: t("Last fill"), at: a.lastExecutionAt },
+                ...(dev && dev.errorCount > 0 ? [{ label: t("Errors"), value: String(dev.errorCount) }] : []),
+                ...(dev && dev.queueDepth ? [{ label: t("Queued"), value: String(dev.queueDepth) }] : []),
               ],
             }
           })

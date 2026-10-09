@@ -1,8 +1,13 @@
 import type { Metadata } from "next"
 import { requireAdmin } from "@/lib/admin/guard"
 import { missingConfiguration, ninjatraderAdminOverview } from "@/lib/tradovate/admin"
+import { ninjatraderDevicesOverview, ninjatraderVpsLoginsOverview } from "@/lib/ninjatrader/admin"
 import { AdminPageHeader, EmptyRow, Panel, StatePill, StatRow, StatTile, fmtAgo, fmtDateTime } from "@/components/admin/ui"
-import { NinjatraderConnectionControls, NinjatraderKillSwitch } from "@/components/admin/ninjatrader/controls"
+import { NinjatraderConnectionControls, NinjatraderDeviceControls, NinjatraderKillSwitch } from "@/components/admin/ninjatrader/controls"
+
+// online / offline / unknown → an admin status pill.
+const layerState: Record<string, string> = { online: "active", offline: "inactive", unknown: "pending" }
+const layerLabel: Record<string, string> = { online: "Connected", offline: "Offline", unknown: "Unknown" }
 
 export const metadata: Metadata = { title: "NinjaTrader — TradeLoop admin" }
 
@@ -13,8 +18,9 @@ export const metadata: Metadata = { title: "NinjaTrader — TradeLoop admin" }
 // secret or balance is shown.
 export default async function AdminNinjatraderPage() {
   await requireAdmin({ brokers: ["view"] })
-  const [overview, missing] = await Promise.all([ninjatraderAdminOverview(), Promise.resolve(missingConfiguration())])
+  const [overview, devicesOverview, vps, missing] = await Promise.all([ninjatraderAdminOverview(), ninjatraderDevicesOverview(), ninjatraderVpsLoginsOverview(), Promise.resolve(missingConfiguration())])
   const { gate, connections, accounts } = overview
+  const { devices } = devicesOverview
 
   const gatePill = gate.enabled
     ? { state: "active", label: "Live" }
@@ -92,6 +98,101 @@ export default async function AdminNinjatraderPage() {
                       <td className="px-3 py-2">
                         <NinjatraderConnectionControls connectionId={p.connectionId} />
                       </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <StatRow>
+          <StatTile label="Add-on devices" value={String(devicesOverview.total)} note={`${devicesOverview.online} online now`} />
+          <StatTile label="Devices with errors" value={String(devicesOverview.errored)} note="recent ingest errors" />
+          <StatTile label="VPS logins" value={String(vps.total)} note="operator-run server path" />
+        </StatRow>
+
+        <Panel title="Add-on devices" description="Every trader's TradeLoop add-on (provider_device_keys). The add-on runs inside their NinjaTrader and posts read-only. No key, token or balance is shown. Reconcile rebuilds a user's journal; Revoke stops that add-on at once.">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">User</th>
+                  <th className="px-3 py-2 font-medium">Device</th>
+                  <th className="px-3 py-2 font-medium">Version</th>
+                  <th className="px-3 py-2 font-medium">NinjaTrader</th>
+                  <th className="px-3 py-2 font-medium">Broker</th>
+                  <th className="px-3 py-2 font-medium">Last heartbeat</th>
+                  <th className="px-3 py-2 font-medium">Queue</th>
+                  <th className="px-3 py-2 font-medium">Errors</th>
+                  <th className="px-3 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {devices.length === 0 ? (
+                  <EmptyRow colSpan={9}>No add-on devices yet.</EmptyRow>
+                ) : (
+                  devices.map((d) => (
+                    <tr key={d.id} className={d.revokedAt ? "opacity-50" : undefined}>
+                      <td className="px-3 py-2 text-xs">{d.userEmail ?? `${d.userId.slice(0, 8)}…`}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <span className="block font-medium text-foreground">{d.label ?? "—"}</span>
+                        <span className="block text-muted-foreground">
+                          {d.os ?? "unknown OS"} · …{d.keyHint}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{d.clientVersion ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <StatePill state={layerState[d.revokedAt ? "offline" : d.layers.ninjaTrader] ?? "inactive"}>{d.revokedAt ? "Revoked" : layerLabel[d.layers.ninjaTrader]}</StatePill>
+                      </td>
+                      <td className="px-3 py-2">
+                        <StatePill state={layerState[d.revokedAt ? "offline" : d.layers.broker] ?? "inactive"}>{layerLabel[d.revokedAt ? "offline" : d.layers.broker]}</StatePill>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground" title={d.lastHeartbeatAt ? fmtDateTime(d.lastHeartbeatAt) : undefined}>
+                        {d.lastHeartbeatAt ? fmtAgo(d.lastHeartbeatAt) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{d.queueDepth ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{d.errorCount || "—"}</td>
+                      <td className="px-3 py-2">
+                        <NinjatraderDeviceControls deviceId={d.id} revoked={d.revokedAt != null} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <Panel title="VPS logins" description="The operator-run server path (ninjatrader_connections). Shown for monitoring only — no username, password or token is displayed.">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">User</th>
+                  <th className="px-3 py-2 font-medium">Connection</th>
+                  <th className="px-3 py-2 font-medium">Kind</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Last seen</th>
+                  <th className="px-3 py-2 font-medium">Last fill</th>
+                  <th className="px-3 py-2 font-medium">Errors</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {vps.logins.length === 0 ? (
+                  <EmptyRow colSpan={7}>No VPS logins.</EmptyRow>
+                ) : (
+                  vps.logins.map((l) => (
+                    <tr key={l.id}>
+                      <td className="px-3 py-2 text-xs">{l.userEmail ?? `${l.userId.slice(0, 8)}…`}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{l.ntConnectionName}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{l.connectionKind ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <StatePill state={connPill[l.status] ?? "inactive"}>{l.status}</StatePill>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{l.lastSeenAt ? fmtAgo(l.lastSeenAt) : "—"}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{l.lastFillAt ? fmtAgo(l.lastFillAt) : "—"}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{l.errorCount || "—"}</td>
                     </tr>
                   ))
                 )}

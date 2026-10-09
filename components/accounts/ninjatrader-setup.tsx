@@ -2,12 +2,12 @@
 
 import type React from "react"
 import { useEffect, useRef, useState } from "react"
-import { CheckCircle2, Copy, Download, FileUp, Info, Loader2 } from "lucide-react"
+import { CheckCircle2, Copy, Download, FileUp, Info, Loader2, RefreshCw, KeyRound } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/components/locale-provider"
-import { getNinjaTraderStatus } from "@/app/actions/ninjatrader"
+import { generateNinjaTraderPairCode, getNinjaTraderStatus, reconcileNinjaTraderNow } from "@/app/actions/ninjatrader"
 import type { NinjaTraderView } from "@/lib/ninjatrader/connections"
 
 // Tradovate through NinjaTrader 8, in the Add account window. Prop-firm
@@ -26,7 +26,23 @@ export function NinjaTraderSetup({ onDone, onFile, onState }: { onDone: () => vo
   const t = useT()
   const [view, setView] = useState<NinjaTraderView | null>(null)
   const [downloadedAt, setDownloadedAt] = useState<number | null>(null)
+  const [reconciling, setReconciling] = useState(false)
+  const [pair, setPair] = useState<{ code: string; expiresAt: string } | null>(null)
   const alive = useRef(true)
+
+  const reconcile = async () => {
+    setReconciling(true)
+    const r = await reconcileNinjaTraderNow().catch(() => null)
+    setReconciling(false)
+    if (r?.ok) toast.success(t("Reconciled — {n} trades in your journal.", { n: r.value.trades }))
+    else toast.error((r && !r.ok && r.error) || t("Couldn't reconcile right now."))
+  }
+
+  const getCode = async () => {
+    const r = await generateNinjaTraderPairCode().catch(() => null)
+    if (r?.ok) setPair(r.value)
+    else toast.error((r && !r.ok && r.error) || t("Couldn't create a pairing code."))
+  }
 
   // An add-on that has checked in recently — or, after a download, since then.
   const connected =
@@ -84,6 +100,29 @@ export function NinjaTraderSetup({ onDone, onFile, onState }: { onDone: () => vo
             ))}
           </ul>
         )}
+        <div className="rounded-xl border p-3">
+          <p className="text-xs text-muted-foreground">{t("Fills sync automatically while NinjaTrader is open. Reconcile rebuilds your journal from everything the add-on has sent — safe to run any time.")}</p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" className="h-9" disabled={reconciling} onClick={reconcile}>
+              {reconciling ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+              {t("Reconcile")}
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="h-9" onClick={getCode}>
+              <KeyRound className="size-3.5" />
+              {t("Pair another device")}
+            </Button>
+          </div>
+          {pair && (
+            <div className="mt-3 rounded-lg bg-muted/50 p-3 text-center">
+              <p className="font-mono text-2xl font-bold tracking-widest text-foreground" dir="ltr">
+                {pair.code}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("On the VPS, open {url} and enter this code to install the add-on — no sign-in needed. Expires in 10 minutes.", { url: "tradeloop.pro/connect" })}
+              </p>
+            </div>
+          )}
+        </div>
         <Button className="h-11 w-full font-semibold hover:bg-primary/90" onClick={onDone}>
           {t("Done")}
         </Button>

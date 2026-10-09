@@ -124,6 +124,18 @@ test("compiles as C# 5 and posts what the server accepts", { skip: !existsSync(C
     // 3: an account that connected later, with its session.
     assert.deepEqual(parsed[2].accounts.map((a) => a.name), ["APEX-123456-01", "TPT-9"])
     assert.deepEqual(parsed[2].executions.map((e) => e.providerExecutionId), ["TPT-9|E3"])
+
+    // Orders and positions are captured too (Phase 2), and the local-sim account's are skipped.
+    const allOrders = parsed.flatMap((p) => p.orders)
+    const o1 = allOrders.find((o) => o.providerOrderId === "O-E1")
+    assert.ok(o1, `order O-E1 captured: ${JSON.stringify(allOrders)}`)
+    assert.deepEqual([o1!.side, o1!.status, o1!.symbol, o1!.orderType], ["buy", "filled", "ESZ5", "limit"])
+    const o2 = allOrders.find((o) => o.providerOrderId === "O-E2")
+    assert.ok(o2 && o2.side === "sell" && o2.orderType === "stop", "the stop order was captured and classified by type")
+    assert.ok(!allOrders.some((o) => o.providerAccountId === "Sim101"), "the local-sim account's order is skipped, like its fills")
+    const allPositions = parsed.flatMap((p) => p.positions)
+    assert.ok(allPositions.some((p) => p.providerAccountId === "APEX-123456-01" && p.symbol === "ESZ5" && p.netQuantity === 2), "the long position was captured")
+    assert.ok(allPositions.some((p) => p.netQuantity === 0), "the position going flat was captured (so the server can clear it)")
   } finally {
     server.close()
   }

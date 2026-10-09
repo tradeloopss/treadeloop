@@ -56,6 +56,10 @@ namespace NinjaTrader.Cbi
     public enum MarketPosition { Flat, Long, Short }
     public enum InstrumentType { Future, Stock, Forex, Cfd, Option }
     public enum Provider { NinjaTrader, Tradovate, Rithmic, Simulator, Playback }
+    public enum OrderAction { Buy, Sell, BuyToCover, SellShort }
+    public enum OrderType { Market, Limit, StopMarket, StopLimit, MIT }
+    public enum OrderState { Initialized, Submitted, Accepted, Working, ChangePending, CancelPending, Cancelled, Filled, PartFilled, Rejected, Unknown }
+    public enum TimeInForce { Day, Gtc }
 
     // In NinjaTrader this is abstract, with a class per kind of connection.
     public class ConnectOptions
@@ -162,6 +166,45 @@ namespace NinjaTrader.Cbi
         public Execution Execution { get; set; }
     }
 
+    public class Order
+    {
+        public Account Account { get; set; }
+        public Instrument Instrument { get; set; }
+        public string OrderId { get; set; }
+        public long Id { get; set; }
+        public OrderAction OrderAction { get; set; }
+        public OrderType OrderType { get; set; }
+        public OrderState OrderState { get; set; }
+        public int Quantity { get; set; }
+        public int Filled { get; set; }
+        public double AverageFillPrice { get; set; }
+        public double LimitPrice { get; set; }
+        public double StopPrice { get; set; }
+        public DateTime Time { get; set; }
+        public string Name { get; set; }
+        public string Oco { get; set; }
+        public TimeInForce TimeInForce { get; set; }
+    }
+
+    public class OrderEventArgs : EventArgs
+    {
+        public Order Order { get; set; }
+    }
+
+    public class Position
+    {
+        public Account Account { get; set; }
+        public Instrument Instrument { get; set; }
+        public MarketPosition MarketPosition { get; set; }
+        public int Quantity { get; set; }
+        public double AveragePrice { get; set; }
+    }
+
+    public class PositionEventArgs : EventArgs
+    {
+        public Position Position { get; set; }
+    }
+
     public class AccountStatusEventArgs : EventArgs
     {
         public Account Account { get; set; }
@@ -173,6 +216,8 @@ namespace NinjaTrader.Cbi
         public static readonly List<Account> All = new List<Account>();
         public static event EventHandler<AccountStatusEventArgs> AccountStatusUpdate;
         public event EventHandler<ExecutionEventArgs> ExecutionUpdate;
+        public event EventHandler<OrderEventArgs> OrderUpdate;
+        public event EventHandler<PositionEventArgs> PositionUpdate;
 
         private readonly Dictionary<AccountItem, double> values = new Dictionary<AccountItem, double>();
 
@@ -181,6 +226,8 @@ namespace NinjaTrader.Cbi
             Name = name;
             Denomination = Currency.UsDollar;
             Executions = new Collection<Execution>();
+            Orders = new Collection<Order>();
+            Positions = new Collection<Position>();
             Connection = new Connection { Options = new ConnectOptions { Provider = provider, Name = connection }, Status = ConnectionStatus.Connected };
             values[AccountItem.CashValue] = cash;
             values[AccountItem.NetLiquidation] = cash;
@@ -191,6 +238,8 @@ namespace NinjaTrader.Cbi
         public Connection Connection { get; set; }
         public Currency Denomination { get; set; }
         public Collection<Execution> Executions { get; private set; }
+        public Collection<Order> Orders { get; private set; }
+        public Collection<Position> Positions { get; private set; }
 
         public double Get(AccountItem item, Currency currency)
         {
@@ -204,6 +253,19 @@ namespace NinjaTrader.Cbi
             lock (Executions) Executions.Add(execution);
             EventHandler<ExecutionEventArgs> handler = ExecutionUpdate;
             if (handler != null) handler(this, new ExecutionEventArgs { Execution = execution });
+        }
+
+        public void RaiseOrder(Order order)
+        {
+            lock (Orders) Orders.Add(order);
+            EventHandler<OrderEventArgs> handler = OrderUpdate;
+            if (handler != null) handler(this, new OrderEventArgs { Order = order });
+        }
+
+        public void RaisePosition(Position position)
+        {
+            EventHandler<PositionEventArgs> handler = PositionUpdate;
+            if (handler != null) handler(this, new PositionEventArgs { Position = position });
         }
 
         public static void RaiseStatus(Account account, ConnectionStatus status)

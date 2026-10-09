@@ -3,11 +3,11 @@
 // trader drops it into Documents\NinjaTrader 8\bin\Custom\AddOns.
 //
 // It uses only NinjaScript's documented add-on API — Account.All,
-// Account.AccountStatusUpdate, Account.ExecutionUpdate, Account.Executions,
-// Account.Get, Execution, Instrument, MasterInstrument — to read the
-// trader's own executions inside their own NinjaTrader, and posts them to
-// TradeLoop over HTTPS. It never places, changes or cancels orders, and holds
-// no broker password. Written for C# 5 (no string interpolation, no ?.)
+// Account.AccountStatusUpdate, Account.ExecutionUpdate/OrderUpdate/PositionUpdate,
+// Account.Executions/Orders/Positions, Account.Get, Execution, Order, Position,
+// Instrument, MasterInstrument — to read the trader's own executions, orders and
+// positions inside their own NinjaTrader, and posts them to TradeLoop over HTTPS.
+// It never places, changes or cancels orders, and holds no broker password. Written for C# 5 (no string interpolation, no ?.)
 // so it compiles in any NinjaTrader 8 release; anything not in the documented
 // API (the time zone setting, the connection's provider name) is read by
 // reflection with a safe fallback, so a NinjaTrader update can't break the
@@ -24,7 +24,7 @@
 // saved connections or to the Output window. Like the rest, it only reads: it
 // connects and disconnects, and never touches an order.
 
-export const ADDON_VERSION = "1.0.0"
+export const ADDON_VERSION = "1.1.0"
 export const ADDON_FILENAME = "TradeLoopSync.cs"
 
 // `provision`: only for the copy that runs in NinjaTrader on TradeLoop's own server. Where the worker's
@@ -49,10 +49,11 @@ export function addonSource(opts: { key: string; syncUrl: string; provision?: { 
 
 const TEMPLATE = String.raw`// TradeLoop Sync — NinjaTrader 8 add-on, version __TRADELOOP_ADDON_VERSION__
 //
-// Sends the executions (fills) of the accounts connected in this NinjaTrader
-// to your TradeLoop journal, where they become trades with P&L. Works with
-// prop-firm Tradovate accounts (Apex, Tradeify, MyFundedFutures…) connected
-// through NinjaTrader's "NinjaTrader" connection, and with other brokers.
+// Sends the executions (fills), orders and positions of the accounts connected
+// in this NinjaTrader to your TradeLoop journal, where the fills become trades
+// with P&L. Works with prop-firm Tradovate accounts (Apex, Tradeify,
+// MyFundedFutures…) connected through NinjaTrader's "NinjaTrader" connection,
+// and with other brokers.
 //
 //   • Read-only: it never places, changes or cancels an order.
 //   • It holds no broker password — only your TradeLoop sync key, below.
@@ -93,6 +94,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         private readonly object gate = new object();
         private readonly Dictionary<string, string> pending = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> pendingOrders = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> pendingPositions = new Dictionary<string, string>();
         private readonly List<Account> watched = new List<Account>();
         private System.Threading.Timer timer;
         private int sending;
@@ -152,7 +155,11 @@ namespace NinjaTrader.NinjaScript.AddOns
             List<Account> accounts;
             lock (gate) { accounts = new List<Account>(watched); watched.Clear(); }
             foreach (Account account in accounts)
+            {
                 account.ExecutionUpdate -= OnExecutionUpdate;
+                account.OrderUpdate -= OnOrderUpdate;
+                account.PositionUpdate -= OnPositionUpdate;
+            }
             // Last fills of the day: one quick attempt before NinjaTrader closes.
             try { SendPending(true, 5000); } catch (Exception) { }
         }
@@ -166,6 +173,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 watched.Add(account);
             }
             account.ExecutionUpdate += OnExecutionUpdate;
+            account.OrderUpdate += OnOrderUpdate;
+            account.PositionUpdate += OnPositionUpdate;
             QueueSessionOf(account);
         }
 
@@ -181,6 +190,21 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             if (stopped || e == null || e.Execution == null) return;
             QueueExecution(e.Execution);
+        }
+
+        // Orders and positions are read-only context for TradeLoop (the journal
+        // is built from executions). Every OrderUpdate is sent, so TradeLoop
+        // sees the whole lifecycle, not just the final state.
+        private void OnOrderUpdate(object sender, OrderEventArgs e)
+        {
+            if (stopped || e == null || e.Order == null) return;
+            QueueOrder(e.Order);
+        }
+
+        private void OnPositionUpdate(object sender, PositionEventArgs e)
+        {
+            if (stopped || e == null || e.Position == null) return;
+            QueuePosition(e.Position);
         }
 
         // ------------------------------------------------------------------ reading
@@ -205,6 +229,18 @@ namespace NinjaTrader.NinjaScript.AddOns
                     executions.Add(execution);
             foreach (Execution execution in executions)
                 QueueExecution(execution);
+            List<Order> orders = new List<Order>();
+            lock (account.Orders)
+                foreach (Order order in account.Orders)
+                    orders.Add(order);
+            foreach (Order order in orders)
+                QueueOrder(order);
+            List<Position> positions = new List<Position>();
+            lock (account.Positions)
+                foreach (Position position in account.Positions)
+                    positions.Add(position);
+            foreach (Position position in positions)
+                QueuePosition(position);
         }
 
         private void QueueExecution(Execution execution)
@@ -243,6 +279,82 @@ namespace NinjaTrader.NinjaScript.AddOns
             JsonNum(sb, "qty", execution.Quantity);
             JsonNum(sb, "price", execution.Price);
             JsonNum(sb, "commission", execution.Commission);
+            return JsonEnd(sb, '}');
+        }
+
+        private void QueueOrder(Order order)
+        {
+            try
+            {
+                Account account = order.Account;
+                if (!ShouldSync(account)) return;
+                string id = order.OrderId;
+                if (string.IsNullOrEmpty(id)) id = "id-" + order.Id.ToString(Invariant);
+                string json = OrderToJson(order, account, id);
+                if (json == null) return;
+                lock (gate) pendingOrders[account.Name + "|" + id] = json;
+            }
+            catch (Exception err)
+            {
+                OutputNote("Couldn't read an order: " + err.Message);
+            }
+        }
+
+        private void QueuePosition(Position position)
+        {
+            try
+            {
+                Account account = position.Account;
+                if (!ShouldSync(account)) return;
+                Instrument instrument = position.Instrument;
+                if (instrument == null || instrument.MasterInstrument == null) return;
+                string json = PositionToJson(position, account, instrument);
+                if (json == null) return;
+                lock (gate) pendingPositions[account.Name + "|" + instrument.FullName] = json;
+            }
+            catch (Exception err)
+            {
+                OutputNote("Couldn't read a position: " + err.Message);
+            }
+        }
+
+        private static string OrderToJson(Order order, Account account, string id)
+        {
+            Instrument instrument = order.Instrument;
+            if (instrument == null || instrument.MasterInstrument == null) return null;
+            MasterInstrument master = instrument.MasterInstrument;
+            StringBuilder sb = new StringBuilder("{");
+            JsonStr(sb, "account", account.Name);
+            JsonStr(sb, "id", id);
+            JsonStr(sb, "root", master.Name);
+            JsonStr(sb, "expiry", instrument.Expiry.Year > 1900 ? instrument.Expiry.ToString("yyyy-MM", Invariant) : null);
+            JsonStr(sb, "instrumentType", master.InstrumentType.ToString());
+            JsonStr(sb, "side", (order.OrderAction == OrderAction.Buy || order.OrderAction == OrderAction.BuyToCover) ? "buy" : "sell");
+            JsonNum(sb, "qty", order.Quantity);
+            JsonNum(sb, "filled", order.Filled);
+            JsonNum(sb, "avgFillPrice", order.AverageFillPrice);
+            JsonStr(sb, "orderType", order.OrderType.ToString());
+            JsonStr(sb, "state", order.OrderState.ToString());
+            JsonNum(sb, "limitPrice", order.LimitPrice);
+            JsonNum(sb, "stopPrice", order.StopPrice);
+            JsonStr(sb, "time", ToUtc(order.Time).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", Invariant));
+            JsonStr(sb, "name", order.Name);
+            JsonStr(sb, "oco", order.Oco);
+            JsonStr(sb, "tif", order.TimeInForce.ToString());
+            return JsonEnd(sb, '}');
+        }
+
+        private static string PositionToJson(Position position, Account account, Instrument instrument)
+        {
+            MasterInstrument master = instrument.MasterInstrument;
+            StringBuilder sb = new StringBuilder("{");
+            JsonStr(sb, "account", account.Name);
+            JsonStr(sb, "root", master.Name);
+            JsonStr(sb, "expiry", instrument.Expiry.Year > 1900 ? instrument.Expiry.ToString("yyyy-MM", Invariant) : null);
+            JsonStr(sb, "instrumentType", master.InstrumentType.ToString());
+            JsonStr(sb, "marketPosition", position.MarketPosition.ToString());
+            JsonNum(sb, "qty", position.Quantity);
+            JsonNum(sb, "avgPrice", position.AveragePrice);
             return JsonEnd(sb, '}');
         }
 
@@ -350,14 +462,28 @@ namespace NinjaTrader.NinjaScript.AddOns
                     foreach (Account account in accounts) QueueSessionOf(account);
                 }
                 Dictionary<string, string> batch = new Dictionary<string, string>();
+                Dictionary<string, string> orderBatch = new Dictionary<string, string>();
+                Dictionary<string, string> positionBatch = new Dictionary<string, string>();
                 lock (gate)
+                {
                     foreach (KeyValuePair<string, string> item in pending)
                     {
                         if (batch.Count >= MaxBatch) break;
                         batch[item.Key] = item.Value;
                     }
+                    foreach (KeyValuePair<string, string> item in pendingOrders)
+                    {
+                        if (orderBatch.Count >= MaxBatch) break;
+                        orderBatch[item.Key] = item.Value;
+                    }
+                    foreach (KeyValuePair<string, string> item in pendingPositions)
+                    {
+                        if (positionBatch.Count >= MaxBatch) break;
+                        positionBatch[item.Key] = item.Value;
+                    }
+                }
                 bool heartbeat = (now - lastPost).TotalSeconds >= HeartbeatSeconds;
-                if (batch.Count == 0 && !heartbeat) return;
+                if (batch.Count == 0 && orderBatch.Count == 0 && positionBatch.Count == 0 && !heartbeat) return;
 
                 StringBuilder body = new StringBuilder();
                 body.Append("{\"v\":1,\"client\":{");
@@ -365,6 +491,10 @@ namespace NinjaTrader.NinjaScript.AddOns
                 JsonStr(client, "version", Version);
                 JsonStr(client, "machine", Environment.MachineName);
                 JsonStr(client, "timeZone", (zone ?? TimeZoneInfo.Local).Id);
+                JsonStr(client, "os", OsDescription());
+                int queued;
+                lock (gate) queued = pending.Count + pendingOrders.Count + pendingPositions.Count;
+                JsonNum(client, "queued", queued);
                 body.Append(client.ToString().TrimEnd(','));
                 body.Append("},\"accounts\":[");
                 bool first = true;
@@ -377,6 +507,10 @@ namespace NinjaTrader.NinjaScript.AddOns
                 }
                 body.Append("],\"executions\":[");
                 body.Append(string.Join(",", batch.Values.ToArray()));
+                body.Append("],\"orders\":[");
+                body.Append(string.Join(",", orderBatch.Values.ToArray()));
+                body.Append("],\"positions\":[");
+                body.Append(string.Join(",", positionBatch.Values.ToArray()));
                 body.Append("]}");
 
                 string response;
@@ -384,11 +518,23 @@ namespace NinjaTrader.NinjaScript.AddOns
                 if (status >= 200 && status < 300)
                 {
                     lock (gate)
+                    {
                         foreach (KeyValuePair<string, string> item in batch)
                         {
                             string current;
                             if (pending.TryGetValue(item.Key, out current) && current == item.Value) pending.Remove(item.Key);
                         }
+                        foreach (KeyValuePair<string, string> item in orderBatch)
+                        {
+                            string current;
+                            if (pendingOrders.TryGetValue(item.Key, out current) && current == item.Value) pendingOrders.Remove(item.Key);
+                        }
+                        foreach (KeyValuePair<string, string> item in positionBatch)
+                        {
+                            string current;
+                            if (pendingPositions.TryGetValue(item.Key, out current) && current == item.Value) pendingPositions.Remove(item.Key);
+                        }
+                    }
                     lastPost = now;
                     if (failures > 0) OutputNote("Connected to TradeLoop again.");
                     failures = 0;
@@ -506,6 +652,12 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             if (sb.Length > 1 && sb[sb.Length - 1] == ',') sb.Length--;
             return sb.Append(end).ToString();
+        }
+
+        private static string OsDescription()
+        {
+            try { return Environment.OSVersion.ToString(); }
+            catch (Exception) { return null; }
         }
 
         private static void OutputNote(string message)

@@ -3,7 +3,7 @@
 import { useTransition } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import { pauseNinjatraderConnection, retryNinjatraderConnection, setNinjatraderKillSwitch } from "@/app/actions/admin-ninjatrader"
+import { forceReconcileNinjatraderDevice, pauseNinjatraderConnection, retryNinjatraderConnection, revokeNinjatraderDevice, setNinjatraderKillSwitch } from "@/app/actions/admin-ninjatrader"
 
 // The NinjaTrader integration kill switch. On = the integration runs (subject
 // to config); Off = no new connections or syncs. Never touches other providers.
@@ -65,6 +65,39 @@ export function NinjatraderConnectionControls({ connectionId }: { connectionId: 
       <button type="button" disabled={pending} className={btn} onClick={() => run(pauseNinjatraderConnection, "Sync paused.")}>
         Pause
       </button>
+    </div>
+  )
+}
+
+// Per-device admin actions: Reconcile rebuilds the owner's journal (idempotent),
+// Revoke stops that add-on at once (its next post is refused). Neither places an
+// order or affects other providers.
+export function NinjatraderDeviceControls({ deviceId, revoked }: { deviceId: number; revoked: boolean }) {
+  const [pending, startTransition] = useTransition()
+  const run = (fn: (id: number) => Promise<{ ok: boolean; error?: string }>, done: string, confirmText?: string) => {
+    if (confirmText && !window.confirm(confirmText)) return
+    startTransition(async () => {
+      const res = await fn(deviceId)
+      if (res.ok) toast.success(done)
+      else toast.error(res.error ?? "That didn't work.")
+    })
+  }
+  const btn = "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
+  return (
+    <div className="flex justify-end gap-1.5">
+      <button type="button" disabled={pending} className={btn} onClick={() => run(forceReconcileNinjatraderDevice, "Reconcile started.")}>
+        Reconcile
+      </button>
+      {!revoked && (
+        <button
+          type="button"
+          disabled={pending}
+          className={cn(btn, "text-[var(--loss)]")}
+          onClick={() => run(revokeNinjatraderDevice, "Device revoked.", "Revoke this add-on?\n\nIts next sync is refused and the trader must download or pair a new one. Trades already imported are kept.")}
+        >
+          Revoke
+        </button>
+      )}
     </div>
   )
 }

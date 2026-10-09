@@ -1,4 +1,4 @@
-import type { AssetClass, NormalizedExecution } from "@/lib/providers/types"
+import type { AssetClass, NormalizedExecution, NormalizedOrder, NormalizedPosition } from "@/lib/providers/types"
 
 // What the TradeLoop add-on for NinjaTrader 8 posts (lib/ninjatrader/addon-source.ts),
 // validated and turned into the provider-neutral model. Pure, so it's tested
@@ -13,12 +13,17 @@ import type { AssetClass, NormalizedExecution } from "@/lib/providers/types"
 export const PAYLOAD_VERSION = 1
 export const MAX_EXECUTIONS = 5000
 export const MAX_ACCOUNTS = 200
+export const MAX_ORDERS = 5000
+export const MAX_POSITIONS = 500
 export const ENVIRONMENT = "desktop"
 
 export interface NtClient {
   version: string | null
   machine: string | null
   timeZone: string | null
+  os: string | null
+  installationId: string | null
+  queued: number | null // events the add-on still has to send (its local queue depth)
 }
 
 export interface NtAccount {
@@ -36,6 +41,11 @@ export interface NtParsed {
   client: NtClient
   accounts: NtAccount[]
   executions: NormalizedExecution[]
+  // Orders and positions are supplementary context (Phase 2): the journal
+  // trades are still built from executions alone. Both are optional in the
+  // payload, so an older add-on that posts only executions keeps working.
+  orders: NormalizedOrder[]
+  positions: NormalizedPosition[]
   rejected: { index: number; reason: string }[]
 }
 
@@ -126,17 +136,124 @@ export function brokerFor(provider: string | null): string {
   return provider!.slice(0, 40)
 }
 
+// NinjaTrader's OrderState enum → a provider-neutral lifecycle status. The
+// full lifecycle is observed because the add-on posts every OrderUpdate, not
+// just the final state; one provider_orders row per order holds the latest.
+export function orderStatusOf(state: string | null): string {
+  switch ((state ?? "").toLowerCase()) {
+    case "initialized":
+    case "submitted":
+    case "pendingsubmit":
+      return "submitted"
+    case "accepted":
+      return "accepted"
+    case "working":
+    case "changepending":
+    case "triggerpending":
+      return "working"
+    case "partfilled":
+      return "partially_filled"
+    case "filled":
+      return "filled"
+    case "cancelled":
+    case "canceled":
+    case "cancelpending":
+      return "cancelled"
+    case "rejected":
+      return "rejected"
+    default:
+      return "unknown"
+  }
+}
+
+// NinjaTrader's OrderType enum → a provider-neutral type. The exact NinjaTrader
+// value is kept in raw.ntType for stop/target classification (Phase 3).
+export function orderTypeOf(type: string | null): string | null {
+  switch ((type ?? "").toLowerCase()) {
+    case "market":
+      return "market"
+    case "limit":
+      return "limit"
+    case "stopmarket":
+    case "stop":
+      return "stop"
+    case "stoplimit":
+      return "stop_limit"
+    case "mit":
+    case "marketiftouched":
+      return "market_if_touched"
+    default:
+      return type ? type.toLowerCase().slice(0, 32) : null
+  }
+}
+
+// Stop-loss / take-profit classification (Phase 3). Only a reliable signal
+// classifies an order; anything else stays "unknown" — a plain order is never
+// guessed to be a stop or a target. Reliable signals:
+//   • NinjaTrader's own protective order names (ATM / strategy orders are named
+//     "Stop loss", "Profit target", "Stop1", "Target1", …).
+//   • A clear OCO bracket: a stop-type and a limit-type leg sharing one OCO
+//     group — then the stop leg is the stop and the limit leg is the target.
+// An OCO of two stops (a breakout) has no limit leg, so it stays "unknown".
+export type OrderPurpose = "stop" | "target" | "unknown"
+const STOP_NAME = /stop\s*loss|stoploss|^stop\s*\d*$/i
+const TARGET_NAME = /profit\s*target|take\s*profit|^target\s*\d*$|^tp\s*\d*$/i
+const STOP_TYPE = /^stop/i // StopMarket, StopLimit
+const LIMIT_TYPE = /^limit$/i
+const raw = (o: NormalizedOrder, k: string): string | null => {
+  const v = o.raw[k]
+  return typeof v === "string" && v !== "" ? v : null
+}
+
+function purposeFromName(name: string | null): OrderPurpose {
+  if (name && STOP_NAME.test(name)) return "stop"
+  if (name && TARGET_NAME.test(name)) return "target"
+  return "unknown"
+}
+
+// Sets raw.purpose on each order, in place.
+export function classifyOrderPurposes(orders: NormalizedOrder[]): void {
+  // OCO groups that look like a bracket: they carry both a stop-type leg and a limit-type leg
+  const group = new Map<string, { stop: boolean; limit: boolean }>()
+  for (const o of orders) {
+    const oco = raw(o, "oco")
+    const ntType = raw(o, "ntType")
+    if (!oco || !ntType) continue
+    const g = group.get(oco) ?? { stop: false, limit: false }
+    if (STOP_TYPE.test(ntType)) g.stop = true
+    else if (LIMIT_TYPE.test(ntType)) g.limit = true
+    group.set(oco, g)
+  }
+  for (const o of orders) {
+    let purpose = purposeFromName(raw(o, "name"))
+    if (purpose === "unknown") {
+      const oco = raw(o, "oco")
+      const ntType = raw(o, "ntType")
+      const g = oco ? group.get(oco) : undefined
+      if (g && g.stop && g.limit && ntType) {
+        if (STOP_TYPE.test(ntType)) purpose = "stop"
+        else if (LIMIT_TYPE.test(ntType)) purpose = "target"
+      }
+    }
+    o.raw.purpose = purpose
+  }
+}
+
 export function parsePayload(body: unknown, now = new Date()): ParseResult {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "Body must be a JSON object." }
   const b = body as Record<string, unknown>
   if (b.v !== PAYLOAD_VERSION) return { ok: false, error: `Unsupported payload version — update the TradeLoop add-on.` }
   const rawAccounts = Array.isArray(b.accounts) ? b.accounts : []
   const rawExecutions = Array.isArray(b.executions) ? b.executions : []
+  const rawOrders = Array.isArray(b.orders) ? b.orders : []
+  const rawPositions = Array.isArray(b.positions) ? b.positions : []
   if (rawAccounts.length > MAX_ACCOUNTS) return { ok: false, error: `Too many accounts in one request (max ${MAX_ACCOUNTS}).` }
   if (rawExecutions.length > MAX_EXECUTIONS) return { ok: false, error: `Too many executions in one request (max ${MAX_EXECUTIONS}).` }
+  if (rawOrders.length > MAX_ORDERS) return { ok: false, error: `Too many orders in one request (max ${MAX_ORDERS}).` }
+  if (rawPositions.length > MAX_POSITIONS) return { ok: false, error: `Too many positions in one request (max ${MAX_POSITIONS}).` }
 
   const c = (b.client ?? {}) as Record<string, unknown>
-  const client: NtClient = { version: str(c.version, 32), machine: str(c.machine, 64), timeZone: str(c.timeZone, 64) }
+  const client: NtClient = { version: str(c.version, 32), machine: str(c.machine, 64), timeZone: str(c.timeZone, 64), os: str(c.os, 64), installationId: str(c.install, 64), queued: num(c.queued) }
 
   const accounts: NtAccount[] = []
   const seen = new Set<string>()
@@ -204,5 +321,68 @@ export function parsePayload(body: unknown, now = new Date()): ParseResult {
       metadata: { fullName: str(e.fullName, 64), tickSize: num(e.tickSize) },
     })
   })
-  return { ok: true, value: { client, accounts, executions, rejected } }
+  // Orders — supplementary; an invalid one is dropped quietly (the journal does
+  // not depend on orders). providerOrderId is NinjaTrader's own order id, which
+  // is unique within one NinjaTrader instance (one instance = one connection),
+  // so it is not namespaced — it matches the orderId carried on executions.
+  const orders: NormalizedOrder[] = []
+  for (const raw of rawOrders) {
+    if (!raw || typeof raw !== "object") continue
+    const o = raw as Record<string, unknown>
+    const account = str(o.account)
+    const id = str(o.id, 200)
+    const root = str(o.root, 32)
+    if (!account || !id || !root) continue
+    const { symbol } = symbolFor(root, str(o.expiry, 16), str(o.instrumentType, 32))
+    const submitted = typeof o.time === "string" ? new Date(o.time) : null
+    const ntState = str(o.state, 32)
+    const ntType = str(o.orderType, 32)
+    orders.push({
+      provider: "ninjatrader",
+      environment: ENVIRONMENT,
+      providerOrderId: id,
+      providerAccountId: account,
+      symbol,
+      contractId: null,
+      side: o.side === "buy" || o.side === "sell" ? o.side : null,
+      quantity: num(o.qty),
+      orderType: orderTypeOf(ntType),
+      limitPrice: num(o.limitPrice),
+      stopPrice: num(o.stopPrice),
+      status: orderStatusOf(ntState),
+      submittedAt: submitted && !Number.isNaN(submitted.getTime()) && submitted.getUTCFullYear() >= 2000 ? submitted : null,
+      // raw keeps what stop/target classification (Phase 3) and the UI need
+      raw: { ntState, ntType, name: str(o.name, 64), oco: str(o.oco, 64), filled: num(o.filled), avgFillPrice: num(o.avgFillPrice), timeInForce: str(o.tif, 16) },
+    })
+  }
+
+  // Positions — the current snapshot for the accounts the add-on reports.
+  // netQuantity is signed; a flat position (0) tells the store to clear it.
+  const positions: NormalizedPosition[] = []
+  for (const raw of rawPositions) {
+    if (!raw || typeof raw !== "object") continue
+    const p = raw as Record<string, unknown>
+    const account = str(p.account)
+    const root = str(p.root, 32)
+    if (!account || !root) continue
+    const { symbol } = symbolFor(root, str(p.expiry, 16), str(p.instrumentType, 32))
+    const market = (str(p.marketPosition, 16) ?? "").toLowerCase()
+    const qty = Math.abs(num(p.qty) ?? 0)
+    const netQuantity = market === "short" ? -qty : market === "long" ? qty : 0
+    positions.push({
+      provider: "ninjatrader",
+      environment: ENVIRONMENT,
+      providerAccountId: account,
+      contractId: symbol,
+      symbol,
+      netQuantity,
+      averagePrice: num(p.avgPrice),
+      updatedAt: now,
+    })
+  }
+
+  // classify stop-loss / take-profit, reliably or not at all (Phase 3)
+  classifyOrderPurposes(orders)
+
+  return { ok: true, value: { client, accounts, executions, orders, positions, rejected } }
 }
