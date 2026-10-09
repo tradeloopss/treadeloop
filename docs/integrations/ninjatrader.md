@@ -11,14 +11,26 @@ NinjaTrader can run two ways, both read-only (nothing places, changes or
 cancels orders) and both feeding the same pipeline (the provider-neutral
 tables → `buildProviderTrades`):
 
-- **On TradeLoop's own server, with credentials — the default when it's set
-  up.** The trader enters their Tradovate login in TradeLoop, like MetaTrader;
-  NinjaTrader runs on a Windows server of ours and syncs on its own, no PC of
-  the trader's needed. See "Credentials, on the VPS" below.
-- **On the trader's own PC.** The trader installs a one-file add-on into their
-  own NinjaTrader; it syncs while that's open. See "The add-on, on the PC".
+- **On the trader's own machine (or their VPS) — the production path.** The
+  trader logs into NinjaTrader themselves and installs a one-file add-on; it
+  syncs while NinjaTrader is open. TradeLoop stores no broker password on this
+  path. See "The add-on, on the PC".
+- **On TradeLoop's own server, with credentials — disabled in production.**
+  The trader would enter their Tradovate login in TradeLoop (like MetaTrader)
+  and NinjaTrader on a Windows server of ours would sync it. This path stores
+  the Tradovate password (encrypted), so it is **gated off**: the Accounts page
+  never shows the login form (`ninjaVps: false` in `accounts-section.tsx`) and
+  the action is behind the `tradovate_vps` feature flag and
+  `NINJATRADER_RELAY_SECRET`. Kept for reference below; not part of the shipped
+  flow.
 
-## Credentials, on the VPS (like MetaTrader)
+## Credentials, on the VPS (like MetaTrader) — DISABLED in production
+
+> This path is **not used by the shipped product**: the login form is hidden
+> (`ninjaVps: false`) and gated behind the `tradovate_vps` feature flag. It
+> stores the Tradovate password (encrypted), which the production add-on path
+> deliberately avoids. Documented here for reference only; do not enable it
+> without a separate decision.
 
 Enabled by setting `NINJATRADER_RELAY_SECRET` on the app and running the
 NinjaTrader worker and the Windows server (`worker/ninjatrader`). Add account →
@@ -80,18 +92,37 @@ and the provisioner drops the connection.
 
 Where the VPS path isn't set up, the trader can run the add-on in their own
 NinjaTrader. A small TradeLoop add-on, one C# file using NinjaScript (NinjaTrader's public
-add-on API), reads the trader's executions inside NinjaTrader and posts them to
-TradeLoop. TradeLoop builds trades from them with the same engine as every
-other fill-based broker.
+add-on API), reads the trader's executions — and, from add-on **1.1.0**, their
+orders and positions — inside NinjaTrader and posts them to TradeLoop. TradeLoop
+builds trades from the fills with the same engine as every other fill-based
+broker.
 
 - **No Tradovate API.** No Tradovate password, session or cookie reaches
   TradeLoop, and nothing scrapes Tradovate.
 - **Read-only.** The add-on never places, changes or cancels orders. A test
-  checks that the file contains no order calls.
+  compiles the generated file and checks it contains no order-entry calls.
 - **Other connections too.** Any account NinjaTrader connects works the same
   way. NinjaTrader's local simulation (Sim101, playback) is skipped. A Rithmic
   account that TradeLoop already syncs directly is skipped too, so its trades
   aren't counted twice.
+- **Orders & positions (1.1.0).** `Account.OrderUpdate` / `PositionUpdate` are
+  captured into `provider_orders` (current state, not an immutable transition
+  log) and `provider_positions` (a snapshot; a flat position clears it). An
+  order is labelled a stop or target only from NinjaTrader's protective order
+  names or a clear OCO bracket — otherwise it is left unknown, never guessed.
+  Older 1.0.0 add-ons that send executions only keep working unchanged.
+- **Status & reconcile.** Each post updates a heartbeat and the layered status
+  shown in the app (connector / NinjaTrader / broker — each *unknown* rather
+  than a false *connected*). "Reconcile" rebuilds the journal from the stored
+  fills; it is idempotent and never deletes trustworthy records.
+- **Pairing (optional).** Instead of downloading the file while signed in, the
+  trader can generate a short code in TradeLoop and enter it at `/connect` on
+  the VPS to fetch the same keyed add-on without signing in there. The code is
+  single-use and expires in 10 minutes. The keyed download still works.
+- **History is going-forward.** NinjaScript exposes the current session's
+  executions, not deep history. So live and reconnect-resend sync are reliable;
+  there is **no unlimited historical backfill** — only what NinjaTrader lists
+  under Executions for the running session.
 
 ```
 NinjaTrader 8 (trader's PC)                      TradeLoop
