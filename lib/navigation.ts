@@ -32,7 +32,7 @@ export type NavIcon =
   | "tests"
   | "replay"
 
-export type SectionId = "journal" | "account-manager" | "propsync" | "edge-lab" | "backtesting" | "agents"
+export type SectionId = "journal" | "account-manager" | "propsync" | "edge-lab" | "copy-trading" | "backtesting" | "agents"
 export type FeatureStage = "admin" | "beta"
 
 export type NavItem = {
@@ -97,20 +97,6 @@ export const NAV_SECTIONS: NavSection[] = [
     tagline: "Manage your live trading accounts.",
     items: [
       { id: "trade-manager", label: "Trade Manager", icon: "tradeManager", href: "/trade-manager", plan: "pro" },
-      {
-        id: "copy-trading",
-        label: "Copy Trading",
-        icon: "copy",
-        href: "/copy-trading",
-        feature: "copy_trading",
-        children: [
-          { id: "copy-dashboard", label: "Copy Dashboard", href: "/copy-trading", exact: true },
-          { id: "copy-connection", label: "Connection", href: "/copy-trading/connection" },
-          { id: "copy-cockpit", label: "Cockpit", href: "/copy-trading/cockpit" },
-          { id: "copy-risk", label: "Risk Management", href: "/copy-trading/risk-management" },
-          { id: "copy-friends", label: "Friends", href: "/copy-trading/friends" },
-        ],
-      },
     ],
   },
   {
@@ -138,6 +124,21 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "psychology", label: "Psychology", icon: "psychology", href: "/psychology", feature: "psychology", description: "Understand your behavior and decision-making" },
       { id: "edge-journal", label: "Edge Journal", icon: "edgeJournal", href: "/edge-lab/setups", match: ["/edge-lab/monitor"], feature: "edge_lab", description: "Track patterns behind your best and worst trades" },
       { id: "edge-tests", label: "Edge Tests", icon: "tests", href: "/edge-lab/hypotheses", match: ["/edge-lab/robustness"], feature: "edge_lab", description: "Validate whether an edge is repeatable" },
+    ],
+  },
+  {
+    // Its own product area, below Edge Lab. Its pages are the second level,
+    // like every other section; the Cockpit is where a group is run.
+    id: "copy-trading",
+    label: "Copy Trading",
+    icon: "copy",
+    tagline: "Copy a leader account to its followers.",
+    items: [
+      { id: "copy-dashboard", label: "Copy Dashboard", icon: "overview", href: "/copy-trading", exact: true, feature: "copy_trading", description: "Your groups, followers and copy activity" },
+      { id: "copy-connection", label: "Connection", icon: "accounts", href: "/copy-trading/connection", feature: "copy_trading", description: "Connect the accounts you copy to and from" },
+      { id: "copy-cockpit", label: "Cockpit", icon: "copy", href: "/copy-trading/cockpit", feature: "copy_trading", description: "Run a copy group: followers, orders and risk" },
+      { id: "copy-risk", label: "Risk Management", icon: "tests", href: "/copy-trading/risk-management", feature: "copy_trading", description: "The limits that guard every copied order" },
+      { id: "copy-friends", label: "Friends", icon: "agents", href: "/copy-trading/friends", feature: "copy_trading", description: "Strategies you share with friends" },
     ],
   },
   {

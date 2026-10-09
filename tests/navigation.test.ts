@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { NAV_SECTIONS, itemForPath, resolveNavigation, sectionForPath, type NavContext } from "@/lib/navigation"
 
-// The main navigation: six product areas, every page that existed before the
+// The main navigation: seven product areas, every page that existed before the
 // redesign still reachable, and what isn't released impossible to open.
 
 const user: NavContext = { isAdmin: false, isPro: true, hasBeta: false, features: {} }
@@ -10,8 +10,8 @@ const admin: NavContext = { isAdmin: true, isPro: true, hasBeta: false, features
 const items = (ctx: NavContext) => resolveNavigation(ctx).flatMap((s) => s.items)
 const byId = (ctx: NavContext, id: string) => items(ctx).find((i) => i.id === id)!
 
-test("the six product areas, in order", () => {
-  assert.deepEqual(NAV_SECTIONS.map((s) => s.label), ["Journal", "Account Manager", "PropSync", "Edge Lab", "Backtesting", "Agents"])
+test("the seven product areas, in order", () => {
+  assert.deepEqual(NAV_SECTIONS.map((s) => s.label), ["Journal", "Account Manager", "PropSync", "Edge Lab", "Copy Trading", "Backtesting", "Agents"])
   assert.deepEqual(NAV_SECTIONS[0].items.map((i) => i.label), ["Dashboard", "Journal", "Trades", "Calendar", "Reports", "Playbooks"])
   assert.equal(NAV_SECTIONS[0].action?.href, "/add-trade")
   assert.deepEqual(NAV_SECTIONS[3].items.map((i) => i.label), ["Edge Overview", "Edge Discovery", "Psychology", "Edge Journal", "Edge Tests"])
@@ -67,7 +67,7 @@ test("the page follows the address, the most specific entry winning", () => {
 })
 
 test("what isn't released can't be opened by a user", () => {
-  for (const id of ["copy-trading", "propsync-tracker", "backtesting", "replay", "agents"]) {
+  for (const id of ["copy-cockpit", "propsync-tracker", "backtesting", "replay", "agents"]) {
     const item = byId(user, id)
     assert.equal(item.enabled, false, id)
     assert.equal(item.badge, "soon", id)
@@ -77,11 +77,13 @@ test("what isn't released can't be opened by a user", () => {
   assert.deepEqual(sections.filter((s) => !s.enabled).map((s) => s.id), ["agents"])
   // a page with no address is closed to everyone, the team included
   assert.equal(byId(admin, "agents").enabled, false)
-  // Copy Trading follows its own release stage, and lists its four pages
-  assert.deepEqual([byId(admin, "copy-trading").enabled, byId(admin, "copy-trading").badge], [true, "admin"])
-  assert.deepEqual(byId(admin, "copy-trading").children?.map((c) => c.label), ["Copy Dashboard", "Connection", "Cockpit", "Risk Management", "Friends"])
-  assert.equal(sectionForPath("/copy-trading/risk-management"), "account-manager")
-  assert.equal(itemForPath("/copy-trading/cockpit")?.item.id, "copy-trading")
+  // Copy Trading is its own product area below Edge Lab; its five pages follow the copy_trading release stage
+  const copy = resolveNavigation(admin).find((s) => s.id === "copy-trading")!
+  assert.deepEqual(copy.items.map((i) => i.label), ["Copy Dashboard", "Connection", "Cockpit", "Risk Management", "Friends"])
+  assert.ok(copy.items.every((i) => i.enabled && i.badge === "admin"))
+  assert.ok(resolveNavigation(user).find((s) => s.id === "copy-trading")!.items.every((i) => !i.enabled && i.badge === "soon"))
+  assert.equal(sectionForPath("/copy-trading/risk-management"), "copy-trading")
+  assert.equal(itemForPath("/copy-trading/cockpit")?.item.id, "copy-cockpit")
 })
 
 test("the team keeps a way in to what it is still testing", () => {

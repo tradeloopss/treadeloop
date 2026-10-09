@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { ArrowDown, ArrowDownRight, ArrowUpRight, CircleAlert, CircleCheck, Crown, Download, Info, SlidersHorizontal, TriangleAlert } from "lucide-react"
+import { ArrowDown, ArrowDownRight, ArrowUpRight, ChevronDown, CircleAlert, CircleCheck, Crown, Download, Info, SlidersHorizontal, TriangleAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { readCopyAlerts, retryCopyOrder } from "@/app/actions/copy-trading"
 import { formatQuantity } from "@/lib/copy/contracts"
@@ -226,6 +226,7 @@ function SideCell({ side }: { side: "buy" | "sell" }) {
 export function OrderHistory({ orders }: { orders: OrderView[] }) {
   const { account } = useCopy()
   const [bucket, setBucket] = useState<OrderBucket | "all">("all")
+  const [expanded, setExpanded] = useState(false)
   const [filters, setFilters] = useState(false)
   const [from, setFrom] = useState("")
   const [accountId, setAccountId] = useState("")
@@ -248,6 +249,10 @@ export function OrderHistory({ orders }: { orders: OrderView[] }) {
   }, [orders])
   const filtered = useMemo(() => lines.filter((l) => (!from || l.at.slice(0, 10) >= from) && (!accountId || l.accountId === Number(accountId)) && (!connection || account(l.accountId)?.platform === connection) && (!contract || l.contract === contract) && (!side || l.side === side)), [lines, from, accountId, connection, contract, side, account])
   const rows = bucket === "all" ? filtered : filtered.filter((l) => l.bucket === bucket)
+  // Only the latest few until "Show more" is pressed, so the Cockpit stays compact.
+  const COLLAPSED = 3
+  const deskRows = rows.slice(0, expanded ? 200 : COLLAPSED)
+  const mobRows = rows.slice(0, expanded ? 60 : COLLAPSED)
   const count = (b: OrderBucket) => filtered.filter((l) => l.bucket === b).length
   const accounts = [...new Set(lines.map((l) => l.accountId))]
   const active = [from, accountId, connection, contract, side].filter(Boolean).length
@@ -327,7 +332,7 @@ export function OrderHistory({ orders }: { orders: OrderView[] }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {rows.slice(0, 200).map((l) => {
+                {deskRows.map((l) => {
                   const lat = l.order ? latencyParts(l.order) : null
                   return (
                     <tr key={l.key} title={l.reason ?? undefined} className={cn("hover:bg-muted/40", l.leader && "bg-amber-500/[0.05]")}>
@@ -366,7 +371,7 @@ export function OrderHistory({ orders }: { orders: OrderView[] }) {
             </table>
           </div>
           <ul className="divide-y md:hidden">
-            {rows.slice(0, 60).map((l) => (
+            {mobRows.map((l) => (
               <li key={l.key} className="space-y-1 px-3 py-2.5 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground tabular-nums">{when(l.at)}</span>
@@ -394,8 +399,16 @@ export function OrderHistory({ orders }: { orders: OrderView[] }) {
               </li>
             ))}
           </ul>
+          {rows.length > COLLAPSED && (
+            <div className="border-t px-3 py-2 text-center">
+              <button type="button" onClick={() => setExpanded((v) => !v)} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium text-primary transition-colors hover:bg-muted/60">
+                {expanded ? "Show less" : `Show more (${rows.length - COLLAPSED})`}
+                <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} aria-hidden />
+              </button>
+            </div>
+          )}
           <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-            {rows.length > 200 ? `Showing the latest 200 of ${rows.length}; the export has them all. ` : ""}
+            {expanded && rows.length > 200 ? `Showing the latest 200 of ${rows.length}; the export has them all. ` : ""}
             Latency is TradeLoop&apos;s part plus the broker&apos;s own answer time, for live orders the copy lane sent. Hover a failed order for the reason.
           </p>
         </>
