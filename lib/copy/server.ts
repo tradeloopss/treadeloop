@@ -41,14 +41,23 @@ export const LANE_FRESH_MS = 20_000
 export const MAX_GROUPS = 20
 
 // What the trader's plan includes of Copy Trading (lib/plan-allowance.ts): how
-// many Copy Groups, and how many accounts in each. Asked of the plan on the
-// server for every group made, every follower added and every group switched
-// on, whatever the page showed. (A test tells it who is on which plan.)
+// many Copy Groups, and how many accounts across them all. Asked of the plan on
+// the server for every group made, every follower added and every group
+// switched on, whatever the page showed. (A test tells it who is on which plan.)
 let allowanceReader: (userId: string) => Promise<CopyAllowance> = async (userId) => copyAllowance(await isPro(userId))
 export function setAllowanceReader(reader: (userId: string) => Promise<CopyAllowance>) {
   allowanceReader = reader
 }
 export const allowanceOf = (userId: string): Promise<CopyAllowance> => allowanceReader(userId)
+
+// Accounts a trader uses across all their Copy Groups, Leaders included: one
+// Leader per group plus every follower row. The plan's `accounts` is this total
+// (lib/plan-allowance.ts), so adding to one group counts against every other.
+async function usedSeats(userId: string): Promise<number> {
+  const [g] = await db.select({ n: sql<number>`count(*)::int` }).from(copyGroups).where(eq(copyGroups.userId, userId))
+  const [f] = await db.select({ n: sql<number>`count(*)::int` }).from(copyGroupFollowers).where(eq(copyGroupFollowers.userId, userId))
+  return Number(g?.n ?? 0) + Number(f?.n ?? 0)
+}
 export const MAX_FOLLOWERS = 25
 export const MAX_CONTRACTS = 30
 
@@ -570,7 +579,10 @@ export async function createGroup(userId: string, input: GroupInput): Promise<nu
   await comply(userId, { leader, followers: followers.map((f) => f.accountId), action: "create_group" })
   const existing = await db.select({ id: copyGroups.id, name: copyGroups.name }).from(copyGroups).where(eq(copyGroups.userId, userId))
   if (existing.length >= MAX_GROUPS) throw new Error(`You can have up to ${MAX_GROUPS} copy groups.`)
-  const over = copyAllowanceProblem(await allowanceOf(userId), { groups: existing.length, accounts: { want: followers.length + 1 } })
+  // the plan's accounts are a total across every group: the seats this new one
+  // adds (its Leader and followers) count against the seats already in use
+  const used = await usedSeats(userId)
+  const over = copyAllowanceProblem(await allowanceOf(userId), { groups: existing.length, accounts: { want: used + followers.length + 1, had: used } })
   if (over) throw new Error(over)
   if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) throw new Error("You already have a group with that name.")
   const rules = cleanRules(input.rules)
@@ -680,8 +692,12 @@ export async function saveFollowers(userId: string, groupId: number, input: Foll
   await ownAccounts(userId, list.map((f) => f.accountId))
   await comply(userId, { leader: g.leaderAccountId, followers: list.map((f) => f.accountId), groupId, action: "save_followers" })
   const existing = await db.select().from(copyGroupFollowers).where(eq(copyGroupFollowers.groupId, groupId))
-  // more accounts than the plan includes: what the group has is kept, another is not taken
-  const over = copyAllowanceProblem(await allowanceOf(userId), { accounts: { want: list.length + 1, had: existing.length + 1 } })
+  // more accounts than the plan's total across all groups: what is there is
+  // kept, another is not taken. `used` counts every group as it stands now
+  // (this one included); swapping this group's followers for `list` changes the
+  // total by the difference, so the Leader on each side cancels out.
+  const used = await usedSeats(userId)
+  const over = copyAllowanceProblem(await allowanceOf(userId), { accounts: { want: used - existing.length + list.length, had: used } })
   if (over) throw new Error(over)
   const gone = existing.filter((e) => !list.some((f) => f.accountId === e.accountId))
   if (gone.length) {

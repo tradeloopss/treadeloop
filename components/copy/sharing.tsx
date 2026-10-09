@@ -54,6 +54,13 @@ export function SharePanel({ account }: { account: AccountView }) {
       </p>
       {!account.sharing.ok ? (
         <p className="mt-1.5 text-xs text-muted-foreground">{account.sharing.reason}</p>
+      ) : !share && state.allowance.plan !== "pro" ? (
+        <div className="mt-2 space-y-2.5">
+          <p className="text-xs text-muted-foreground">Sharing a strategy with friends is on Pro. Invite people to copy this account&apos;s trades onto their own broker accounts, at sizes and limits they choose.</p>
+          <Link href="/pricing" className={linkBtnPrimary}>
+            Upgrade to Pro
+          </Link>
+        </div>
       ) : !share ? (
         <div className="mt-2 space-y-2.5">
           <p className="text-xs text-muted-foreground">Friends you invite can copy this account&apos;s trades onto their own broker accounts, at sizes and limits they choose. They see the trades and nothing else: no balance, no login. They can never trade on it.</p>

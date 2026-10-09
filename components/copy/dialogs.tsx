@@ -299,7 +299,11 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
   // what the plan includes (lib/plan-allowance.ts): said here, and held to on the server
   const { allowance } = state
   const groupLimit = copyAllowanceProblem(allowance, { groups: state.groups.length })
-  const roomForFollower = followers.length + 1 < allowance.accounts
+  // the plan's accounts are a total across every group: seats already used in the
+  // trader's other groups (a Leader and its followers each) leave this new group less
+  const usedSeats = state.groups.reduce((n, g) => n + 1 + g.followers.length, 0)
+  const seatsLeft = Math.max(0, allowance.accounts - usedSeats) // seats this new group may use, its Leader included
+  const roomForFollower = followers.length + 1 < allowance.accounts - usedSeats
   // the Leader is a friend's shared strategy: only the trader's own broker accounts may copy it
   const sharedLeader = !!byId.get(leader ?? -1)?.shared
   const problems = activationProblems({ hasLeader: leader != null, leaderConnected: isOnline(byId.get(leader ?? -1)), followers: followers.map((f) => ({ name: byId.get(f.accountId)?.name ?? "Follower", config: f.config, connected: isOnline(byId.get(f.accountId)) })), contracts: contracts.length, symbolScope: rules.symbolScope })
@@ -381,11 +385,13 @@ export function GroupWizard({ open, onClose }: { open: boolean; onClose: () => v
               <fieldset className="space-y-2">
                 <legend className="mb-1 text-sm font-medium">Which accounts copy it?</legend>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Your plan includes up to {allowance.accounts} accounts in a Copy Group: the Leader and {allowance.accounts - 1} {allowance.accounts - 1 === 1 ? "Follower" : "Followers"}.{allowance.plan === "essential" && " Pro includes 5."}
+                  {allowance.plan === "pro"
+                    ? `Pro includes ${allowance.accounts} accounts in total across your copy groups${usedSeats > 0 ? `; ${seatsLeft} left` : ""}. This group can have a Leader and ${Math.max(0, seatsLeft - 1)} ${seatsLeft - 1 === 1 ? "Follower" : "Followers"}.`
+                    : `Your plan includes up to ${allowance.accounts} accounts in a Copy Group: the Leader and ${allowance.accounts - 1} ${allowance.accounts - 1 === 1 ? "Follower" : "Followers"}. Pro includes 15 accounts across your copy groups.`}
                 </p>
                 {state.accounts.filter((a) => a.id !== leader).map((a) => {
                   const on = followers.some((f) => f.accountId === a.id)
-                  if (!on && !roomForFollower) return <AccountOption key={a.id} a={a} type="checkbox" checked={false} disabled note="your plan's accounts for one group are taken" onChange={() => {}} />
+                  if (!on && !roomForFollower) return <AccountOption key={a.id} a={a} type="checkbox" checked={false} disabled note={allowance.plan === "pro" ? "your plan's accounts are all in use" : "your plan's accounts for this group are taken"} onChange={() => {}} />
                   // a friend's strategy is copied to broker accounts only (lib/compliance/kind.ts)
                   if (sharedLeader && !a.sharing.ok) return <AccountOption key={a.id} a={a} type="checkbox" checked={false} disabled note="not a broker account: it can't copy a friend's strategy" onChange={() => {}} />
                   return <AccountOption key={a.id} a={a} type="checkbox" checked={on} note={state.mode === "live" && !a.canExecute ? "can't receive live orders" : undefined} onChange={() => setFollowers((list) => (on ? list.filter((f) => f.accountId !== a.id) : [...list, { accountId: a.id, config: { ...DEFAULT_FOLLOWER } }]))} />

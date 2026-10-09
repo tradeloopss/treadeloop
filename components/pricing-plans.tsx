@@ -48,7 +48,7 @@ const PLANS: Plan[] = [
         items: [
           { text: "1 copy group, up to 2 accounts", included: true },
           { text: "Per-follower sizing & risk limits", included: true },
-          { text: "Share strategies with friends", included: true },
+          { text: "Share strategies with friends", included: false },
         ],
       },
       {
@@ -91,7 +91,7 @@ const PLANS: Plan[] = [
       {
         title: "Copy Trading",
         items: [
-          { text: "3 copy groups, up to 5 accounts each", included: true },
+          { text: "Up to 3 copy groups, 15 accounts in total", included: true },
           { text: "Per-follower sizing & risk limits", included: true },
           { text: "Share strategies with friends", included: true },
         ],

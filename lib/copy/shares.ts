@@ -5,6 +5,7 @@ import { copyGroups, copyShareMembers, copyShares, metatraderConnections, propAc
 import { detectProvider } from "@/lib/compliance/engine"
 import { accountKind, type AccountFacts, type AccountKind } from "@/lib/compliance/kind"
 import { ruleSets } from "@/lib/compliance/server"
+import { isPro } from "@/lib/subscription"
 import { MAX_FRIENDS } from "./friends"
 
 // Sharing a strategy with friends. A trader lets the people they invite copy
@@ -95,6 +96,8 @@ export async function listShares(ownerId: string): Promise<ShareView[]> {
 // the trader says so themselves as well: what can be told from here is not all there is to know.
 export async function createShare(ownerId: string, input: { accountId: number; name: unknown; attested: boolean }): Promise<ShareView> {
   const accountId = Number(input.accountId)
+  // sharing a strategy with friends is a Pro feature (components/pricing-plans.tsx)
+  if (!(await isPro(ownerId))) throw new Error("Sharing a strategy with friends is on Pro. Upgrade at /pricing to share your strategy.")
   const name = cleanName(input.name)
   if (name.length < 2) throw new Error("Give the strategy a name your friends will recognise.")
   const facts = (await accountFacts([accountId])).get(accountId)
