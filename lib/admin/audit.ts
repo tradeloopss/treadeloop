@@ -105,6 +105,9 @@ export const ACTION_LABELS: Record<string, string> = {
   "affiliate.export": "Exported affiliate data",
   "affiliate.dashboard_v2": "Changed the affiliate dashboard V2 rollout",
   "admin.dashboard_version": "Switched admin dashboard version",
+  "ninjatrader.kill_switch": "Turned the NinjaTrader integration on or off",
+  "ninjatrader.retry": "Retried a NinjaTrader connection's sync",
+  "ninjatrader.pause": "Paused a NinjaTrader connection's sync",
 }
 
 export async function logAdminAction(
