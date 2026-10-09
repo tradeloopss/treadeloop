@@ -15,6 +15,7 @@ import { tradovateAvailability } from "@/lib/tradovate/config"
 import { tradovateConnectionsFor } from "@/lib/tradovate/connections"
 import { ninjaTraderViewFor, type NinjaTraderView } from "@/lib/ninjatrader/connections"
 import { listCredentials, type NinjaCredentialView } from "@/lib/ninjatrader/credentials"
+import { featureAccess } from "@/lib/features/server"
 
 const num = (v: string | number | null | undefined) => (v == null || v === "" ? null : Number(v))
 
@@ -62,7 +63,7 @@ export async function AccountsSection({
   const initialPlatform = CONNECTABLE.find((p) => p === connect) ?? (tradovateParam ? "tradovate" : null)
   const t = await getT()
   const session = await auth.api.getSession({ headers: await headers() })
-  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate, ninjatrader, ninjaCreds] = await Promise.all([
+  const [accounts, rithmic, metatrader, tradingview, pairings, pro, owner, tradovate, ninjatrader, ninjaCreds, features] = await Promise.all([
     getAccounts(true),
     getRithmicConnections(),
     getMetaTraderConnections(),
@@ -89,8 +90,10 @@ export async function AccountsSection({
           return []
         })
       : Promise.resolve([]),
+    featureAccess().catch(() => null),
   ])
   const tradovateStatus = tradovateAvailability()
+  const managedVps = features?.can.managed_vps === true
 
   // Essential's allowance (lib/plan-allowance.ts), counted the way
   // lib/plan-limits.ts enforces it: every account, archived ones included.
@@ -363,6 +366,10 @@ export async function AccountsSection({
         // NinjaTrader holds one signed-in user. Tradovate accounts connect through the add-on instead
         // (the trader signs in to their own NinjaTrader — on their PC, or a session on the VPS — once).
         ninjaVps: false,
+        // When the managed-VPS feature is released to this user it becomes the
+        // only Tradovate option (the add-on download/pairing, credential login
+        // and OAuth bodies are all hidden). Off by default (admin test only).
+        managedVps,
       }}
     />
   )

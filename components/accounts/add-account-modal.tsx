@@ -19,6 +19,7 @@ import type { TradingViewPairingView } from "@/app/actions/tradingview"
 import { ConnectionStepper } from "@/components/accounts/connection-stepper"
 import { TradovateConnect, TradovateProgress, type TradovateProgressState } from "@/components/accounts/tradovate-connect"
 import { NinjaTraderSetup, type NinjaTraderSetupState } from "@/components/accounts/ninjatrader-setup"
+import { ManagedVpsConnect } from "@/components/accounts/managed-vps-connect"
 import { TradovateCredentials, type TradovateCredentialsState } from "@/components/accounts/tradovate-credentials"
 import { Badge, PlatformCard, type PlatformBadge } from "@/components/accounts/platform-card"
 import type { PlatformId } from "@/components/accounts/types"
@@ -51,6 +52,10 @@ export interface TradovateSetup {
   // The VPS NinjaTrader relay is configured, so Tradovate can be connected with
   // credentials (like MetaTrader). When off, the PC add-on setup is shown.
   ninjaVps: boolean
+  // The managed-VPS flow is released to this user (managed_vps feature). When
+  // on, it is the ONLY Tradovate option — the local add-on download/pairing,
+  // credential login and OAuth bodies are all hidden.
+  managedVps: boolean
 }
 
 type Outcome =
@@ -419,6 +424,10 @@ export function AddAccountModal({
           onBack={() => setStage("choose")}
         />
       )
+    } else if (def.id === "tradovate" && tradovate.managedVps) {
+      // The managed-VPS flow is the only Tradovate option when released: no
+      // local add-on download, pairing, credential login or OAuth body.
+      body = <ManagedVpsConnect onDone={done} onFile={() => goConnect("file")} />
     } else if (def.id === "tradovate" && tradovate.enabled) {
       body =
         tradovateProgressId != null ? (

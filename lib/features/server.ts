@@ -42,7 +42,7 @@ export const featureAccess = cache(async (): Promise<FeatureAccess> => {
     userId: session?.user?.id ?? null,
     isAdmin,
     releases,
-    can: { edge_lab: signedIn && canUseFeature(releases.edge_lab, isAdmin), psychology: signedIn && canUseFeature(releases.psychology, isAdmin), copy_trading: copyTrading, tradovate_vps: signedIn && canUseFeature(releases.tradovate_vps, isAdmin) },
+    can: { edge_lab: signedIn && canUseFeature(releases.edge_lab, isAdmin), psychology: signedIn && canUseFeature(releases.psychology, isAdmin), copy_trading: copyTrading, tradovate_vps: signedIn && canUseFeature(releases.tradovate_vps, isAdmin), managed_vps: signedIn && canUseFeature(releases.managed_vps, isAdmin) },
   }
 })
 

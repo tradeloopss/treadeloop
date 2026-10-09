@@ -13,6 +13,7 @@ export const FEATURES = [
   { key: "psychology", label: "Psychology", href: "/psychology", description: "Shows how behaviour and state of mind change trading results." },
   { key: "copy_trading", label: "Copy Trading", href: "/copy-trading", description: "Copies a leader account to follower accounts, each within its own risk limits." },
   { key: "tradovate_vps", label: "Tradovate by login", href: "/accounts", description: "A trader enters their Tradovate login in Add account, and the NinjaTrader on TradeLoop's own server syncs it. Needs that server running (worker/ninjatrader)." },
+  { key: "managed_vps", label: "Managed VPS (NinjaTrader)", href: "/accounts", description: "Connect Tradovate through a TradeLoop-managed Windows VPS running NinjaTrader + the add-on — the client installs nothing locally. Read-only. Needs a VPS provider configured (see docs/managed-vps-architecture.md)." },
 ] as const
 
 export type FeatureKey = (typeof FEATURES)[number]["key"]
@@ -26,7 +27,7 @@ export const isStage = (v: unknown): v is Stage => v === "admin" || v === "beta"
 export const STAGE_LABELS: Record<Stage, string> = { admin: "Admin test only", beta: "Beta — all users" }
 
 export type Releases = Record<FeatureKey, Stage>
-export const DEFAULT_RELEASES: Releases = { edge_lab: "admin", psychology: "admin", copy_trading: "admin", tradovate_vps: "admin" }
+export const DEFAULT_RELEASES: Releases = { edge_lab: "admin", psychology: "admin", copy_trading: "admin", tradovate_vps: "admin", managed_vps: "admin" }
 
 // Whatever is stored, a feature is only ever in a known stage — and anything
 // unreadable means "admin", never "released".

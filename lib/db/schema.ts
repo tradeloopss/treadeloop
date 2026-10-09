@@ -1057,10 +1057,69 @@ export const providerDeviceKeys = pgTable(
     brokerConnected: boolean("brokerConnected"), // null = unknown
     queueDepth: integer("queueDepth"), // pending events the add-on still has to send, if it reports them
     errorCount: integer("errorCount").notNull().default(0),
+    vpsInstanceId: integer("vpsInstanceId"), // set when this key belongs to a managed-VPS agent (provider "vps_agent")
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     revokedAt: timestamp("revokedAt"),
   },
   (t) => [uniqueIndex("provider_device_keys_hash").on(t.keyHash), index("provider_device_keys_user").on(t.userId, t.provider), index("provider_device_keys_status").on(t.provider, t.status)],
+)
+
+// A TradeLoop-managed Windows VPS running NinjaTrader 8 + the add-on + the
+// TradeLoop VPS agent (docs/managed-vps-architecture.md). One row per client
+// environment. The agent authenticates with a provider_device_keys row
+// (provider "vps_agent", vpsInstanceId set) and is read-only. No broker
+// password is ever stored here — the client authenticates inside NinjaTrader
+// on the prepared VPS, or through an authorized OAuth flow when available.
+export const vpsInstances = pgTable(
+  "vps_instances",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("userId").notNull(),
+    connectionId: integer("connectionId"), // the trading_connection its fills land under, once syncing
+    deviceKeyId: integer("deviceKeyId"), // the agent's provider_device_keys row
+    provider: text("provider").notNull(), // which VpsProvider created it (e.g. "mock")
+    providerServerId: text("providerServerId"), // the provider's own server id, once created
+    hostname: text("hostname"),
+    publicIp: text("publicIp"),
+    region: text("region"),
+    operatingSystem: text("operatingSystem"),
+    // lifecycle: provisioning | installing | configuring | ready | awaiting_auth | connected | disconnected | error | rebooting | destroying | destroyed
+    status: text("status").notNull().default("provisioning"),
+    provisioningStep: text("provisioningStep"), // the step currently running
+    ninjaTraderStatus: text("ninjaTraderStatus").notNull().default("unknown"), // online | offline | unknown
+    agentStatus: text("agentStatus").notNull().default("unknown"),
+    brokerStatus: text("brokerStatus").notNull().default("unknown"),
+    addonVersion: text("addonVersion"),
+    lastHeartbeatAt: timestamp("lastHeartbeatAt"),
+    lastSyncAt: timestamp("lastSyncAt"),
+    lastError: text("lastError"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (t) => [index("vps_instances_user").on(t.userId), index("vps_instances_status").on(t.provider, t.status), index("vps_instances_due").on(t.status, t.updatedAt)],
+)
+
+// Commands the cloud queues for a VPS agent to poll and run — all read-only
+// (ping, health, sync_now, reconcile, reconnect, collect_logs). Each is
+// single-delivery, expires, and is bound to one instance; the agent posts a
+// result back. No order-entry command exists.
+export const vpsAgentCommands = pgTable(
+  "vps_agent_commands",
+  {
+    id: serial("id").primaryKey(),
+    vpsInstanceId: integer("vpsInstanceId").notNull(),
+    userId: text("userId").notNull(),
+    command: text("command").notNull(),
+    status: text("status").notNull().default("pending"), // pending | delivered | done | failed | expired
+    result: text("result"),
+    issuedBy: text("issuedBy"), // user | admin:<id>
+    expiresAt: timestamp("expiresAt").notNull(),
+    deliveredAt: timestamp("deliveredAt"),
+    completedAt: timestamp("completedAt"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  (t) => [index("vps_agent_commands_poll").on(t.vpsInstanceId, t.status), index("vps_agent_commands_user").on(t.userId)],
 )
 
 // Short-lived pairing codes (the "ABC-123" shown in the dashboard). The add-on

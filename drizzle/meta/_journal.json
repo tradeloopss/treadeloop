@@ -372,6 +372,13 @@
       "when": 1791534378826,
       "tag": "0052_device_connector_state",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1791538448466,
+      "tag": "0053_managed_vps",
+      "breakpoints": true
     }
   ]
 }

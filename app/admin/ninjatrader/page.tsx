@@ -2,8 +2,10 @@ import type { Metadata } from "next"
 import { requireAdmin } from "@/lib/admin/guard"
 import { missingConfiguration, ninjatraderAdminOverview } from "@/lib/tradovate/admin"
 import { ninjatraderDevicesOverview, ninjatraderVpsLoginsOverview } from "@/lib/ninjatrader/admin"
+import { adminVpsOverview } from "@/lib/vps/server"
 import { AdminPageHeader, EmptyRow, Panel, StatePill, StatRow, StatTile, fmtAgo, fmtDateTime } from "@/components/admin/ui"
 import { NinjatraderConnectionControls, NinjatraderDeviceControls, NinjatraderKillSwitch } from "@/components/admin/ninjatrader/controls"
+import { VpsInstanceControls } from "@/components/admin/ninjatrader/vps-controls"
 
 // online / offline / unknown → an admin status pill.
 const layerState: Record<string, string> = { online: "active", offline: "inactive", unknown: "pending" }
@@ -18,7 +20,7 @@ export const metadata: Metadata = { title: "NinjaTrader — TradeLoop admin" }
 // secret or balance is shown.
 export default async function AdminNinjatraderPage() {
   await requireAdmin({ brokers: ["view"] })
-  const [overview, devicesOverview, vps, missing] = await Promise.all([ninjatraderAdminOverview(), ninjatraderDevicesOverview(), ninjatraderVpsLoginsOverview(), Promise.resolve(missingConfiguration())])
+  const [overview, devicesOverview, vps, vpsInstances, missing] = await Promise.all([ninjatraderAdminOverview(), ninjatraderDevicesOverview(), ninjatraderVpsLoginsOverview(), adminVpsOverview(), Promise.resolve(missingConfiguration())])
   const { gate, connections, accounts } = overview
   const { devices } = devicesOverview
 
@@ -193,6 +195,65 @@ export default async function AdminNinjatraderPage() {
                       <td className="px-3 py-2 text-xs text-muted-foreground">{l.lastSeenAt ? fmtAgo(l.lastSeenAt) : "—"}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{l.lastFillAt ? fmtAgo(l.lastFillAt) : "—"}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{l.errorCount || "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <StatRow>
+          <StatTile label="Managed VPS" value={String(vpsInstances.total)} note={`${vpsInstances.online} connected`} />
+          <StatTile label="VPS provider" value={vpsInstances.instances[0]?.simulated === false ? "live" : "mock / simulated"} note="VPS_PROVIDER" />
+        </StatRow>
+
+        <Panel title="Managed VPS instances" description="TradeLoop-managed Windows VPS running NinjaTrader + the add-on + the read-only agent. Health is shown in layers — never a false connected. A simulated (mock) provider is labelled; no real server exists behind it. No key, token, password or balance is shown.">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">User</th>
+                  <th className="px-3 py-2 font-medium">Provider</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">VPS</th>
+                  <th className="px-3 py-2 font-medium">Agent</th>
+                  <th className="px-3 py-2 font-medium">NinjaTrader</th>
+                  <th className="px-3 py-2 font-medium">Broker</th>
+                  <th className="px-3 py-2 font-medium">Last heartbeat</th>
+                  <th className="px-3 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {vpsInstances.instances.length === 0 ? (
+                  <EmptyRow colSpan={9}>No managed VPS instances yet.</EmptyRow>
+                ) : (
+                  vpsInstances.instances.map((v) => (
+                    <tr key={v.id}>
+                      <td className="px-3 py-2 text-xs">{v.userEmail ?? `${v.userId.slice(0, 8)}…`}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {v.provider}
+                        {v.simulated && <span className="ms-1 rounded bg-muted px-1 py-0.5 text-[10px]">simulated</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs capitalize">{v.status.replace(/_/g, " ")}</td>
+                      <td className="px-3 py-2">
+                        <StatePill state={layerState[v.health.vps] ?? "inactive"}>{layerLabel[v.health.vps]}</StatePill>
+                      </td>
+                      <td className="px-3 py-2">
+                        <StatePill state={layerState[v.health.agent] ?? "inactive"}>{layerLabel[v.health.agent]}</StatePill>
+                      </td>
+                      <td className="px-3 py-2">
+                        <StatePill state={layerState[v.health.ninjaTrader] ?? "inactive"}>{layerLabel[v.health.ninjaTrader]}</StatePill>
+                      </td>
+                      <td className="px-3 py-2">
+                        <StatePill state={layerState[v.health.broker] ?? "inactive"}>{layerLabel[v.health.broker]}</StatePill>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground" title={v.lastHeartbeatAt ? fmtDateTime(v.lastHeartbeatAt) : undefined}>
+                        {v.lastHeartbeatAt ? fmtAgo(v.lastHeartbeatAt) : "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <VpsInstanceControls instanceId={v.id} />
+                      </td>
                     </tr>
                   ))
                 )}
