@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, max, count, sql } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { providerAccounts, providerExecutions, providerPositions, tradingConnections } from "@/lib/db/schema"
 import { tlog } from "@/lib/tradovate/log"
+import { ninjatraderGate } from "@/lib/tradovate/admin"
 import { defaultSyncDeps, runTradovateSync } from "@/lib/tradovate/sync"
 import { buildTradovateTrades } from "@/lib/tradovate/trades"
 
@@ -125,6 +126,7 @@ const MANUAL_SYNC_GAP_MS = 20_000
 // picks it up within seconds (mock connections sync right here, after the
 // response). Throttled per connection.
 export async function requestTradovateSync(userId: string, connectionId: number, runInline: (fn: () => Promise<void>) => void): Promise<ActionResult> {
+  if (!(await ninjatraderGate()).enabled) return { ok: false, error: "NinjaTrader sync is turned off right now." }
   const row = await owned(userId, connectionId)
   if (!row) return { ok: false, error: "Connection not found." }
   if (row.status === "disconnected") return { ok: false, error: "This Tradovate connection is disconnected — connect it again to sync." }

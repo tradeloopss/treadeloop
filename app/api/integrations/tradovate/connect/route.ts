@@ -7,7 +7,8 @@ import { headers } from "next/headers"
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { isPro } from "@/lib/subscription"
-import { tradovateAvailability, tradovateConfig } from "@/lib/tradovate/config"
+import { tradovateConfig } from "@/lib/tradovate/config"
+import { ninjatraderGate } from "@/lib/tradovate/admin"
 import { sameOrigin } from "@/lib/tradovate/connections"
 import { tlog } from "@/lib/tradovate/log"
 import { TradovateProvider } from "@/lib/tradovate/provider"
@@ -23,8 +24,8 @@ export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session?.user) return NextResponse.redirect(new URL("/sign-in?next=/accounts", req.url), 303)
 
-  const availability = tradovateAvailability()
-  if (!availability.enabled) return back(req, "unavailable")
+  // Env config complete AND no admin kill switch — else there's nothing to connect to.
+  if (!(await ninjatraderGate()).enabled) return back(req, "unavailable")
   // Live broker sync is a Pro feature (Essential's one live sync is MetaTrader).
   if (!(await isPro(session.user.id))) return back(req, "plan")
 
