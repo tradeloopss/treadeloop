@@ -44,6 +44,14 @@ const PLANS: Plan[] = [
         ],
       },
       {
+        title: "Copy Trading",
+        items: [
+          { text: "1 copy group, up to 2 accounts", included: true },
+          { text: "Per-follower sizing & risk limits", included: true },
+          { text: "Share strategies with friends", included: true },
+        ],
+      },
+      {
         title: "Journal & Reports",
         items: [
           { text: "Automated daily journal", included: true },
@@ -78,6 +86,14 @@ const PLANS: Plan[] = [
           { text: "CSV / file import", included: true },
           { text: "Live broker & prop firm sync (Rithmic)", included: true },
           { text: "MetaTrader 4 & 5 live sync", included: true },
+        ],
+      },
+      {
+        title: "Copy Trading",
+        items: [
+          { text: "3 copy groups, up to 5 accounts each", included: true },
+          { text: "Per-follower sizing & risk limits", included: true },
+          { text: "Share strategies with friends", included: true },
         ],
       },
       {
